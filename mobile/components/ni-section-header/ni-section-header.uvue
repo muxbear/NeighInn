@@ -1,0 +1,86 @@
+<template>
+  <view class="ni-section-header">
+    <view class="ni-section-header__left">
+      <text v-if="kicker" class="ni-section-header__kicker">{{ kicker }}</text>
+      <text class="ni-section-header__title" :class="{ 'ni-section-header__title--lg': size === 'lg' }">
+        {{ title }}
+      </text>
+      <text v-if="subtitle" class="ni-section-header__subtitle">{{ subtitle }}</text>
+    </view>
+    <view class="ni-section-header__action" @click="onAction">
+      <slot name="action">
+        <text v-if="actionText" class="ni-section-header__action-text">{{ actionText }}</text>
+        <ni-icon v-if="actionText || actionIcon" :name="actionIcon || 'chevron'" :size="13" state="tertiary" />
+      </slot>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    kicker?: string
+    title: string
+    subtitle?: string
+    actionText?: string
+    actionIcon?: string
+    size?: 'md' | 'lg'
+  }>(),
+  {
+    kicker: '',
+    subtitle: '',
+    actionText: '',
+    actionIcon: '',
+    size: 'md',
+  },
+)
+
+const emit = defineEmits<{ (event: 'action'): void }>()
+
+function onAction(): void {
+  if (props.actionText || props.actionIcon) emit('action')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-section-header {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.ni-section-header__left {
+  flex: 1;
+}
+.ni-section-header__kicker {
+  font-size: $ni-font-8;
+  font-weight: 600;
+  color: #a17a64;
+  letter-spacing: 0.6px;
+  margin-bottom: 2px;
+}
+.ni-section-header__title {
+  font-size: $ni-font-18;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.3px;
+}
+.ni-section-header__title--lg {
+  font-size: $ni-font-19;
+}
+.ni-section-header__subtitle {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.ni-section-header__action {
+  flex-direction: row;
+  align-items: center;
+  padding-bottom: 2px;
+  padding-left: 10px;
+}
+.ni-section-header__action-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+  margin-right: 2px;
+}
+</style>

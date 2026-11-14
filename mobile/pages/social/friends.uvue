@@ -1,0 +1,285 @@
+<template>
+  <scroll-view class="friends" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="friends__header">
+      <ni-status-bar />
+      <view class="friends__nav">
+        <view class="friends__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="friends__nav-title">我的邻居</text>
+        <view class="friends__nav-button" @click="goRequests">
+          <ni-icon name="friend" :size="19" state="secondary" />
+          <view v-if="socialStore.pendingRequestCount > 0" class="friends__request-badge">
+            <ni-badge :count="socialStore.pendingRequestCount" :max="9" />
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="friends__search-wrap">
+      <view class="friends__search">
+        <ni-icon name="search" :size="17" state="tertiary" />
+        <input
+          class="friends__search-input"
+          :value="keyword"
+          placeholder="搜索邻居昵称或小区"
+          placeholder-class="friends__placeholder"
+          @input="onSearch"
+        />
+      </view>
+    </view>
+
+    <view class="friends__requests" @click="goRequests">
+      <view class="friends__requests-icon">
+        <ni-icon name="friend" :size="19" state="blue" />
+      </view>
+      <view class="friends__requests-copy">
+        <text class="friends__requests-title">好友申请</text>
+        <text class="friends__requests-desc">{{ socialStore.pendingRequestCount }} 条待处理</text>
+      </view>
+      <ni-icon name="chevron" :size="15" state="tertiary" />
+    </view>
+
+    <view v-if="groups.length === 0" class="friends__empty">
+      <ni-empty icon="friend" title="还没有邻居好友" desc="在物品详情或生活频道认识同小区的邻居吧" action-text="去首页" @action="goHome" />
+    </view>
+
+    <view v-else class="friends__list">
+      <view v-for="group in groups" :key="group.letter" class="friends__group">
+        <text class="friends__letter">{{ group.letter }}</text>
+        <view class="friends__group-card">
+          <view v-for="friend in group.friends" :key="friend.id" class="friends__row" @click="chatWith(friend.id)">
+            <ni-avatar :src="friend.avatar" :name="friend.name" :size="44" variant="green" />
+            <view class="friends__row-copy">
+              <view class="friends__row-name">
+                <text class="friends__name">{{ friend.name }}</text>
+                <ni-icon v-if="friend.verified" name="shield" :size="9" state="gold" />
+              </view>
+              <text class="friends__community">{{ friend.community }}</text>
+            </view>
+            <view class="friends__row-right">
+              <view v-if="friend.online" class="friends__online" />
+              <ni-icon name="message" :size="17" state="tertiary" />
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Friend } from '../../models'
+import { useSocialStore } from '../../stores/social.store'
+import { useToast } from '../../composables/useToast'
+
+const socialStore = useSocialStore()
+const { toast, showToast } = useToast()
+
+const keyword = ref('')
+
+const groups = computed(() => {
+  const filtered = socialStore.friends.filter((friend) => {
+    const value = keyword.value.trim()
+    if (!value) return true
+    return friend.name.indexOf(value) >= 0 || friend.community.indexOf(value) >= 0
+  })
+  const map: Record<string, Friend[]> = {}
+  filtered.forEach((friend) => {
+    const letter = friend.letter || '#'
+    if (!map[letter]) map[letter] = []
+    map[letter].push(friend)
+  })
+  return Object.keys(map)
+    .sort()
+    .map((letter) => ({ letter, friends: map[letter] }))
+})
+
+onLoad(() => {
+  socialStore.fetchFriends().catch(() => undefined)
+  socialStore.fetchRequests().catch(() => undefined)
+})
+
+function onSearch(event: any): void {
+  keyword.value = String(event?.detail?.value ?? '')
+}
+
+async function chatWith(friendId: string): Promise<void> {
+  try {
+    const conversation = await socialStore.openConversation(friendId)
+    uni.navigateTo({ url: `/pages/social/chat?id=${conversation.id}` })
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/messages/index' })
+}
+function goRequests(): void {
+  uni.navigateTo({ url: '/pages/social/friend-requests' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.friends {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.friends__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.friends__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.friends__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.friends__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.friends__request-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+}
+.friends__search-wrap {
+  padding: 10px 14px;
+  background-color: $ni-color-white;
+}
+.friends__search {
+  height: 40px;
+  padding-left: 12px;
+  padding-right: 12px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-color: #f5f3f1;
+}
+.friends__search-input {
+  flex: 1;
+  height: 100%;
+  margin-left: 6px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-primary;
+}
+.friends__placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-11;
+}
+.friends__requests {
+  margin: 10px 14px 0;
+  min-height: 66px;
+  padding: 11px 13px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-15;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.friends__requests-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: $ni-color-swap-bg;
+  align-items: center;
+  justify-content: center;
+}
+.friends__requests-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.friends__requests-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.friends__requests-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.friends__empty {
+  margin: 10px 14px 0;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.friends__list {
+  padding: 4px 14px 0;
+}
+.friends__group {
+  margin-top: 10px;
+}
+.friends__letter {
+  margin-left: 4px;
+  margin-bottom: 5px;
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: $ni-color-text-tertiary;
+}
+.friends__group-card {
+  padding: 0 13px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.friends__row {
+  height: 68px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.friends__row-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.friends__row-name {
+  flex-direction: row;
+  align-items: center;
+}
+.friends__name {
+  font-size: $ni-font-13;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.friends__community {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.friends__row-right {
+  flex-direction: row;
+  align-items: center;
+}
+.friends__online {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: $ni-color-gift;
+  margin-right: 8px;
+}
+</style>

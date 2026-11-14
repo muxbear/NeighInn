@@ -1,0 +1,688 @@
+<template>
+  <scroll-view class="community" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="community__header">
+      <ni-status-bar />
+      <view class="community__nav">
+        <view class="community__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <view class="community__nav-center">
+          <text class="community__nav-title">小区管理</text>
+          <text class="community__nav-sub">最多认证 {{ appStore.config.maxCommunities }} 个小区</text>
+        </view>
+        <view class="community__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="community__content">
+      <view v-if="current" class="community__current">
+        <view class="community__current-head">
+          <view class="community__current-icon">
+            <ni-icon name="home" :size="17" state="white" />
+          </view>
+          <view class="community__current-copy">
+            <text class="community__current-title">{{ current.name }}</text>
+            <text class="community__current-desc">{{ current.address || '云杉路 88 号' }} · {{ current.building || '3号楼' }}</text>
+          </view>
+          <view class="community__current-badge">
+            <ni-icon name="shield" :size="10" state="green" />
+            <text class="community__current-badge-text">{{ current.role }}</text>
+          </view>
+        </view>
+
+        <view class="community__stats">
+          <view class="community__stat">
+            <text class="community__stat-value">{{ current.memberCount }}</text>
+            <text class="community__stat-label">认证邻里</text>
+          </view>
+          <view class="community__stat">
+            <text class="community__stat-value">{{ current.itemCount }}</text>
+            <text class="community__stat-label">在售物品</text>
+          </view>
+          <view class="community__stat">
+            <text class="community__stat-value">{{ current.helpCount }}</text>
+            <text class="community__stat-label">互助服务</text>
+          </view>
+        </view>
+
+        <view class="community__current-footer">
+          <view class="community__visit">
+            <ni-icon name="clock" :size="13" state="white" />
+            <text class="community__visit-text">最近到访：今天 09:20</text>
+          </view>
+          <view class="community__verify" @click="goOwnerProof">
+            <text class="community__verify-text">{{ current.status === '已认证' ? '查看认证' : '继续认证' }}</text>
+            <ni-icon name="chevron" :size="11" state="green" />
+          </view>
+        </view>
+      </view>
+
+      <view class="community__location">
+        <view class="community__location-icon">
+          <ni-icon name="pin" :size="19" state="active" />
+        </view>
+        <view class="community__location-copy">
+          <text class="community__location-title">当前位置</text>
+          <text class="community__location-desc">{{ locationText }}</text>
+        </view>
+        <view class="community__relocate" @click="relocate">
+          <ni-loading v-if="locating" :size="14" />
+          <text v-else class="community__relocate-text">重新定位</text>
+        </view>
+      </view>
+
+      <view class="community__add">
+        <view class="community__add-head">
+          <view class="community__add-copy">
+            <text class="community__add-title">添加附近小区</text>
+            <text class="community__add-desc">认证后可以查看并参与该小区的闲置与互助</text>
+          </view>
+          <text class="community__add-count">{{ communityStore.bindings.length }}/{{ appStore.config.maxCommunities }}</text>
+        </view>
+
+        <view class="community__search">
+          <ni-icon name="search" :size="17" state="tertiary" />
+          <input
+            class="community__search-input"
+            :value="keyword"
+            placeholder="搜索小区名称或地址"
+            placeholder-class="community__search-placeholder"
+            confirm-type="search"
+            @input="onSearchInput"
+            @confirm="doSearch"
+          />
+          <text v-if="keyword" class="community__search-action" @click="doSearch">搜索</text>
+        </view>
+
+        <view v-if="searching" class="community__searching">
+          <ni-loading :size="20" text="正在搜索小区" />
+        </view>
+
+        <view v-else-if="communityStore.nearby.length === 0" class="community__empty">
+          <ni-empty icon="pin" title="没有找到附近小区" desc="换个关键词，或申请收录你的小区" action-text="申请收录" @action="applyCollect" />
+        </view>
+
+        <view v-else class="community__nearby-list">
+          <view v-for="item in communityStore.nearby" :key="item.id" class="community__nearby-cell">
+            <community-card
+              :community="item"
+              @tap="onCommunityTap(item)"
+              @apply="openApply(item)"
+            />
+          </view>
+        </view>
+      </view>
+
+      <view class="community__rules">
+        <ni-icon name="shield" :size="16" state="gold" />
+        <view class="community__rules-copy">
+          <text class="community__rules-title">认证规则</text>
+          <text class="community__rules-desc">一个账号最多认证 {{ appStore.config.maxCommunities }} 个小区；认证信息仅用于业主身份核验，审核时效不超过 24 小时。</text>
+        </view>
+      </view>
+    </view>
+
+    <ni-sheet v-model:visible="applyVisible" title="申请认证小区" height="64vh">
+      <view v-if="selectedCommunity" class="apply">
+        <view class="apply__target">
+          <view class="apply__target-icon">
+            <ni-icon name="home" :size="20" state="active" />
+          </view>
+          <view class="apply__target-copy">
+            <text class="apply__target-name">{{ selectedCommunity.name }}</text>
+            <text class="apply__target-address">{{ selectedCommunity.address || '附近小区' }} · {{ selectedCommunity.distance || '约 1km' }}</text>
+          </view>
+        </view>
+
+        <text class="apply__label">选择你的身份</text>
+        <view class="apply__identities">
+          <view
+            v-for="identity in identities"
+            :key="identity.key"
+            class="apply__identity"
+            :class="{ 'apply__identity--active': selectedIdentity === identity.key }"
+            @click="selectedIdentity = identity.key"
+          >
+            <ni-icon
+              :name="identity.key === 'owner' ? 'home' : identity.key === 'tenant' ? 'order' : 'friend'"
+              :size="20"
+              :state="selectedIdentity === identity.key ? 'active' : 'tertiary'"
+            />
+            <text class="apply__identity-title">{{ identity.label }}</text>
+            <text class="apply__identity-desc">{{ identity.desc }}</text>
+            <view v-if="selectedIdentity === identity.key" class="apply__identity-check">
+              <ni-icon name="check" :size="10" state="white" />
+            </view>
+          </view>
+        </view>
+
+        <text class="apply__label">证明材料</text>
+        <ni-photo-uploader v-model="proofImages" :max="5" :min="1" :columns="3" :tile-height="88" add-text="添加证明" show-count />
+
+        <view class="apply__privacy">
+          <ni-icon name="lock" :size="14" state="gold" />
+          <text class="apply__privacy-text">证明材料仅用于业主身份核验，加密存储，审核完成后按隐私政策处理。</text>
+        </view>
+
+        <ni-button type="primary" size="lg" block :loading="submitting" @tap="submitApply">
+          提交认证申请
+        </ni-button>
+      </view>
+    </ni-sheet>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { CommunityBinding } from '../../models'
+import { useAppStore } from '../../stores/app.store'
+import { useCommunityStore } from '../../stores/community.store'
+import { useToast } from '../../composables/useToast'
+import { useLocation } from '../../composables/useLocation'
+import { IDENTITY_OPTIONS } from '../../config/constants'
+
+const appStore = useAppStore()
+const communityStore = useCommunityStore()
+const { toast, showToast } = useToast()
+const { locating, getLocation } = useLocation()
+
+const keyword = ref('')
+const searching = ref(false)
+const applyVisible = ref(false)
+const selectedCommunity = ref<CommunityBinding | null>(null)
+const selectedIdentity = ref<'owner' | 'tenant' | 'family'>('owner')
+const proofImages = ref<string[]>([])
+const submitting = ref(false)
+const locationText = ref('阳光花园小区附近 · 已授权定位')
+const identities = IDENTITY_OPTIONS
+
+const current = computed(() => communityStore.current)
+
+onLoad(() => {
+  loadData()
+})
+
+async function loadData(): Promise<void> {
+  await Promise.all([
+    communityStore.fetchMine().catch(() => undefined),
+    communityStore.fetchNearby().catch(() => undefined),
+  ])
+}
+
+function onSearchInput(event: any): void {
+  keyword.value = String(event?.detail?.value ?? '')
+}
+
+async function doSearch(): Promise<void> {
+  const value = keyword.value.trim()
+  if (!value) {
+    await communityStore.fetchNearby()
+    return
+  }
+  searching.value = true
+  try {
+    await communityStore.search(value)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '搜索失败', 'alert')
+  } finally {
+    searching.value = false
+  }
+}
+
+async function relocate(): Promise<void> {
+  const coords = await getLocation()
+  if (coords) {
+    locationText.value = `已定位到 ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)} 附近`
+    showToast('定位已更新，正在刷新附近小区')
+    await communityStore.fetchNearby().catch(() => undefined)
+  } else {
+    locationText.value = '定位权限未开启，按绑定小区位置展示'
+    showToast('未获取到定位，已按绑定小区位置展示', 'alert')
+  }
+}
+
+function onCommunityTap(community: CommunityBinding): void {
+  if (community.status === '已认证') {
+    showToast('该小区已认证')
+    return
+  }
+  openApply(community)
+}
+
+function openApply(community: CommunityBinding): void {
+  if (communityStore.bindings.length >= appStore.config.maxCommunities) {
+    showToast(`最多认证 ${appStore.config.maxCommunities} 个小区`, 'alert')
+    return
+  }
+  selectedCommunity.value = community
+  selectedIdentity.value = 'owner'
+  proofImages.value = []
+  applyVisible.value = true
+}
+
+async function submitApply(): Promise<void> {
+  if (!selectedCommunity.value || submitting.value) return
+  if (!proofImages.value.length) {
+    showToast('请至少上传 1 份证明材料', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await communityStore.apply(selectedCommunity.value.id, {
+      communityId: selectedCommunity.value.id,
+      identity: selectedIdentity.value,
+      images: proofImages.value,
+    })
+    applyVisible.value = false
+    showToast('认证申请已提交，审核不超过 24 小时')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function applyCollect(): void {
+  uni.showModal({
+    title: '申请收录小区',
+    content: '请提供小区名称、地址与物业联系方式，我们会在 3 个工作日内核实并收录。',
+    confirmText: '联系客服',
+    success: (res) => {
+      if (res.confirm) showToast('已记录你的收录申请')
+    },
+  })
+}
+
+function goOwnerProof(): void {
+  uni.navigateTo({ url: '/pages/auth/owner-proof' })
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.community {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.community__header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 64px;
+  background-color: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #f0ece8;
+}
+.community__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.community__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.community__nav-center {
+  flex: 1;
+  align-items: center;
+}
+.community__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.community__nav-sub {
+  margin-top: 1px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.community__nav-placeholder {
+  width: 42px;
+}
+.community__content {
+  padding: 14px;
+}
+.community__current {
+  padding: 15px;
+  border-radius: $ni-radius-20;
+  background-image: linear-gradient(140deg, #ff8f52 0%, #ffb16b 100%);
+  box-shadow: 0 8px 22px rgba(255, 122, 61, 0.2);
+}
+.community__current-head {
+  flex-direction: row;
+  align-items: center;
+}
+.community__current-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.22);
+  align-items: center;
+  justify-content: center;
+}
+.community__current-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.community__current-title {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: #ffffff;
+}
+.community__current-desc {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: rgba(255, 255, 255, 0.86);
+}
+.community__current-badge {
+  flex-direction: row;
+  align-items: center;
+  height: 22px;
+  padding-left: 7px;
+  padding-right: 7px;
+  border-radius: 11px;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+.community__current-badge-text {
+  margin-left: 2px;
+  font-size: 7px;
+  font-weight: 600;
+  color: $ni-color-gift-deep;
+}
+.community__stats {
+  flex-direction: row;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.22);
+}
+.community__stat {
+  flex: 1;
+  align-items: center;
+}
+.community__stat-value {
+  font-size: $ni-font-18;
+  font-weight: 700;
+  color: #ffffff;
+}
+.community__stat-label {
+  margin-top: 2px;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.82);
+}
+.community__current-footer {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.community__visit {
+  flex-direction: row;
+  align-items: center;
+}
+.community__visit-text {
+  margin-left: 4px;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.82);
+}
+.community__verify {
+  flex-direction: row;
+  align-items: center;
+  height: 28px;
+  padding-left: 10px;
+  padding-right: 8px;
+  border-radius: 10px;
+  background-color: #ffffff;
+}
+.community__verify-text {
+  margin-right: 2px;
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-gift-deep;
+}
+.community__location {
+  min-height: 65px;
+  margin-top: 10px;
+  padding: 11px 13px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.community__location-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.community__location-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.community__location-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.community__location-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.community__relocate {
+  height: 28px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: 9px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.community__relocate-text {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.community__add {
+  margin-top: 18px;
+}
+.community__add-head {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.community__add-copy {
+  flex: 1;
+}
+.community__add-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.community__add-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.community__add-count {
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.community__search {
+  height: 44px;
+  margin-top: 10px;
+  padding-left: 13px;
+  padding-right: 10px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-13;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-sm;
+}
+.community__search-input {
+  flex: 1;
+  height: 100%;
+  margin-left: 7px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-primary;
+}
+.community__search-placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-11;
+}
+.community__search-action {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.community__searching {
+  margin-top: 10px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.community__empty {
+  margin-top: 10px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.community__nearby-list {
+  margin-top: 10px;
+}
+.community__nearby-cell {
+  margin-bottom: 9px;
+}
+.community__rules {
+  margin-top: 12px;
+  padding: 11px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-12;
+  background-color: #fff8e8;
+}
+.community__rules-copy {
+  flex: 1;
+  margin-left: 6px;
+}
+.community__rules-title {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-service-deep;
+}
+.community__rules-desc {
+  margin-top: 3px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+.apply {
+  padding-bottom: 16px;
+}
+.apply__target {
+  padding: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-primary-bg;
+}
+.apply__target-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.apply__target-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.apply__target-name {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.apply__target-address {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.apply__label {
+  margin-top: 15px;
+  margin-bottom: 8px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.apply__identities {
+  flex-direction: row;
+}
+.apply__identity {
+  flex: 1;
+  min-height: 90px;
+  padding: 10px;
+  border-radius: $ni-radius-13;
+  background-color: $ni-color-fill-1;
+  border: 1px solid transparent;
+  margin-right: 8px;
+  position: relative;
+  align-items: center;
+}
+.apply__identity--active {
+  background-color: $ni-color-primary-bg;
+  border-color: #ffb58b;
+}
+.apply__identity-title {
+  margin-top: 5px;
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.apply__identity-desc {
+  margin-top: 3px;
+  font-size: 7px;
+  line-height: 12px;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+}
+.apply__identity-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: $ni-color-primary;
+  align-items: center;
+  justify-content: center;
+}
+.apply__privacy {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 10px;
+  margin-bottom: 12px;
+  padding: 9px;
+  border-radius: $ni-radius-10;
+  background-color: #fff8e8;
+}
+.apply__privacy-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

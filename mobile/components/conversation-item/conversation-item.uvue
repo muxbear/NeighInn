@@ -1,0 +1,97 @@
+<template>
+  <view class="conversation" hover-class="conversation--pressed" :hover-stay-time="100" @click="onTap">
+    <view class="conversation__avatar-wrap">
+      <ni-avatar :src="conversation.peerAvatar" :name="conversation.peerName" :size="48" variant="orange" />
+      <view v-if="conversation.unread > 0" class="conversation__badge">
+        <text class="conversation__badge-text">{{ conversation.unread > 99 ? '99+' : conversation.unread }}</text>
+      </view>
+    </view>
+    <view class="conversation__body">
+      <view class="conversation__head">
+        <view class="conversation__name-row">
+          <text class="conversation__name">{{ conversation.peerName }}</text>
+          <ni-icon v-if="conversation.peerVerified" name="shield" :size="9" state="gold" />
+        </view>
+        <text class="conversation__time">{{ conversation.lastTime }}</text>
+      </view>
+      <text class="conversation__summary" :lines="1">{{ conversation.lastMessage }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import type { Conversation } from '../../models'
+
+defineProps<{ conversation: Conversation }>()
+const emit = defineEmits<{ (event: 'tap'): void }>()
+
+function onTap(): void {
+  emit('tap')
+}
+</script>
+
+<style scoped lang="scss">
+.conversation {
+  flex-direction: row;
+  align-items: center;
+  min-height: 72px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eeeae6;
+  transition: opacity 100ms ease-out;
+}
+.conversation--pressed {
+  opacity: 0.82;
+}
+.conversation__avatar-wrap {
+  position: relative;
+  overflow: visible;
+}
+.conversation__badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 17px;
+  height: 17px;
+  padding-left: 3px;
+  padding-right: 3px;
+  border-radius: 9px;
+  background-color: $ni-color-primary;
+  border: 2px solid #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.conversation__badge-text {
+  font-size: 8px;
+  color: #ffffff;
+  font-weight: 700;
+}
+.conversation__body {
+  flex: 1;
+  margin-left: 10px;
+}
+.conversation__head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.conversation__name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.conversation__name {
+  font-size: $ni-font-13;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.conversation__time {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.conversation__summary {
+  margin-top: 4px;
+  font-size: $ni-font-10;
+  color: #999999;
+}
+</style>

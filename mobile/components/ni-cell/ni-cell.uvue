@@ -1,0 +1,103 @@
+<template>
+  <view
+    class="ni-cell"
+    :class="{ 'ni-cell--bordered': bordered }"
+    :style="{ minHeight: height + 'px' }"
+    :hover-class="clickable ? 'ni-cell--pressed' : ''"
+    :hover-stay-time="100"
+    @click="onTap"
+  >
+    <view v-if="icon" class="ni-cell__icon" :style="{ width: iconSize + 'px', height: iconSize + 'px' }">
+      <ni-icon :name="icon" :size="Math.round(iconSize * 0.52)" :state="iconState" />
+    </view>
+    <view class="ni-cell__body">
+      <text class="ni-cell__title">{{ title }}</text>
+      <text v-if="desc" class="ni-cell__desc">{{ desc }}</text>
+    </view>
+    <view class="ni-cell__right">
+      <slot name="right">
+        <text v-if="rightText" class="ni-cell__right-text">{{ rightText }}</text>
+      </slot>
+      <ni-icon v-if="arrow" name="chevron" :size="16" state="tertiary" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    title: string
+    desc?: string
+    icon?: string
+    iconState?: string
+    rightText?: string
+    arrow?: boolean
+    bordered?: boolean
+    clickable?: boolean
+    height?: number
+    iconSize?: number
+  }>(),
+  {
+    desc: '',
+    icon: '',
+    iconState: 'active',
+    rightText: '',
+    arrow: true,
+    bordered: true,
+    clickable: true,
+    height: 60,
+    iconSize: 34,
+  },
+)
+
+const emit = defineEmits<{ (event: 'tap'): void }>()
+
+function onTap(): void {
+  if (props.clickable) emit('tap')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-cell {
+  flex-direction: row;
+  align-items: center;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.ni-cell--bordered {
+  border-bottom: $ni-border-divider;
+}
+.ni-cell--pressed {
+  opacity: 0.82;
+}
+.ni-cell__icon {
+  border-radius: 11px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.ni-cell__body {
+  flex: 1;
+}
+.ni-cell__title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.ni-cell__desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.ni-cell__right {
+  flex-direction: row;
+  align-items: center;
+  margin-left: 8px;
+}
+.ni-cell__right-text {
+  margin-right: 3px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+</style>

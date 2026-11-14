@@ -1,0 +1,789 @@
+<template>
+  <scroll-view class="home" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="home__header">
+      <ni-status-bar />
+      <image class="home__decor" src="/static/placeholders/glow-header.svg" mode="scaleToFill" />
+
+      <view class="home__community" @click="goCommunity">
+        <view class="home__community-icon">
+          <ni-icon name="home" :size="20" state="active" />
+        </view>
+        <view class="home__community-copy">
+          <view class="home__community-name-row">
+            <text class="home__community-name">{{ communityName }}</text>
+            <view class="home__verified-pill">
+              <ni-icon name="shield" :size="9" state="green" />
+              <text class="home__verified-text">{{ formatThousands(community.verifiedCount) }} 已认证</text>
+            </view>
+          </view>
+          <text class="home__community-sub">{{ community.building }} · 仅限本小区发布与交易</text>
+        </view>
+        <view class="home__community-actions">
+          <view class="home__header-button" @click.stop="goSearch">
+            <ni-icon name="search" :size="20" state="secondary" />
+          </view>
+          <view class="home__header-button" @click.stop="goNotifications">
+            <ni-icon name="bell" :size="20" state="secondary" />
+            <view v-if="notificationStore.unread > 0" class="home__bell-badge">
+              <text class="home__bell-badge-text">{{ notificationStore.unread > 9 ? '9+' : notificationStore.unread }}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view class="home__search">
+        <ni-search-bar
+          v-model="homeKeyword"
+          placeholder="搜索小区好物、互助服务"
+          show-filter
+          @confirm="searchFromHome"
+          @filter="goSearch"
+        />
+      </view>
+    </view>
+
+    <view v-if="!itemStore.homeFeed && itemStore.homeLoading" class="home__skeleton">
+      <ni-skeleton :rows="4" :avatar="true" />
+      <ni-skeleton :rows="3" :avatar="false" />
+    </view>
+
+    <view v-else-if="!itemStore.homeFeed && itemStore.homeError" class="home__error">
+      <ni-empty
+        icon="alert"
+        title="首页加载失败"
+        :desc="itemStore.homeError"
+        action-text="重新加载"
+        @action="reload"
+      />
+    </view>
+
+    <template v-else-if="itemStore.homeFeed">
+      <view class="home__zones">
+        <view class="home__zones-head">
+          <view class="home__zones-copy">
+            <text class="home__zones-kicker">阳光花园邻里生活圈</text>
+            <text class="home__zones-title">今天想去哪里？</text>
+          </view>
+          <text class="home__zones-count">{{ community.itemCount }}件 · {{ community.serviceCount }}服务</text>
+        </view>
+        <view class="home__zone-grid">
+          <zone-card
+            v-for="(zone, index) in zoneCards"
+            :key="zone.key"
+            :name="zone.name"
+            :label="zone.label"
+            :icon="zone.icon"
+            :tone="zone.tone"
+            :count="zone.count"
+            :is-last="index === zoneCards.length - 1"
+            @tap="goZone(zone.key)"
+          />
+        </view>
+      </view>
+
+      <view class="home__broadcast">
+        <view class="home__broadcast-head">
+          <view class="home__broadcast-title-row">
+            <view class="home__broadcast-icon">
+              <ni-icon name="megaphone" :size="15" state="active" />
+            </view>
+            <view class="home__broadcast-copy">
+              <text class="home__broadcast-title">小区喇叭站</text>
+              <text class="home__broadcast-sub">邻里公告 · 实时更新</text>
+            </view>
+          </view>
+          <view class="home__live">
+            <view class="home__live-dot" />
+            <text class="home__live-text">实时播报</text>
+          </view>
+        </view>
+
+        <swiper
+          class="home__swiper"
+          :circular="true"
+          :autoplay="true"
+          :interval="4200"
+          :duration="350"
+          :current="broadcastIndex"
+          @change="onBroadcastChange"
+        >
+          <swiper-item v-for="(broadcast, index) in broadcasts" :key="broadcast.id">
+            <broadcast-card
+              :broadcast="broadcast"
+              :total="broadcasts.length"
+              :current-index="broadcastIndex"
+              @tap="goBroadcast(broadcast.id)"
+              @action="goBroadcast(broadcast.id)"
+              @dot="broadcastIndex = $event"
+            />
+          </swiper-item>
+        </swiper>
+      </view>
+
+      <view class="home__hot">
+        <ni-section-header
+          kicker="邻居们都在看"
+          title="最近热门商品"
+          action-text="查看更多"
+          @action="goZone('sale')"
+        />
+        <view class="home__product-grid">
+          <view
+            v-for="(item, index) in hotItems"
+            :key="item.id"
+            class="home__product-cell"
+            :class="{ 'home__product-cell--gap': index % 2 === 0 }"
+          >
+            <product-card
+              :item="item"
+              @tap="goItem(item.id)"
+              @favorite="onFavorite(item)"
+            />
+          </view>
+        </view>
+        <view v-if="hotItems.length === 0" class="home__section-empty">
+          <ni-empty icon="box" title="还没有热门商品" desc="去发布一件闲置，让邻居们看到吧" />
+        </view>
+      </view>
+
+      <view class="home__service">
+        <view class="home__service-head">
+          <ni-section-header
+            kicker="身边有人需要你"
+            title="邻里互助"
+            action-text="进入服务互助"
+            @action="goZone('service')"
+          />
+        </view>
+        <view class="home__service-tabbar">
+          <view class="home__service-tabs">
+            <view
+              class="home__service-tab"
+              :class="{ 'home__service-tab--active': serviceKind === '求助' }"
+              @click="serviceKind = '求助'"
+            >
+              <view class="home__service-dot home__service-dot--need" />
+              <text class="home__service-tab-text" :class="{ 'home__service-tab-text--active': serviceKind === '求助' }">邻里求助</text>
+            </view>
+            <view
+              class="home__service-tab home__service-tab--last"
+              :class="{ 'home__service-tab--active': serviceKind === '提供' }"
+              @click="serviceKind = '提供'"
+            >
+              <view class="home__service-dot home__service-dot--offer" />
+              <text class="home__service-tab-text" :class="{ 'home__service-tab-text--active': serviceKind === '提供' }">邻里服务</text>
+            </view>
+          </view>
+        </view>
+        <view class="home__service-list">
+          <service-preview-card
+            v-for="post in currentServices"
+            :key="post.id"
+            :post="post"
+            @tap="goZone('service')"
+          />
+          <view v-if="currentServices.length === 0" class="home__service-empty">
+            <ni-empty icon="friend" title="暂时没有互助信息" desc="邻里之间，互相搭把手" />
+          </view>
+        </view>
+      </view>
+
+      <view class="home__life">
+        <ni-section-header
+          kicker="记录身边真实生活"
+          title="生活频道"
+          action-text="查看全部"
+          size="lg"
+          @action="goLife"
+        />
+        <view class="home__life-sub">
+          <text class="home__life-sub-text">小区风景、邻里日常，看看邻居们正在分享什么</text>
+          <text class="home__life-sort">最新发布</text>
+        </view>
+        <scroll-view class="home__life-tabs-scroll" scroll-x :show-scrollbar="false">
+          <view class="home__life-tabs">
+            <view
+              v-for="category in lifeCategories"
+              :key="category"
+              class="home__life-tab"
+              :class="{ 'home__life-tab--active': lifeCategory === category }"
+              @click="lifeCategory = category"
+            >
+              <text class="home__life-tab-text" :class="{ 'home__life-tab-text--active': lifeCategory === category }">
+                {{ category }}
+              </text>
+            </view>
+          </view>
+        </scroll-view>
+
+        <view class="home__life-list">
+          <life-post-card
+            v-for="post in filteredLifePosts"
+            :key="post.id"
+            :post="post"
+            @open="goLifeDetail(post.id)"
+            @like="onLifeLike(post)"
+            @comment="goLifeDetail(post.id)"
+          />
+        </view>
+        <view v-if="filteredLifePosts.length === 0" class="home__section-empty">
+          <ni-empty icon="image" title="这个分类还没有动态" desc="去生活频道看看邻居们的最新记录" />
+        </view>
+
+        <view class="home__life-more" hover-class="home__life-more--pressed" @click="goLife">
+          <text class="home__life-more-text">查看更多生活动态</text>
+          <ni-icon name="chevron" :size="13" state="tertiary" />
+        </view>
+      </view>
+    </template>
+
+    <view class="home__bottom-space" />
+    <ni-tab-bar active="home" :unread="socialStore.unreadTotal" />
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="92" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { useItemStore } from '../../stores/item.store'
+import { useNotificationStore } from '../../stores/notification.store'
+import { useSocialStore } from '../../stores/social.store'
+import { useCommunityStore } from '../../stores/community.store'
+import { useToast } from '../../composables/useToast'
+import { ZONE_MAP } from '../../config/constants'
+import { formatThousands } from '../../utils/formatter'
+import { lifeService } from '../../services/life.service'
+
+const itemStore = useItemStore()
+const notificationStore = useNotificationStore()
+const socialStore = useSocialStore()
+const communityStore = useCommunityStore()
+const { toast, showToast } = useToast()
+
+const serviceKind = ref<'求助' | '提供'>('求助')
+const lifeCategory = ref('全部')
+const lifeCategories = ['全部', '小区风景', '邻里日常', '个人风采']
+const broadcastIndex = ref(0)
+const homeKeyword = ref('')
+
+const community = computed(() => {
+  if (itemStore.homeFeed) return itemStore.homeFeed.community
+  return communityStore.current
+    ? {
+        id: communityStore.current.id,
+        name: communityStore.current.name,
+        building: communityStore.current.building ?? '3号楼',
+        verifiedCount: communityStore.current.memberCount,
+        itemCount: communityStore.current.itemCount,
+        serviceCount: communityStore.current.helpCount,
+      }
+    : { id: 'c1', name: '阳光花园小区', building: '3号楼', verifiedCount: 2138, itemCount: 126, serviceCount: 24 }
+})
+
+const communityName = computed(() => community.value.name)
+const zoneCards = computed(() =>
+  (itemStore.homeFeed?.zones ?? []).map((zone) => {
+    const config = ZONE_MAP[zone.key]
+    return {
+      key: zone.key,
+      name: config?.name ?? zone.name,
+      label: config?.label ?? '',
+      icon: config?.icon ?? 'box',
+      tone: config?.tone ?? 'gift',
+      count: zone.count,
+    }
+  }),
+)
+const broadcasts = computed(() => itemStore.homeFeed?.broadcasts ?? [])
+const keywordText = computed(() => homeKeyword.value.trim().toLowerCase())
+function matchesKeyword(text: string): boolean {
+  if (!keywordText.value) return true
+  return text.toLowerCase().indexOf(keywordText.value) >= 0
+}
+const hotItems = computed(() =>
+  (itemStore.homeFeed?.hotItems ?? []).filter((item) =>
+    matchesKeyword(`${item.title} ${item.description ?? ''}`),
+  ),
+)
+const currentServices = computed(() => {
+  if (!itemStore.homeFeed) return []
+  const list = serviceKind.value === '求助' ? itemStore.homeFeed.serviceHelp : itemStore.homeFeed.serviceOffer
+  return list.filter((post) =>
+    matchesKeyword(`${post.title} ${post.description} ${post.category}`),
+  )
+})
+const filteredLifePosts = computed(() => {
+  const posts = itemStore.homeFeed?.lifePosts ?? []
+  const byCategory =
+    lifeCategory.value === '全部'
+      ? posts
+      : posts.filter((post) => post.category === lifeCategory.value)
+  return byCategory.filter((post) => matchesKeyword(`${post.title} ${post.description}`))
+})
+
+onLoad(() => {
+  loadData()
+})
+
+onShow(() => {
+  if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
+  socialStore.fetchConversations().catch(() => undefined)
+  notificationStore.fetchUnread().catch(() => undefined)
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await loadData(true)
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+async function loadData(force = false): Promise<void> {
+  const tasks: Array<Promise<any>> = [
+    itemStore.fetchHome(force),
+    socialStore.fetchConversations(),
+    notificationStore.fetchUnread(),
+  ]
+  if (!communityStore.bindings.length) tasks.push(communityStore.fetchMine())
+  try {
+    await Promise.all(tasks)
+  } catch (error) {
+    if (!itemStore.homeFeed) {
+      showToast(error instanceof Error ? error.message : '首页加载失败', 'alert')
+    }
+  }
+}
+
+async function reload(): Promise<void> {
+  await loadData(true)
+}
+
+function onBroadcastChange(event: any): void {
+  broadcastIndex.value = event?.detail?.current ?? 0
+}
+
+function goCommunity(): void {
+  uni.navigateTo({ url: '/pages/community/index' })
+}
+function goSearch(): void {
+  uni.navigateTo({ url: '/pages/home/search' })
+}
+function searchFromHome(keyword: string): void {
+  const value = String(keyword || '').trim()
+  if (!value) {
+    goSearch()
+    return
+  }
+  uni.navigateTo({ url: `/pages/home/search?keyword=${encodeURIComponent(value)}` })
+}
+function goNotifications(): void {
+  uni.navigateTo({ url: '/pages/notifications/index' })
+}
+function goZone(zone: string): void {
+  uni.navigateTo({ url: `/pages/zone/index?zone=${zone}` })
+}
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+function goBroadcast(id: string): void {
+  uni.navigateTo({ url: `/pages/broadcast/detail?id=${id}` })
+}
+function goLife(): void {
+  uni.navigateTo({ url: '/pages/life/index' })
+}
+function goLifeDetail(id: string): void {
+  uni.navigateTo({ url: `/pages/life/detail?id=${id}` })
+}
+
+async function onFavorite(item: any): Promise<void> {
+  try {
+    await itemStore.toggleFavorite(item)
+    showToast(item.favorite ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+async function onLifeLike(post: any): Promise<void> {
+  const previous = Boolean(post.liked)
+  const next = !previous
+  post.liked = next
+  post.likes = Math.max(0, post.likes + (next ? 1 : -1))
+  try {
+    const result = await lifeService.toggleLike(post.id)
+    post.liked = result.liked
+    post.likes = result.likes
+  } catch (error) {
+    post.liked = previous
+    post.likes = Math.max(0, post.likes + (previous ? 1 : -1))
+    showToast('点赞失败，请重试', 'alert')
+  }
+}
+
+</script>
+
+<style scoped lang="scss">
+.home {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.home__header {
+  padding-top: 0;
+  padding-left: 16px;
+  padding-right: 16px;
+  padding-bottom: 8px;
+  background-image: $ni-gradient-home-header;
+  position: relative;
+  overflow: hidden;
+}
+.home__decor {
+  position: absolute;
+  top: -100px;
+  right: -70px;
+  width: 190px;
+  height: 190px;
+}
+.home__community {
+  min-height: 68px;
+  flex-direction: row;
+  align-items: center;
+  padding-top: 10px;
+}
+.home__community-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  background-image: linear-gradient(135deg, #ffe6d5 0%, #fff2e9 100%);
+  align-items: center;
+  justify-content: center;
+}
+.home__community-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.home__community-name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.home__community-name {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 6px;
+}
+.home__verified-pill {
+  flex-direction: row;
+  align-items: center;
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-radius: 10px;
+  border: 1px solid #a8d7ba;
+  background-color: #ecf8f1;
+}
+.home__verified-text {
+  margin-left: 2px;
+  font-size: 7px;
+  color: #327c50;
+}
+.home__community-sub {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.home__community-actions {
+  flex-direction: row;
+  align-items: center;
+}
+.home__header-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(92, 73, 62, 0.06);
+  align-items: center;
+  justify-content: center;
+  margin-left: 7px;
+  position: relative;
+  overflow: visible;
+}
+.home__bell-badge {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  min-width: 15px;
+  height: 15px;
+  padding-left: 2px;
+  padding-right: 2px;
+  border-radius: 8px;
+  background-color: $ni-color-primary;
+  border: 1.5px solid #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.home__bell-badge-text {
+  font-size: 7px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 12px;
+}
+.home__search {
+  margin-top: 8px;
+}
+.home__skeleton {
+  background-color: $ni-color-white;
+  margin: 12px 14px;
+  border-radius: $ni-radius-16;
+}
+.home__error {
+  background-color: $ni-color-white;
+  margin: 12px 14px;
+  border-radius: $ni-radius-16;
+}
+.home__zones {
+  background-color: $ni-color-white;
+  padding: 17px 14px 14px;
+}
+.home__zones-head {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.home__zones-copy {
+  flex: 1;
+}
+.home__zones-kicker {
+  font-size: $ni-font-9;
+  color: #a17a64;
+  font-weight: 600;
+}
+.home__zones-title {
+  margin-top: 3px;
+  font-size: $ni-font-18;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.home__zones-count {
+  font-size: $ni-font-9;
+  color: #aaa19a;
+}
+.home__zone-grid {
+  flex-direction: row;
+  align-items: stretch;
+  margin-top: 12px;
+  padding-bottom: 5px;
+}
+.home__broadcast {
+  background-color: #f2efeb;
+  padding: 8px 14px 10px;
+}
+.home__broadcast-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.home__broadcast-title-row {
+  flex-direction: row;
+  align-items: center;
+}
+.home__broadcast-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background-color: #fff0e7;
+  align-items: center;
+  justify-content: center;
+}
+.home__broadcast-copy {
+  flex-direction: row;
+  align-items: baseline;
+  margin-left: 5px;
+}
+.home__broadcast-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.home__broadcast-sub {
+  margin-left: 5px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.home__live {
+  flex-direction: row;
+  align-items: center;
+}
+.home__live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background-color: $ni-color-error;
+  margin-right: 3px;
+}
+.home__live-text {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.home__swiper {
+  height: 132px;
+}
+.home__hot {
+  background-color: $ni-color-fill-1;
+  padding: 18px 14px 20px;
+}
+.home__product-grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.home__product-cell {
+  width: calc((100% - 12px) / 2);
+  margin-bottom: 12px;
+}
+.home__product-cell--gap {
+  margin-right: 12px;
+}
+.home__section-empty {
+  margin-top: 10px;
+}
+.home__service {
+  background-color: $ni-color-fill-1;
+  padding-top: 18px;
+  padding-bottom: 26px;
+}
+.home__service-head {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.home__service-tabbar {
+  padding-left: 14px;
+  padding-right: 14px;
+  margin-top: 10px;
+  margin-bottom: 11px;
+}
+.home__service-tabs {
+  flex-direction: row;
+  align-self: flex-start;
+  height: 32px;
+  padding: 3px;
+  border-radius: $ni-radius-10;
+  background-color: #ebe7e3;
+}
+.home__service-tab {
+  height: 26px;
+  padding-left: 10px;
+  padding-right: 10px;
+  margin-right: 3px;
+  border-radius: 8px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+.home__service-tab--last {
+  margin-right: 0;
+}
+.home__service-tab--active {
+  background-color: #ffffff;
+  box-shadow: 0 2px 8px rgba(62, 44, 32, 0.08);
+}
+.home__service-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  margin-right: 5px;
+}
+.home__service-dot--need {
+  background-color: $ni-color-primary;
+}
+.home__service-dot--offer {
+  background-color: $ni-color-sage;
+}
+.home__service-tab-text {
+  font-size: $ni-font-9;
+  color: #817872;
+  white-space: nowrap;
+}
+.home__service-tab-text--active {
+  color: #302a26;
+  font-weight: 700;
+}
+.home__service-list {
+  padding: 1px 14px 7px;
+}
+.home__service-empty {
+  width: 100%;
+}
+.home__life {
+  background-color: $ni-color-white;
+  padding: 20px 14px 30px;
+}
+.home__life-sub {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+.home__life-sub-text {
+  flex: 1;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.home__life-sort {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.home__life-tabs-scroll {
+  margin-top: 10px;
+  width: 100%;
+  height: 29px;
+}
+.home__life-tabs {
+  flex-direction: row;
+}
+.home__life-tab {
+  height: 29px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: $ni-radius-10;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 7px;
+}
+.home__life-tab--active {
+  background-image: $ni-gradient-brand;
+}
+.home__life-tab-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.home__life-tab-text--active {
+  color: #ffffff;
+  font-weight: 700;
+}
+.home__life-list {
+  margin-top: 12px;
+}
+.home__life-more {
+  height: 38px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: $ni-radius-12;
+  background-color: #f6f2ef;
+}
+.home__life-more--pressed {
+  opacity: 0.8;
+}
+.home__life-more-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+  margin-right: 3px;
+}
+.home__bottom-space {
+  height: calc(92px + env(safe-area-inset-bottom));
+}
+</style>

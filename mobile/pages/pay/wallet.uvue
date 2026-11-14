@@ -1,0 +1,504 @@
+<template>
+  <scroll-view class="wallet" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="wallet__header">
+      <ni-status-bar />
+      <view class="wallet__nav">
+        <view class="wallet__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="wallet__nav-title">我的钱包</text>
+        <view class="wallet__nav-button" @click="goHelp">
+          <ni-icon name="message" :size="18" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <view class="wallet__content">
+      <view class="wallet__card">
+        <view class="wallet__card-row">
+          <text class="wallet__label">可用余额</text>
+          <view class="wallet__secure">
+            <ni-icon name="lock" :size="11" state="white" />
+            <text class="wallet__secure-text">持牌机构托管</text>
+          </view>
+        </view>
+        <view class="wallet__amount-row">
+          <text class="wallet__symbol">¥</text>
+          <text class="wallet__amount">{{ formatAmount(summary.balance) }}</text>
+        </view>
+        <view class="wallet__sub-row">
+          <text class="wallet__sub-text">担保中 ¥{{ formatAmount(summary.escrow) }}</text>
+          <text class="wallet__sub-text">可提现 ¥{{ formatAmount(summary.withdrawable) }}</text>
+        </view>
+        <view class="wallet__actions">
+          <view class="wallet__action" @click="recharge">
+            <text class="wallet__action-text">充值</text>
+          </view>
+          <view class="wallet__action wallet__action--outline" @click="openWithdraw">
+            <text class="wallet__action-text wallet__action-text--light">提现</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="wallet__security">
+        <view class="wallet__security-item">
+          <ni-icon name="shield" :size="15" state="gold" />
+          <text class="wallet__security-text">持牌托管</text>
+        </view>
+        <view class="wallet__security-item">
+          <ni-icon name="lock" :size="15" state="gold" />
+          <text class="wallet__security-text">隔离存管</text>
+        </view>
+        <view class="wallet__security-item">
+          <ni-icon name="eye" :size="15" state="gold" />
+          <text class="wallet__security-text">全链路加密</text>
+        </view>
+      </view>
+
+      <view class="wallet__transactions">
+        <view class="wallet__transactions-head">
+          <text class="wallet__transactions-title">资金明细</text>
+          <text class="wallet__transactions-filter">全部</text>
+        </view>
+
+        <view v-if="loading && transactions.length === 0" class="wallet__loading">
+          <ni-skeleton :rows="4" :avatar="true" />
+        </view>
+
+        <view v-else-if="transactions.length === 0" class="wallet__empty">
+          <ni-empty icon="wallet" title="还没有资金记录" desc="完成第一笔担保交易后，明细会显示在这里" />
+        </view>
+
+        <view v-else>
+          <view v-for="item in transactions" :key="item.id" class="wallet__transaction">
+            <view class="wallet__transaction-icon" :class="{ 'wallet__transaction-icon--in': item.direction === 'in' }">
+              <ni-icon :name="item.icon" :size="16" :state="item.direction === 'in' ? 'green' : 'active'" />
+            </view>
+            <view class="wallet__transaction-copy">
+              <text class="wallet__transaction-title" :lines="1">{{ item.title }}</text>
+              <text class="wallet__transaction-time">{{ item.time }}</text>
+            </view>
+            <text class="wallet__transaction-amount" :class="{ 'wallet__transaction-amount--in': item.direction === 'in' }">
+              {{ item.direction === 'in' ? '+' : '-' }}¥{{ formatAmount(item.amount) }}
+            </text>
+          </view>
+          <view v-if="hasMore" class="wallet__more" @click="loadTransactions(false)">
+            <text class="wallet__more-text">{{ loadingMore ? '加载中…' : '加载更多' }}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <ni-sheet v-model:visible="withdrawVisible" title="申请提现" height="54vh">
+      <view class="withdraw">
+        <view class="withdraw__available">
+          <text class="withdraw__available-label">可提现金额</text>
+          <text class="withdraw__available-value">¥{{ formatAmount(summary.withdrawable) }}</text>
+        </view>
+        <text class="withdraw__label">提现金额</text>
+        <view class="withdraw__input-row">
+          <text class="withdraw__symbol">¥</text>
+          <input
+            class="withdraw__input"
+            type="digit"
+            :value="withdrawAmount"
+            placeholder="0.00"
+            placeholder-class="withdraw__placeholder"
+            @input="onWithdrawInput"
+          />
+          <text class="withdraw__all" @click="withdrawAmount = formatAmount(summary.withdrawable)">全部</text>
+        </view>
+        <view class="withdraw__note">
+          <ni-icon name="lock" :size="12" state="tertiary" />
+          <text class="withdraw__note-text">提现申请需风控审核，预计 1–3 个工作日到账。</text>
+        </view>
+        <ni-button type="primary" size="lg" block :loading="withdrawing" @tap="submitWithdraw">
+          确认提现
+        </ni-button>
+      </view>
+    </ni-sheet>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { WalletSummary, WalletTransaction } from '../../models'
+import { payService } from '../../services/pay.service'
+import { useToast } from '../../composables/useToast'
+import { formatAmount } from '../../utils/formatter'
+
+const { toast, showToast } = useToast()
+
+const summary = ref<WalletSummary>({ balance: 0, escrow: 0, withdrawable: 0 })
+const transactions = ref<WalletTransaction[]>([])
+const loading = ref(false)
+const loadingMore = ref(false)
+const hasMore = ref(true)
+const page = ref(1)
+const withdrawVisible = ref(false)
+const withdrawAmount = ref('')
+const withdrawing = ref(false)
+
+onLoad(() => {
+  loadWallet()
+  loadTransactions(true)
+})
+
+async function loadWallet(): Promise<void> {
+  try {
+    summary.value = await payService.getWallet()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '钱包加载失败', 'alert')
+  }
+}
+
+async function loadTransactions(refresh: boolean): Promise<void> {
+  if (refresh) {
+    page.value = 1
+    loading.value = true
+  } else {
+    if (!hasMore.value) return
+    loadingMore.value = true
+  }
+  try {
+    const result = await payService.getTransactions(page.value, 20)
+    transactions.value = refresh ? result.list : [...transactions.value, ...result.list]
+    hasMore.value = result.hasMore
+    if (!refresh) page.value += 1
+    else page.value = 2
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '明细加载失败', 'alert')
+  } finally {
+    loading.value = false
+    loadingMore.value = false
+  }
+}
+
+function recharge(): void {
+  uni.showModal({
+    title: '充值',
+    content: '充值功能将在接入微信 / 支付宝支付渠道后开放。',
+    showCancel: false,
+    confirmText: '我知道了',
+  })
+}
+
+function openWithdraw(): void {
+  withdrawAmount.value = ''
+  withdrawVisible.value = true
+}
+
+function onWithdrawInput(event: any): void {
+  withdrawAmount.value = String(event?.detail?.value ?? '').replace(/[^\d.]/g, '')
+}
+
+async function submitWithdraw(): Promise<void> {
+  const amount = Number.parseFloat(withdrawAmount.value)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast('请输入有效提现金额', 'alert')
+    return
+  }
+  withdrawing.value = true
+  try {
+    await payService.withdraw(amount)
+    withdrawVisible.value = false
+    showToast('提现申请已提交')
+    await Promise.all([loadWallet(), loadTransactions(true)])
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提现失败', 'alert')
+  } finally {
+    withdrawing.value = false
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+function goHelp(): void {
+  uni.navigateTo({ url: '/pages/settings/help' })
+}
+</script>
+
+<style scoped lang="scss">
+.wallet {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.wallet__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.wallet__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.wallet__nav-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+}
+.wallet__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.wallet__content {
+  padding: 14px;
+}
+.wallet__card {
+  padding: 16px;
+  border-radius: $ni-radius-18;
+  background-image: linear-gradient(140deg, #ff8d50 0%, #ffb16b 100%);
+  box-shadow: 0 8px 24px rgba(255, 122, 61, 0.22);
+}
+.wallet__card-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.wallet__label {
+  font-size: $ni-font-10;
+  color: rgba(255, 255, 255, 0.86);
+}
+.wallet__secure {
+  flex-direction: row;
+  align-items: center;
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 7px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.18);
+}
+.wallet__secure-text {
+  margin-left: 2px;
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.9);
+}
+.wallet__amount-row {
+  flex-direction: row;
+  align-items: baseline;
+  margin-top: 3px;
+}
+.wallet__symbol {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: #ffffff;
+}
+.wallet__amount {
+  margin-left: 2px;
+  font-size: $ni-font-29;
+  font-weight: 700;
+  color: #ffffff;
+}
+.wallet__sub-row {
+  flex-direction: row;
+  margin-top: 5px;
+}
+.wallet__sub-text {
+  margin-right: 14px;
+  font-size: $ni-font-9;
+  color: rgba(255, 255, 255, 0.84);
+}
+.wallet__actions {
+  flex-direction: row;
+  margin-top: 14px;
+}
+.wallet__action {
+  flex: 1;
+  height: 38px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+  margin-right: 9px;
+}
+.wallet__action--outline {
+  background-color: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.wallet__action-text {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.wallet__action-text--light {
+  color: #ffffff;
+}
+.wallet__security {
+  margin-top: 10px;
+  padding: 11px 13px;
+  flex-direction: row;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.wallet__security-item {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+.wallet__security-text {
+  margin-left: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-credit-deep;
+}
+.wallet__transactions {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.wallet__transactions-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.wallet__transactions-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.wallet__transactions-filter {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.wallet__loading {
+  padding-top: 10px;
+}
+.wallet__empty {
+  padding-top: 10px;
+}
+.wallet__transaction {
+  min-height: 62px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.wallet__transaction-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.wallet__transaction-icon--in {
+  background-color: $ni-color-gift-bg;
+}
+.wallet__transaction-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.wallet__transaction-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.wallet__transaction-time {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.wallet__transaction-amount {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.wallet__transaction-amount--in {
+  color: $ni-color-gift-deep;
+}
+.wallet__more {
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+}
+.wallet__more-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.withdraw {
+  padding-bottom: 16px;
+}
+.withdraw__available {
+  padding: 11px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-primary-bg;
+}
+.withdraw__available-label {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.withdraw__available-value {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.withdraw__label {
+  margin-top: 15px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.withdraw__input-row {
+  height: 50px;
+  margin-top: 8px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: $ni-radius-12;
+  background-color: #f8f6f4;
+}
+.withdraw__symbol {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.withdraw__input {
+  flex: 1;
+  height: 100%;
+  margin-left: 5px;
+  font-size: $ni-font-20;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.withdraw__placeholder {
+  font-size: $ni-font-20;
+  color: $ni-color-text-placeholder;
+}
+.withdraw__all {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.withdraw__note {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 8px;
+  margin-bottom: 14px;
+}
+.withdraw__note-text {
+  margin-left: 4px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+</style>

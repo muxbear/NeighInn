@@ -1,0 +1,209 @@
+<template>
+  <ni-sheet :visible="visible" height="82vh" title="选择内置头像" @update:visible="onVisible">
+    <view class="avatar-lib">
+      <view class="avatar-lib__preview">
+        <ni-avatar :src="previewSrc" :name="'邻'" :size="64" variant="orange" ring />
+        <view class="avatar-lib__preview-copy">
+          <text class="avatar-lib__preview-title">{{ selectedLabel || '邻里小栈内置头像' }}</text>
+          <text class="avatar-lib__preview-desc">选择喜欢的卡通形象，展示在个人信息与邻里互动中</text>
+        </view>
+      </view>
+
+      <view class="avatar-lib__tabs">
+        <view
+          v-for="(group, index) in groups"
+          :key="group.key"
+          class="avatar-lib__tab"
+          :class="{ 'avatar-lib__tab--active': activeIndex === index }"
+          @click="activeIndex = index"
+        >
+          <text class="avatar-lib__tab-text" :class="{ 'avatar-lib__tab-text--active': activeIndex === index }">
+            {{ group.label }}
+          </text>
+        </view>
+      </view>
+
+      <view class="avatar-lib__grid">
+        <view
+          v-for="(key, index) in currentItems"
+          :key="key"
+          class="avatar-lib__tile"
+          :class="{ 'avatar-lib__tile--gap': index % 3 !== 2 }"
+          :style="{ width: 'calc((100% - 16px) / 3)', marginBottom: '10px' }"
+          @click="select(key)"
+        >
+          <view class="avatar-lib__avatar-wrap" :class="{ 'avatar-lib__avatar-wrap--active': selectedKey === key }">
+            <image class="avatar-lib__avatar" :src="avatarSrc(key)" mode="aspectFill" />
+            <view v-if="selectedKey === key" class="avatar-lib__check">
+              <ni-icon name="check" :size="11" state="white" />
+            </view>
+          </view>
+          <text class="avatar-lib__label" :class="{ 'avatar-lib__label--active': selectedKey === key }">{{ labelFor(key) }}</text>
+        </view>
+      </view>
+
+      <ni-button type="primary" size="lg" block :disabled="!selectedKey" @tap="confirm">
+        确认使用
+      </ni-button>
+    </view>
+  </ni-sheet>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import type { AvatarPresetGroup } from '../../models'
+import { AVATAR_PRESET_LABELS } from '../../config/constants'
+
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    groups: AvatarPresetGroup[]
+    selected?: string
+  }>(),
+  { selected: '' },
+)
+
+const emit = defineEmits<{
+  (event: 'update:visible', value: boolean): void
+  (event: 'select', key: string): void
+  (event: 'confirm', key: string): void
+}>()
+
+const activeIndex = ref(0)
+const selectedKey = ref(props.selected)
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) selectedKey.value = props.selected
+  },
+)
+
+const currentItems = computed(() => props.groups[activeIndex.value]?.items ?? [])
+const previewSrc = computed(() => (selectedKey.value ? avatarSrc(selectedKey.value) : ''))
+const selectedLabel = computed(() => (selectedKey.value ? labelFor(selectedKey.value) : ''))
+
+function avatarSrc(key: string): string {
+  return `/static/avatars/${key}.svg`
+}
+
+function labelFor(key: string): string {
+  return AVATAR_PRESET_LABELS[key] || '内置头像'
+}
+
+function select(key: string): void {
+  selectedKey.value = key
+  emit('select', key)
+}
+
+function confirm(): void {
+  if (!selectedKey.value) return
+  emit('confirm', selectedKey.value)
+  emit('update:visible', false)
+}
+
+function onVisible(value: boolean): void {
+  emit('update:visible', value)
+}
+</script>
+
+<style scoped lang="scss">
+.avatar-lib {
+  padding-bottom: 10px;
+}
+.avatar-lib__preview {
+  flex-direction: row;
+  align-items: center;
+  padding: 13px;
+  border-radius: $ni-radius-18;
+  background-image: linear-gradient(135deg, #fff5ed 0%, #fffaf5 100%);
+}
+.avatar-lib__preview-copy {
+  flex: 1;
+  margin-left: 12px;
+}
+.avatar-lib__preview-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.avatar-lib__preview-desc {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-text-tertiary;
+}
+.avatar-lib__tabs {
+  flex-direction: row;
+  margin-top: 14px;
+  margin-bottom: 12px;
+}
+.avatar-lib__tab {
+  flex: 1;
+  height: 34px;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  background-color: $ni-color-fill-3;
+  margin-right: 6px;
+}
+.avatar-lib__tab--active {
+  background-color: $ni-color-white;
+  border: 1px solid #ffd3b9;
+}
+.avatar-lib__tab-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.avatar-lib__tab-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.avatar-lib__grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.avatar-lib__tile {
+  align-items: center;
+}
+.avatar-lib__tile--gap {
+  margin-right: 8px;
+}
+.avatar-lib__avatar-wrap {
+  width: 100%;
+  height: 80px;
+  border-radius: $ni-radius-15;
+  border: 2px solid transparent;
+  overflow: hidden;
+  position: relative;
+  background-color: #f5f1ed;
+}
+.avatar-lib__avatar-wrap--active {
+  border-color: $ni-color-primary;
+}
+.avatar-lib__avatar {
+  width: 100%;
+  height: 100%;
+}
+.avatar-lib__label {
+  margin-top: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+}
+.avatar-lib__label--active {
+  color: $ni-color-primary-dark;
+  font-weight: 600;
+}
+.avatar-lib__check {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 19px;
+  height: 19px;
+  border-radius: 10px;
+  background-color: $ni-color-primary;
+  align-items: center;
+  justify-content: center;
+}
+</style>

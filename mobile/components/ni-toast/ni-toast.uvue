@@ -1,0 +1,61 @@
+<template>
+  <view v-if="visible" class="ni-toast" :style="{ bottom: bottom + 'px' }">
+    <view class="ni-toast__pill">
+      <ni-icon :name="icon" :size="16" state="white" />
+      <text class="ni-toast__text">{{ text }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+withDefaults(
+  defineProps<{
+    visible: boolean
+    text: string
+    icon?: string
+    bottom?: number
+  }>(),
+  {
+    icon: 'check',
+    bottom: 92,
+  },
+)
+</script>
+
+<style scoped lang="scss">
+.ni-toast {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 500;
+  align-items: center;
+  pointer-events: none;
+}
+.ni-toast__pill {
+  flex-direction: row;
+  align-items: center;
+  min-height: 40px;
+  max-width: 85%;
+  padding-left: 16px;
+  padding-right: 18px;
+  border-radius: 20px;
+  background-color: rgba(35, 30, 27, 0.9);
+  animation: niToastIn 0.2s ease-out;
+}
+.ni-toast__text {
+  margin-left: 6px;
+  color: #ffffff;
+  font-size: $ni-font-11;
+  line-height: 16px;
+}
+@keyframes niToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+</style>

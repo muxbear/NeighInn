@@ -1,0 +1,355 @@
+<template>
+  <scroll-view class="manage" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="manage__header">
+      <ni-status-bar />
+      <view class="manage__nav">
+        <view class="manage__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="manage__nav-title">我的发布</text>
+        <view class="manage__publish" @click="goPublish">
+          <ni-icon name="plus" :size="13" state="white" />
+          <text class="manage__publish-text">发布</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="manage__tabs">
+      <view
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="manage__tab"
+        :class="{ 'manage__tab--active': activeTab === tab.key }"
+        @click="activeTab = tab.key"
+      >
+        <text class="manage__tab-text" :class="{ 'manage__tab-text--active': activeTab === tab.key }">{{ tab.label }}</text>
+        <text class="manage__tab-count">{{ countOf(tab.key) }}</text>
+      </view>
+    </view>
+
+    <view class="manage__body">
+      <view v-if="itemStore.myItemsLoading && itemStore.myItems.length === 0" class="manage__loading">
+        <ni-skeleton :rows="4" :avatar="false" />
+      </view>
+
+      <view v-else-if="filtered.length === 0" class="manage__empty">
+        <ni-empty icon="box" title="这里还没有物品" desc="发布一件闲置，让它继续发光" action-text="去发布" @action="goPublish" />
+      </view>
+
+      <view v-else>
+        <view v-for="item in filtered" :key="item.id" class="manage__item">
+          <view class="manage__item-top" @click="goDetail(item.id)">
+            <image class="manage__item-image" :src="item.image" mode="aspectFill" />
+            <view class="manage__item-copy">
+              <text class="manage__item-title" :lines="2">{{ item.title }}</text>
+              <view class="manage__item-meta">
+                <ni-tag :type="statusTagType(item.status)" size="xs">{{ statusText(item.status) }}</ni-tag>
+                <text class="manage__item-condition">{{ item.condition }} · {{ item.category }}</text>
+              </view>
+              <view class="manage__item-price-row">
+                <text v-if="Number(item.price) > 0" class="manage__item-price">¥{{ item.price }}</text>
+                <text v-else class="manage__item-free">{{ item.type === '免费' ? '免费赠送' : '物品互换' }}</text>
+                <text class="manage__item-views">浏览 {{ item.viewCount || 0 }}</text>
+              </view>
+            </view>
+          </view>
+
+          <view class="manage__actions">
+            <view class="manage__action" @click="editItem(item)">
+              <text class="manage__action-text">编辑</text>
+            </view>
+            <view v-if="item.status === 'ON_SALE'" class="manage__action" @click="offShelf(item)">
+              <text class="manage__action-text">下架</text>
+            </view>
+            <view v-if="item.status === 'ON_SALE' || item.status === 'AUDITING'" class="manage__action" @click="renew(item)">
+              <text class="manage__action-text">续期</text>
+            </view>
+            <view class="manage__action manage__action--danger" @click="remove(item)">
+              <text class="manage__action-text manage__action-text--danger">删除</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import type { Item, ItemStatus } from '../../models'
+import { useItemStore } from '../../stores/item.store'
+import { useToast } from '../../composables/useToast'
+
+const itemStore = useItemStore()
+const { toast, showToast } = useToast()
+
+const tabs = [
+  { key: 'ALL', label: '全部' },
+  { key: 'ON_SALE', label: '在售' },
+  { key: 'AUDITING', label: '审核中' },
+  { key: 'OFF_SHELF', label: '已下架' },
+]
+const activeTab = ref('ALL')
+
+const filtered = computed(() => {
+  if (activeTab.value === 'ALL') return itemStore.myItems
+  return itemStore.myItems.filter((item) => item.status === activeTab.value)
+})
+
+onShow(() => {
+  itemStore.fetchMyItems().catch(() => undefined)
+})
+
+function countOf(key: string): number {
+  if (key === 'ALL') return itemStore.myItems.length
+  return itemStore.myItems.filter((item) => item.status === key).length
+}
+
+function statusText(status?: ItemStatus): string {
+  if (status === 'AUDITING') return '审核中'
+  if (status === 'OFF_SHELF') return '已下架'
+  if (status === 'RESERVED') return '已被预约'
+  if (status === 'SOLD') return '已售出'
+  if (status === 'REJECTED') return '已驳回'
+  return '在售'
+}
+
+function statusTagType(status?: ItemStatus): string {
+  if (status === 'AUDITING') return 'condition'
+  if (status === 'OFF_SHELF' || status === 'REJECTED') return 'neutral'
+  if (status === 'SOLD') return 'verified'
+  return 'gift'
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+function goPublish(): void {
+  uni.navigateTo({ url: '/pages/publish/index' })
+}
+function goDetail(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+
+function editItem(item: Item): void {
+  uni.navigateTo({ url: `/pages/publish/index?editId=${item.id}` })
+}
+
+async function offShelf(item: Item): Promise<void> {
+  try {
+    await itemStore.offShelf(item.id)
+    showToast('物品已下架')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '下架失败', 'alert')
+  }
+}
+
+async function renew(item: Item): Promise<void> {
+  try {
+    await itemStore.renew(item.id)
+    showToast('物品已续期')
+    await itemStore.fetchMyItems()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '续期失败', 'alert')
+  }
+}
+
+function remove(item: Item): void {
+  uni.showModal({
+    title: '删除物品',
+    content: '删除后无法恢复，确认删除这件物品吗？',
+    confirmText: '删除',
+    confirmColor: '#E85D20',
+    success: async (res) => {
+      if (!res.confirm) return
+      try {
+        await itemStore.removeItem(item.id)
+        showToast('物品已删除')
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '删除失败', 'alert')
+      }
+    },
+  })
+}
+</script>
+
+<style scoped lang="scss">
+.manage {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.manage__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.manage__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.manage__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.manage__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.manage__publish {
+  height: 30px;
+  padding-left: 9px;
+  padding-right: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 10px;
+  background-image: $ni-gradient-brand;
+}
+.manage__publish-text {
+  margin-left: 3px;
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: #ffffff;
+}
+.manage__tabs {
+  flex-direction: row;
+  padding: 10px 14px;
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.manage__tab {
+  height: 32px;
+  padding-left: 12px;
+  padding-right: 12px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  margin-right: 8px;
+}
+.manage__tab--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.manage__tab-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.manage__tab-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.manage__tab-count {
+  margin-left: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.manage__body {
+  padding: 14px;
+}
+.manage__loading {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.manage__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.manage__item {
+  margin-bottom: 10px;
+  padding: 12px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.manage__item-top {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.manage__item-image {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  background-color: #f3ede7;
+}
+.manage__item-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.manage__item-title {
+  font-size: $ni-font-12;
+  line-height: 18px;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.manage__item-meta {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 4px;
+}
+.manage__item-condition {
+  margin-left: 5px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.manage__item-price-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+.manage__item-price {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.manage__item-free {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-gift;
+}
+.manage__item-views {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.manage__actions {
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: $ni-border-divider;
+}
+.manage__action {
+  height: 28px;
+  padding-left: 11px;
+  padding-right: 11px;
+  border-radius: 9px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+  margin-left: 7px;
+}
+.manage__action--danger {
+  background-color: $ni-color-danger-bg;
+}
+.manage__action-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.manage__action-text--danger {
+  color: $ni-color-danger-deep;
+}
+</style>

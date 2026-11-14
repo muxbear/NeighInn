@@ -1,0 +1,374 @@
+<template>
+  <scroll-view class="proof" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="proof__header">
+      <ni-status-bar />
+      <view class="proof__nav">
+        <view class="proof__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="proof__nav-title">业主证明</text>
+        <view class="proof__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="proof__content">
+      <view class="proof__security">
+        <view class="proof__security-icon">
+          <ni-icon name="shield" :size="19" state="gold" />
+        </view>
+        <view class="proof__security-copy">
+          <text class="proof__security-title">仅用于业主身份核验</text>
+          <text class="proof__security-desc">证明材料加密存储，审核完成后按隐私政策处理，不会公开展示。</text>
+        </view>
+      </view>
+
+      <view v-if="rejected" class="proof__rejected">
+        <ni-icon name="alert" :size="16" state="danger" />
+        <view class="proof__rejected-copy">
+          <text class="proof__rejected-title">上次申请未通过</text>
+          <text class="proof__rejected-desc">{{ rejectReason }}</text>
+        </view>
+      </view>
+
+      <view class="proof__card">
+        <text class="proof__card-title">认证小区</text>
+        <view class="proof__community" @click="chooseCommunity">
+          <view class="proof__community-icon">
+            <ni-icon name="home" :size="18" state="active" />
+          </view>
+          <view class="proof__community-copy">
+            <text class="proof__community-name">{{ selectedCommunity?.name || '请选择小区' }}</text>
+            <text class="proof__community-address">{{ selectedCommunity?.address || '选择你居住的小区' }}</text>
+          </view>
+          <ni-icon name="chevron" :size="15" state="tertiary" />
+        </view>
+      </view>
+
+      <view class="proof__card">
+        <text class="proof__card-title">你的身份</text>
+        <text class="proof__card-desc">不同身份需要提交的证明材料不同</text>
+        <view class="proof__identities">
+          <view
+            v-for="identity in identities"
+            :key="identity.key"
+            class="proof__identity"
+            :class="{ 'proof__identity--active': selectedIdentity === identity.key }"
+            @click="selectedIdentity = identity.key"
+          >
+            <ni-icon
+              :name="identity.key === 'owner' ? 'home' : identity.key === 'tenant' ? 'order' : 'friend'"
+              :size="21"
+              :state="selectedIdentity === identity.key ? 'active' : 'tertiary'"
+            />
+            <text class="proof__identity-title">{{ identity.label }}</text>
+            <text class="proof__identity-desc">{{ identity.desc }}</text>
+            <view v-if="selectedIdentity === identity.key" class="proof__identity-check">
+              <ni-icon name="check" :size="10" state="white" />
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view class="proof__card">
+        <view class="proof__card-head">
+          <text class="proof__card-title">证明材料</text>
+          <text class="proof__card-count">{{ images.length }}/5</text>
+        </view>
+        <text class="proof__card-desc">可上传房产证、购房合同、租赁合同或近 3 个月缴费记录</text>
+        <ni-photo-uploader v-model="images" :max="5" :min="1" :columns="3" :tile-height="100" add-text="添加证明" show-count />
+      </view>
+
+      <view class="proof__tips">
+        <text class="proof__tips-title">审核说明</text>
+        <text class="proof__tips-item">· 审核时效不超过 24 小时，结果会通过通知中心告知</text>
+        <text class="proof__tips-item">· 累计 3 次未通过将转人工复核，请确保材料真实清晰</text>
+        <text class="proof__tips-item">· 认证通过后可在该小区发布与参与闲置交易</text>
+      </view>
+
+      <ni-button type="primary" size="lg" block :loading="submitting" :disabled="!canSubmit" @tap="submit">
+        {{ canSubmit ? '提交业主认证' : '请选择小区并上传证明材料' }}
+      </ni-button>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { CommunityBinding } from '../../models'
+import { useCommunityStore } from '../../stores/community.store'
+import { useToast } from '../../composables/useToast'
+import { authService } from '../../services/auth.service'
+import { IDENTITY_OPTIONS } from '../../config/constants'
+
+const communityStore = useCommunityStore()
+const { toast, showToast } = useToast()
+
+const selectedCommunity = ref<CommunityBinding | null>(null)
+const selectedIdentity = ref<'owner' | 'tenant' | 'family'>('owner')
+const images = ref<string[]>([])
+const submitting = ref(false)
+const rejected = ref(false)
+const rejectReason = ref('房产证照片反光，无法核验业主姓名与房号。')
+const identities = IDENTITY_OPTIONS
+
+const canSubmit = computed(() => Boolean(selectedCommunity.value && images.value.length))
+
+onLoad(async () => {
+  await communityStore.fetchMine().catch(() => undefined)
+  if (!communityStore.current && communityStore.bindings.length === 0) {
+    await communityStore.fetchNearby().catch(() => undefined)
+  }
+  selectedCommunity.value = communityStore.current ?? communityStore.bindings[0] ?? communityStore.nearby[0] ?? null
+})
+
+function chooseCommunity(): void {
+  const source = [...communityStore.bindings, ...communityStore.nearby]
+  if (!source.length) {
+    showToast('暂未获取到小区列表', 'alert')
+    return
+  }
+  uni.showActionSheet({
+    itemList: source.map((item) => item.name),
+    success: (res: any) => {
+      selectedCommunity.value = source[Number(res.tapIndex)] ?? source[0]
+    },
+  })
+}
+
+async function submit(): Promise<void> {
+  if (!canSubmit.value || submitting.value) return
+  submitting.value = true
+  try {
+    await authService.submitOwnerProof({
+      communityId: selectedCommunity.value!.id,
+      identity: selectedIdentity.value,
+      images: images.value,
+    })
+    showToast('业主认证已提交')
+    setTimeout(() => {
+      uni.redirectTo({ url: '/pages/auth/result?type=owner' })
+    }, 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.proof {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.proof__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.proof__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.proof__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.proof__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.proof__nav-placeholder {
+  width: 42px;
+}
+.proof__content {
+  padding: 14px;
+}
+.proof__security {
+  padding: 12px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-14;
+  background-color: #fff8e8;
+}
+.proof__security-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.proof__security-copy {
+  flex: 1;
+  margin-left: 8px;
+}
+.proof__security-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-service-deep;
+}
+.proof__security-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #9a7c45;
+}
+.proof__rejected {
+  margin-top: 10px;
+  padding: 11px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-danger-bg;
+}
+.proof__rejected-copy {
+  flex: 1;
+  margin-left: 6px;
+}
+.proof__rejected-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-danger-deep;
+}
+.proof__rejected-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #9a6a55;
+}
+.proof__card {
+  margin-top: 10px;
+  padding: 15px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.proof__card-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.proof__card-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.proof__card-desc {
+  margin-top: 4px;
+  margin-bottom: 10px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.proof__card-count {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.proof__community {
+  margin-top: 11px;
+  padding: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-13;
+  background-color: $ni-color-fill-1;
+}
+.proof__community-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.proof__community-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.proof__community-name {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.proof__community-address {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.proof__identities {
+  flex-direction: row;
+}
+.proof__identity {
+  flex: 1;
+  min-height: 90px;
+  padding: 10px;
+  margin-right: 8px;
+  border-radius: $ni-radius-13;
+  background-color: $ni-color-fill-1;
+  border: 1px solid transparent;
+  align-items: center;
+  position: relative;
+}
+.proof__identity--active {
+  background-color: $ni-color-primary-bg;
+  border-color: #ffb58b;
+}
+.proof__identity-title {
+  margin-top: 5px;
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.proof__identity-desc {
+  margin-top: 3px;
+  font-size: 7px;
+  line-height: 12px;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+}
+.proof__identity-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: $ni-color-primary;
+  align-items: center;
+  justify-content: center;
+}
+.proof__tips {
+  margin-top: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: $ni-radius-12;
+  background-color: #fff8e8;
+}
+.proof__tips-title {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-service-deep;
+}
+.proof__tips-item {
+  margin-top: 4px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

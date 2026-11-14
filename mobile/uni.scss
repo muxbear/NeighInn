@@ -1,0 +1,223 @@
+/**
+ * uni.scss —— HBuilderX 自动注入到所有 SCSS 样式块。
+ * 为保证注入后相对路径可解析，Token 与 mixin 直接内联在本文件中。
+ * styles/tokens.scss 与 styles/mixins.scss 保留为兼容转发文件。
+ */
+/**
+ * 邻里小栈 · 设计 Token（唯一来源）
+ * 数值取自《邻家小栈移动端详细设计方案》第 4 章 Figma 原值。
+ * ucss 说明：编译期使用 SCSS 变量；不使用 gap / grid / 伪元素。
+ */
+
+// ============ 品牌与功能色 ============
+$ni-color-primary: #ff7a3d;
+$ni-color-primary-dark: #e85d20;
+$ni-color-primary-light: #ffb37a;
+$ni-color-primary-bg: #fff5ed;
+$ni-color-sage: #6bb88a;
+$ni-color-sky: #5dade2;
+$ni-color-gold: #d4a055;
+$ni-color-rose: #e57373;
+$ni-color-success: #52c41a;
+$ni-color-warning: #faad14;
+$ni-color-error: #f5222d;
+$ni-color-info: #1890ff;
+
+// ============ 中性色 ============
+$ni-color-text-primary: #1f1f1f;
+$ni-color-text-secondary: #666666;
+$ni-color-text-tertiary: #999999;
+$ni-color-text-placeholder: #bbbbbb;
+$ni-color-text-disabled: #cccccc;
+$ni-color-white: #ffffff;
+
+$ni-color-divider: #eee9e4;
+$ni-color-divider-light: #f0edea;
+$ni-color-page: #faf8f5;
+$ni-color-card: #ffffff;
+$ni-color-input: #f5f3f1;
+$ni-color-input-2: #f7f5f3;
+$ni-color-fill-1: #f8f6f3;
+$ni-color-fill-2: #f4f1ef;
+$ni-color-fill-3: #ebe7e3;
+$ni-color-mask: rgba(30, 25, 22, 0.46);
+
+// ============ 语义辅助色（赠与 / 互换 / 出售 / 服务 / 认证） ============
+$ni-color-gift: #4e9870;
+$ni-color-gift-deep: #43835d;
+$ni-color-gift-bg: #e6f7ed;
+$ni-color-gift-bg-2: #eaf7ef;
+$ni-color-gift-border: #9ed1b2;
+
+$ni-color-swap: #4e94c4;
+$ni-color-swap-deep: #447fa7;
+$ni-color-swap-bg: #e5f3fb;
+$ni-color-swap-bg-2: #eaf5fb;
+$ni-color-swap-border: #9bc9e7;
+
+$ni-color-sale: #d86631;
+$ni-color-sale-deep: #b26b38;
+$ni-color-sale-bg: #ffe9d9;
+$ni-color-sale-bg-2: #fff0e5;
+$ni-color-sale-border: #ffb98f;
+
+$ni-color-service: #a8772f;
+$ni-color-service-deep: #9a6d2d;
+$ni-color-service-bg: #fff1c9;
+$ni-color-service-bg-2: #fff8e8;
+$ni-color-service-border: #ddbd7a;
+
+$ni-color-credit: #a57628;
+$ni-color-credit-deep: #9a702e;
+$ni-color-credit-bg: #fff4d9;
+$ni-color-credit-bg-2: #fff5dc;
+
+$ni-color-success-deep: #4e765f;
+$ni-color-success-bg: #eff9f3;
+$ni-color-danger-deep: #b95a31;
+$ni-color-danger-bg: #fff0e7;
+
+// ============ 渐变 ============
+$ni-gradient-brand: linear-gradient(135deg, #ff7a3d 0%, #ff9f5c 100%);
+$ni-gradient-brand-publish: linear-gradient(135deg, #ff7a3d 0%, #ffa15f 100%);
+$ni-gradient-publish-tab: linear-gradient(135deg, #ff7a3d 0%, #ffb866 100%);
+$ni-gradient-home-header: linear-gradient(160deg, #fff5ed 0%, #fffaf5 58%, #faf8f5 100%);
+$ni-gradient-login: linear-gradient(180deg, #fff5ed 0%, #fffaf6 32%, #faf8f5 68%, #f7f4f1 100%);
+$ni-gradient-gift: linear-gradient(135deg, #59a979 0%, #79c99a 100%);
+$ni-gradient-swap: linear-gradient(135deg, #4d9bd0 0%, #71b9e9 100%);
+$ni-gradient-service: linear-gradient(135deg, #c68e3d 0%, #e8bd73 100%);
+$ni-gradient-credit: linear-gradient(110deg, #fff5d9 0%, #fffbef 100%);
+$ni-gradient-success: linear-gradient(135deg, #55a173 0%, #7cbd95 100%);
+$ni-gradient-profile: linear-gradient(150deg, #fff2e6 0%, #fff9f3 62%, #f8f6f3 100%);
+$ni-gradient-zone-header: linear-gradient(150deg, #fff5ed 0%, #fffdf9 100%);
+
+// ============ 字体 ============
+$ni-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+
+$ni-font-6: 6px;
+$ni-font-7: 7px;
+$ni-font-8: 8px;
+$ni-font-9: 9px;
+$ni-font-10: 10px;
+$ni-font-11: 11px;
+$ni-font-12: 12px;
+$ni-font-13: 13px;
+$ni-font-14: 14px;
+$ni-font-15: 15px;
+$ni-font-16: 16px;
+$ni-font-17: 17px;
+$ni-font-18: 18px;
+$ni-font-19: 19px;
+$ni-font-20: 20px;
+$ni-font-21: 21px;
+$ni-font-22: 22px;
+$ni-font-25: 25px;
+$ni-font-26: 26px;
+$ni-font-27: 27px;
+$ni-font-29: 29px;
+
+$ni-weight-regular: 400;
+$ni-weight-medium: 500;
+$ni-weight-semibold: 600;
+$ni-weight-bold: 700;
+
+// ============ 间距（Figma 原值） ============
+$ni-space-2: 2px;
+$ni-space-3: 3px;
+$ni-space-4: 4px;
+$ni-space-5: 5px;
+$ni-space-6: 6px;
+$ni-space-7: 7px;
+$ni-space-8: 8px;
+$ni-space-9: 9px;
+$ni-space-10: 10px;
+$ni-space-11: 11px;
+$ni-space-12: 12px;
+$ni-space-13: 13px;
+$ni-space-14: 14px;
+$ni-space-15: 15px;
+$ni-space-16: 16px;
+$ni-space-17: 17px;
+$ni-space-18: 18px;
+$ni-space-20: 20px;
+$ni-space-22: 22px;
+$ni-space-25: 25px;
+$ni-space-26: 26px;
+$ni-space-30: 30px;
+
+// ============ 圆角 ============
+$ni-radius-4: 4px;
+$ni-radius-5: 5px;
+$ni-radius-6: 6px;
+$ni-radius-7: 7px;
+$ni-radius-8: 8px;
+$ni-radius-9: 9px;
+$ni-radius-10: 10px;
+$ni-radius-11: 11px;
+$ni-radius-12: 12px;
+$ni-radius-13: 13px;
+$ni-radius-14: 14px;
+$ni-radius-15: 15px;
+$ni-radius-16: 16px;
+$ni-radius-17: 17px;
+$ni-radius-18: 18px;
+$ni-radius-19: 19px;
+$ni-radius-20: 20px;
+$ni-radius-22: 22px;
+$ni-radius-24: 24px;
+$ni-radius-31: 31px;
+
+// ============ 阴影 ============
+$ni-shadow-sm: 0 2px 10px rgba(90, 58, 39, 0.05);
+$ni-shadow-card: 0 3px 14px rgba(58, 39, 28, 0.055);
+$ni-shadow-md: 0 4px 15px rgba(61, 43, 31, 0.045);
+$ni-shadow-lg: 0 7px 20px rgba(82, 55, 38, 0.1);
+$ni-shadow-brand: 0 5px 15px rgba(255, 122, 61, 0.22);
+$ni-shadow-sheet: 0 -12px 40px rgba(43, 31, 24, 0.18);
+
+// ============ 边框 ============
+$ni-border-card: 1px solid rgba(65, 45, 32, 0.045);
+$ni-border-divider: 1px solid #f0edea;
+$ni-border-dashed: 1.5px dashed #ffd0b5;
+
+// ============ 尺寸 ============
+$ni-tabbar-height: 78px;
+$ni-page-bottom-reserve: 92px;
+$ni-page-gutter: 14px;
+$ni-page-gutter-wide: 16px;
+$ni-status-bar-design: 30px;
+$ni-touch-min: 44px;
+/**
+ * SCSS 混入：只输出声明，不产生选择器，兼容 ucss。
+ */
+
+@mixin ni-ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@mixin ni-line-clamp-2 {
+  // ucss 不支持 -webkit-line-clamp，实际截断请使用 <text :lines="2">
+  overflow: hidden;
+}
+
+@mixin ni-card($radius: $ni-radius-16) {
+  background-color: $ni-color-card;
+  border-radius: $radius;
+  border: $ni-border-card;
+  box-shadow: $ni-shadow-card;
+}
+
+@mixin ni-pressable {
+  transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+@mixin ni-safe-bottom($extra: 0px) {
+  padding-bottom: calc(#{$extra} + env(safe-area-inset-bottom));
+}
+
+@mixin ni-gradient-text($gradient: $ni-gradient-brand) {
+  background-image: $gradient;
+  color: transparent;
+}

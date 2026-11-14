@@ -1,0 +1,418 @@
+<template>
+  <view class="chat">
+    <view class="chat__header">
+      <ni-status-bar />
+      <view class="chat__nav">
+        <view class="chat__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <view v-if="conversation" class="chat__peer">
+          <ni-avatar :src="conversation.peerAvatar" :name="conversation.peerName" :size="32" variant="green" />
+          <view class="chat__peer-copy">
+            <view class="chat__peer-name-row">
+              <text class="chat__peer-name">{{ conversation.peerName }}</text>
+              <ni-icon v-if="conversation.peerVerified" name="shield" :size="9" state="gold" />
+            </view>
+            <text class="chat__peer-status">{{ conversation.peerVerified ? '认证业主 · 同小区邻居' : '邻里小栈用户' }}</text>
+          </view>
+        </view>
+        <text v-else class="chat__title">私信</text>
+        <view class="chat__nav-button" @click="openMore">
+          <ni-icon name="settings" :size="18" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <scroll-view
+      class="chat__scroll"
+      scroll-y
+      :show-scrollbar="false"
+      :scroll-into-view="scrollTarget"
+      :scroll-with-animation="true"
+    >
+      <view class="chat__notice">
+        <ni-icon name="shield" :size="13" state="gold" />
+        <text class="chat__notice-text">请勿私下转账；平台担保交易更安全。遇到可疑信息请举报。</text>
+      </view>
+
+      <view v-if="messages.length === 0" class="chat__empty">
+        <ni-empty icon="message" title="还没有消息" desc="和邻居打个招呼，问问物品细节吧" />
+      </view>
+
+      <view v-for="message in messages" :key="message.id" :id="`msg-${message.id}`">
+        <view v-if="message.type === 'SYSTEM'" class="chat__system">
+          <text class="chat__system-text">{{ message.content }}</text>
+        </view>
+        <view v-else class="chat__row" :class="{ 'chat__row--mine': message.mine }">
+          <ni-avatar
+            v-if="!message.mine"
+            :src="conversation?.peerAvatar"
+            :name="conversation?.peerName"
+            :size="34"
+            variant="green"
+          />
+          <view class="chat__message" :class="{ 'chat__message--mine': message.mine }">
+            <view class="chat__bubble" :class="{ 'chat__bubble--mine': message.mine }">
+              <text v-if="message.type === 'TEXT'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
+                {{ message.content }}
+              </text>
+              <view v-else-if="message.type === 'ITEM' && message.item" class="chat__item" @click="goItem(message.item.id)">
+                <image class="chat__item-image" :src="message.item.image" mode="aspectFill" />
+                <view class="chat__item-copy">
+                  <text class="chat__item-title" :lines="1">{{ message.item.title }}</text>
+                  <text class="chat__item-price">{{ message.item.type === '出售' ? `¥${message.item.price}` : message.item.type }}</text>
+                </view>
+                <ni-icon name="chevron" :size="12" state="tertiary" />
+              </view>
+            </view>
+            <view class="chat__meta">
+              <text class="chat__time">{{ message.timeText }}</text>
+              <text v-if="message.mine && message.status === 'SENDING'" class="chat__status">发送中…</text>
+              <text v-if="message.mine && message.status === 'FAILED'" class="chat__status chat__status--failed">发送失败</text>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view class="chat__scroll-space" />
+    </scroll-view>
+
+    <view class="chat__input-bar">
+      <view class="chat__input-wrap">
+        <input
+          class="chat__input"
+          :value="draft"
+          placeholder="和邻居说点什么…"
+          placeholder-class="chat__placeholder"
+          confirm-type="send"
+          :adjust-position="true"
+          @input="onInput"
+          @confirm="send"
+        />
+      </view>
+      <view class="chat__send" :class="{ 'chat__send--active': draft.trim().length > 0 }" @click="send">
+        <text class="chat__send-text" :class="{ 'chat__send-text--active': draft.trim().length > 0 }">发送</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="90" />
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { ChatMessage, Conversation } from '../../models'
+import { useSocialStore } from '../../stores/social.store'
+import { useToast } from '../../composables/useToast'
+
+const socialStore = useSocialStore()
+const { toast, showToast } = useToast()
+
+const conversationId = ref('')
+const pendingItemId = ref('')
+const draft = ref('')
+const scrollTarget = ref('')
+const sending = ref(false)
+
+const conversation = computed<Conversation | null>(
+  () => socialStore.conversations.find((item) => item.id === conversationId.value) ?? null,
+)
+const messages = computed<ChatMessage[]>(() => socialStore.messagesByConv[conversationId.value] ?? [])
+
+onLoad(async (options: any) => {
+  conversationId.value = String(options?.id ?? '')
+  pendingItemId.value = String(options?.itemId ?? '')
+  if (!conversationId.value) return
+  try {
+    if (!socialStore.conversations.length) await socialStore.fetchConversations()
+    const conversation = socialStore.conversations.find((item) => item.id === conversationId.value)
+    if (!conversation) {
+      showToast('会话不存在', 'alert')
+      return
+    }
+    await socialStore.fetchMessages(conversationId.value)
+    if (conversation.unread > 0) {
+      await socialStore.markConversationRead(conversationId.value)
+    }
+    scrollToBottom()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '会话加载失败', 'alert')
+  }
+})
+
+function onInput(event: any): void {
+  draft.value = String(event?.detail?.value ?? '')
+}
+
+async function send(): Promise<void> {
+  const text = draft.value.trim()
+  if (!text || sending.value) return
+  sending.value = true
+  draft.value = ''
+  try {
+    await socialStore.sendMessage(conversationId.value, text)
+    scrollToBottom()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '发送失败', 'alert')
+  } finally {
+    sending.value = false
+  }
+}
+
+function scrollToBottom(): void {
+  setTimeout(() => {
+    const list = messages.value
+    if (list.length) scrollTarget.value = `msg-${list[list.length - 1].id}`
+  }, 80)
+}
+
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+
+function openMore(): void {
+  uni.showActionSheet({
+    itemList: ['举报该用户', '加入黑名单', '清空聊天记录'],
+    success: (res: any) => {
+      const index = Number(res.tapIndex)
+      if (index === 0) {
+        uni.navigateTo({ url: '/pages/report/index?type=user' })
+      } else if (index === 1) {
+        showToast('已加入黑名单')
+      } else {
+        showToast('聊天记录已清空')
+      }
+    },
+  })
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/messages/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.chat {
+  height: 100vh;
+  background-color: #f4f1ef;
+}
+.chat__header {
+  background-color: rgba(255, 255, 255, 0.97);
+  border-bottom: 1px solid #eee9e4;
+}
+.chat__nav {
+  height: 52px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.chat__nav-button {
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+}
+.chat__peer {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  margin-left: 4px;
+}
+.chat__peer-copy {
+  margin-left: 8px;
+}
+.chat__peer-name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.chat__peer-name {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.chat__peer-status {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.chat__title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.chat__scroll {
+  flex: 1;
+  padding-left: 13px;
+  padding-right: 13px;
+}
+.chat__notice {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 9px;
+  margin-top: 10px;
+  border-radius: $ni-radius-10;
+  background-color: #fff8e8;
+}
+.chat__notice-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+.chat__empty {
+  padding-top: 20px;
+}
+.chat__system {
+  align-items: center;
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+.chat__system-text {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+  background-color: rgba(0, 0, 0, 0.05);
+  padding-left: 8px;
+  padding-right: 8px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  border-radius: 8px;
+}
+.chat__row {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 12px;
+}
+.chat__row--mine {
+  justify-content: flex-end;
+}
+.chat__message {
+  max-width: 74%;
+  margin-left: 8px;
+}
+.chat__message--mine {
+  margin-left: 0;
+  align-items: flex-end;
+}
+.chat__bubble {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border-top-left-radius: 4px;
+  background-color: #ffffff;
+  box-shadow: 0 2px 8px rgba(60, 45, 35, 0.05);
+}
+.chat__bubble--mine {
+  border-top-left-radius: 14px;
+  border-top-right-radius: 4px;
+  background-image: $ni-gradient-brand;
+}
+.chat__text {
+  font-size: $ni-font-12;
+  line-height: 19px;
+  color: $ni-color-text-primary;
+}
+.chat__text--mine {
+  color: #ffffff;
+}
+.chat__item {
+  flex-direction: row;
+  align-items: center;
+  padding: 7px;
+  border-radius: $ni-radius-10;
+  background-color: #f8f4f1;
+  min-width: 200px;
+}
+.chat__item-image {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background-color: #e9e1da;
+}
+.chat__item-copy {
+  flex: 1;
+  margin-left: 7px;
+}
+.chat__item-title {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.chat__item-price {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: $ni-color-primary-dark;
+}
+.chat__meta {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 3px;
+}
+.chat__time {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.chat__status {
+  margin-left: 4px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.chat__status--failed {
+  color: $ni-color-danger-deep;
+}
+.chat__scroll-space {
+  height: 16px;
+}
+.chat__input-bar {
+  padding: 8px 12px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  flex-direction: row;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.98);
+  border-top: 1px solid #eee9e4;
+}
+.chat__input-wrap {
+  flex: 1;
+  height: 40px;
+  padding-left: 13px;
+  padding-right: 13px;
+  border-radius: $ni-radius-13;
+  background-color: #f3f0ed;
+  justify-content: center;
+}
+.chat__input {
+  width: 100%;
+  height: 100%;
+  font-size: $ni-font-12;
+  color: $ni-color-text-primary;
+}
+.chat__placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-12;
+}
+.chat__send {
+  width: 58px;
+  height: 38px;
+  margin-left: 8px;
+  border-radius: $ni-radius-12;
+  background-color: #e9e3dd;
+  align-items: center;
+  justify-content: center;
+}
+.chat__send--active {
+  background-image: $ni-gradient-brand;
+}
+.chat__send-text {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: #999999;
+}
+.chat__send-text--active {
+  color: #ffffff;
+}
+</style>

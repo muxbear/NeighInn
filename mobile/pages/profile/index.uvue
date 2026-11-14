@@ -1,0 +1,663 @@
+<template>
+  <scroll-view class="profile" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="profile__hero">
+      <ni-status-bar />
+      <view class="profile__glow" />
+
+      <view class="profile__actions">
+        <view class="profile__action" @click="goNotifications">
+          <ni-icon name="bell" :size="19" state="secondary" />
+          <view v-if="notificationStore.unread > 0" class="profile__action-badge">
+            <ni-badge :count="notificationStore.unread" :max="9" />
+          </view>
+        </view>
+        <view class="profile__action profile__action--gap" @click="goSettings">
+          <ni-icon name="settings" :size="19" state="secondary" />
+        </view>
+      </view>
+
+      <view class="profile__user" @click="goEdit">
+        <view class="profile__avatar-wrap">
+          <ni-avatar :src="userStore.avatarSrc" :name="userStore.profile?.nickname" :size="64" variant="orange" />
+          <view class="profile__avatar-camera">
+            <ni-icon name="camera" :size="11" state="white" />
+          </view>
+        </view>
+        <view class="profile__user-copy">
+          <view class="profile__name-row">
+            <text class="profile__name">{{ displayName }}</text>
+            <view v-if="userStore.profile?.verified" class="profile__verified">
+              <ni-icon name="shield" :size="10" state="gold" />
+              <text class="profile__verified-text">认证业主</text>
+            </view>
+          </view>
+          <text class="profile__user-meta">{{ communityName }} · 加入 {{ userStore.profile?.joinedDays || 0 }} 天</text>
+          <text class="profile__credit">{{ userStore.profile?.creditLevel || '信用良好' }} · {{ userStore.profile?.creditScore || 0 }} 分</text>
+        </view>
+        <ni-icon name="chevron" :size="17" state="tertiary" />
+      </view>
+
+      <view class="profile__stats">
+        <view class="profile__stat">
+          <text class="profile__stat-value">{{ stats.publishCount }}</text>
+          <text class="profile__stat-label">闲置发布</text>
+        </view>
+        <view class="profile__stat-divider" />
+        <view class="profile__stat">
+          <text class="profile__stat-value">{{ stats.lifeCount }}</text>
+          <text class="profile__stat-label">生活动态</text>
+        </view>
+        <view class="profile__stat-divider" />
+        <view class="profile__stat">
+          <text class="profile__stat-value">{{ stats.serviceCount }}</text>
+          <text class="profile__stat-label">互助服务</text>
+        </view>
+        <view class="profile__stat-divider" />
+        <view class="profile__stat">
+          <text class="profile__stat-value">{{ stats.creditScore }}</text>
+          <text class="profile__stat-label">信用分</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="profile__body">
+      <view class="profile__content-card">
+        <view class="profile__content-head">
+          <text class="profile__content-heading">我的内容</text>
+          <text class="profile__content-manage" @click="goManage">内容管理 ›</text>
+        </view>
+        <view class="profile__content-grid">
+          <view class="profile__content-item" @click="goManage">
+            <view class="profile__content-icon profile__content-icon--sale">
+              <ni-icon name="box" :size="18" state="active" />
+            </view>
+            <text class="profile__content-title">闲置物品</text>
+            <text class="profile__content-count">{{ stats.publishCount }} 条</text>
+          </view>
+          <view class="profile__content-item" @click="goLife">
+            <view class="profile__content-icon profile__content-icon--gift">
+              <ni-icon name="image" :size="18" state="green" />
+            </view>
+            <text class="profile__content-title">生活动态</text>
+            <text class="profile__content-count">{{ stats.lifeCount }} 条</text>
+          </view>
+          <view class="profile__content-item" @click="goZoneService">
+            <view class="profile__content-icon profile__content-icon--gold">
+              <ni-icon name="friend" :size="18" state="gold" />
+            </view>
+            <text class="profile__content-title">互助服务</text>
+            <text class="profile__content-count">{{ stats.serviceCount }} 条</text>
+          </view>
+          <view class="profile__content-item" @click="goFavorites">
+            <view class="profile__content-icon profile__content-icon--swap">
+              <ni-icon name="heart" :size="18" state="blue" />
+            </view>
+            <text class="profile__content-title">收藏足迹</text>
+            <text class="profile__content-count">{{ stats.favoriteCount + stats.historyCount }} 条</text>
+          </view>
+        </view>
+      </view>
+
+      <credit-banner
+        :score="stats.creditScore"
+        :level="credit?.level || '信用极好'"
+        :desc="credit?.nextLevel || '完成交易、按时赴约、收到好评都能提升信用分'"
+        @detail="goCredit"
+      />
+
+      <view class="profile__orders">
+        <view class="profile__orders-head">
+          <text class="profile__orders-title">我的订单</text>
+          <text class="profile__orders-all" @click="goOrders('monetary')">全部订单</text>
+        </view>
+        <view class="profile__orders-grid">
+          <view class="profile__order-item" @click="goOrders('free')">
+            <view class="profile__order-icon profile__order-icon--gift">
+              <ni-icon name="gift" :size="20" state="green" />
+              <text v-if="orderCount('free') > 0" class="profile__order-badge">{{ orderCount('free') }}</text>
+            </view>
+            <text class="profile__order-title">免费订单</text>
+            <text class="profile__order-desc">赠与与领取</text>
+          </view>
+          <view class="profile__order-item" @click="goOrders('swap')">
+            <view class="profile__order-icon profile__order-icon--swap">
+              <ni-icon name="swap" :size="20" state="blue" />
+              <text v-if="orderCount('swap') > 0" class="profile__order-badge">{{ orderCount('swap') }}</text>
+            </view>
+            <text class="profile__order-title">互换订单</text>
+            <text class="profile__order-desc">以物换物</text>
+          </view>
+          <view class="profile__order-item" @click="goOrders('monetary')">
+            <view class="profile__order-icon profile__order-icon--sale">
+              <ni-icon name="wallet" :size="20" state="active" />
+              <text v-if="orderCount('monetary') > 0" class="profile__order-badge">{{ orderCount('monetary') }}</text>
+            </view>
+            <text class="profile__order-title">货币订单</text>
+            <text class="profile__order-desc">担保交易</text>
+          </view>
+        </view>
+      </view>
+
+      <wallet-card :balance="wallet.balance" :escrow="wallet.escrow" @open="goWallet" />
+
+      <view class="profile__menu">
+        <view class="profile__menu-row" @click="goAuth">
+          <view class="profile__menu-icon profile__menu-icon--gold"><ni-icon name="shield" :size="17" state="gold" /></view>
+          <view class="profile__menu-copy">
+            <text class="profile__menu-title">认证中心</text>
+            <text class="profile__menu-desc">实名认证与业主证明</text>
+          </view>
+          <ni-icon name="chevron" :size="17" state="tertiary" />
+        </view>
+        <view class="profile__menu-row" @click="goFriends">
+          <view class="profile__menu-icon"><ni-icon name="friend" :size="17" state="active" /></view>
+          <view class="profile__menu-copy">
+            <text class="profile__menu-title">我的邻居</text>
+            <text class="profile__menu-desc">{{ socialStore.friends.length }} 位邻居好友 · 互相帮助</text>
+          </view>
+          <ni-icon name="chevron" :size="17" state="tertiary" />
+        </view>
+        <view class="profile__menu-row" @click="goFavorites">
+          <view class="profile__menu-icon profile__menu-icon--blue"><ni-icon name="heart" :size="17" state="blue" /></view>
+          <view class="profile__menu-copy">
+            <text class="profile__menu-title">收藏与足迹</text>
+            <text class="profile__menu-desc">收藏商品、服务与生活动态</text>
+          </view>
+          <ni-icon name="chevron" :size="17" state="tertiary" />
+        </view>
+        <view class="profile__menu-row" @click="goCommunity">
+          <view class="profile__menu-icon profile__menu-icon--green"><ni-icon name="home" :size="17" state="green" /></view>
+          <view class="profile__menu-copy">
+            <text class="profile__menu-title">我的小区</text>
+            <text class="profile__menu-desc">{{ communityName }} · 认证小区管理</text>
+          </view>
+          <ni-icon name="chevron" :size="17" state="tertiary" />
+        </view>
+        <view class="profile__menu-row" @click="goHelp">
+          <view class="profile__menu-icon profile__menu-icon--blue"><ni-icon name="message" :size="17" state="blue" /></view>
+          <view class="profile__menu-copy">
+            <text class="profile__menu-title">帮助与客服</text>
+            <text class="profile__menu-desc">常见问题 · 在线客服 · 意见反馈</text>
+          </view>
+          <ni-icon name="chevron" :size="17" state="tertiary" />
+        </view>
+        <view class="profile__menu-row profile__menu-row--last" @click="goSettings">
+          <view class="profile__menu-icon"><ni-icon name="settings" :size="17" state="active" /></view>
+          <view class="profile__menu-copy">
+            <text class="profile__menu-title">设置与隐私</text>
+            <text class="profile__menu-desc">通知、账号安全与长辈模式</text>
+          </view>
+          <ni-icon name="chevron" :size="17" state="tertiary" />
+        </view>
+      </view>
+
+      <text class="profile__slogan">真实邻居 · 安心流转</text>
+    </view>
+
+    <view class="profile__bottom-space" />
+    <ni-tab-bar active="profile" :unread="socialStore.unreadTotal" />
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="92" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import type { CreditInfo, MineStats, WalletSummary } from '../../models'
+import { useUserStore } from '../../stores/user.store'
+import { useItemStore } from '../../stores/item.store'
+import { useOrderStore } from '../../stores/order.store'
+import { useSocialStore } from '../../stores/social.store'
+import { useNotificationStore } from '../../stores/notification.store'
+import { useCommunityStore } from '../../stores/community.store'
+import { useToast } from '../../composables/useToast'
+import { itemService } from '../../services/item.service'
+import { payService } from '../../services/pay.service'
+
+const userStore = useUserStore()
+const itemStore = useItemStore()
+const orderStore = useOrderStore()
+const socialStore = useSocialStore()
+const notificationStore = useNotificationStore()
+const communityStore = useCommunityStore()
+const { toast, showToast } = useToast()
+
+const stats = ref<MineStats>({
+  publishCount: 0,
+  favoriteCount: 0,
+  historyCount: 0,
+  lifeCount: 0,
+  serviceCount: 0,
+  creditScore: 92,
+})
+const credit = ref<CreditInfo | null>(null)
+const wallet = ref<WalletSummary>({ balance: 0, escrow: 0, withdrawable: 0 })
+
+const displayName = computed(() => userStore.profile?.nickname || '温暖的邻居')
+const communityName = computed(() => communityStore.current?.name || userStore.profile?.communityName || '阳光花园小区')
+
+onShow(() => {
+  if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
+  loadData()
+})
+
+async function loadData(): Promise<void> {
+  await Promise.all([
+    userStore.refreshProfile().catch(() => undefined),
+    loadStats(),
+    loadOrders(),
+    socialStore.fetchFriends().catch(() => undefined),
+    socialStore.fetchConversations().catch(() => undefined),
+    notificationStore.fetchUnread().catch(() => undefined),
+    communityStore.fetchMine().catch(() => undefined),
+  ])
+}
+
+async function loadStats(): Promise<void> {
+  try {
+    stats.value = await itemService.getMineStats()
+  } catch {
+    stats.value = {
+      publishCount: 4,
+      favoriteCount: 1,
+      historyCount: 0,
+      lifeCount: 8,
+      serviceCount: 5,
+      creditScore: userStore.profile?.creditScore || 92,
+    }
+  }
+  try {
+    credit.value = await itemService.getCreditInfo()
+  } catch {
+    credit.value = null
+  }
+  try {
+    wallet.value = await payService.getWallet()
+  } catch {
+    wallet.value = { balance: 0, escrow: 0, withdrawable: 0 }
+  }
+}
+
+async function loadOrders(): Promise<void> {
+  await Promise.all([
+    orderStore.fetchOrders('free').catch(() => undefined),
+    orderStore.fetchOrders('swap').catch(() => undefined),
+    orderStore.fetchOrders('monetary').catch(() => undefined),
+  ])
+}
+
+function orderCount(type: 'free' | 'swap' | 'monetary'): number {
+  return orderStore.ordersByType[type]?.length ?? 0
+}
+
+function goEdit(): void {
+  uni.navigateTo({ url: '/pages/profile/edit' })
+}
+function goSettings(): void {
+  uni.navigateTo({ url: '/pages/settings/index' })
+}
+function goNotifications(): void {
+  uni.navigateTo({ url: '/pages/notifications/index' })
+}
+function goManage(): void {
+  uni.navigateTo({ url: '/pages/item/manage' })
+}
+function goFavorites(): void {
+  uni.navigateTo({ url: '/pages/mine/favorites' })
+}
+function goLife(): void {
+  uni.navigateTo({ url: '/pages/life/index' })
+}
+function goZoneService(): void {
+  uni.navigateTo({ url: '/pages/zone/index?zone=service' })
+}
+function goCredit(): void {
+  uni.navigateTo({ url: '/pages/mine/credit' })
+}
+function goOrders(type: string): void {
+  uni.navigateTo({ url: `/pages/orders/index?type=${type}` })
+}
+function goWallet(): void {
+  uni.navigateTo({ url: '/pages/pay/wallet' })
+}
+function goFriends(): void {
+  uni.navigateTo({ url: '/pages/social/friends' })
+}
+function goCommunity(): void {
+  uni.navigateTo({ url: '/pages/community/index' })
+}
+function goAuth(): void {
+  uni.navigateTo({ url: '/pages/auth/owner-proof' })
+}
+function goHelp(): void {
+  uni.navigateTo({ url: '/pages/settings/help' })
+}
+</script>
+
+<style scoped lang="scss">
+.profile {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.profile__hero {
+  min-height: 260px;
+  padding: 17px 17px 22px;
+  background-image: $ni-gradient-profile;
+  position: relative;
+  overflow: hidden;
+}
+.profile__glow {
+  position: absolute;
+  top: -60px;
+  right: -50px;
+  width: 170px;
+  height: 170px;
+  border-radius: 85px;
+  background-color: rgba(255, 179, 122, 0.22);
+}
+.profile__actions {
+  flex-direction: row;
+  justify-content: flex-end;
+  overflow: visible;
+}
+.profile__action {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(92, 73, 62, 0.06);
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+}
+.profile__action--gap {
+  margin-left: 8px;
+}
+.profile__action-badge {
+  position: absolute;
+  top: -4px;
+  right: -3px;
+}
+.profile__user {
+  margin-top: 15px;
+  flex-direction: row;
+  align-items: center;
+}
+.profile__avatar-wrap {
+  position: relative;
+}
+.profile__avatar-camera {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: $ni-color-primary;
+  border: 2px solid #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.profile__user-copy {
+  flex: 1;
+  margin-left: 12px;
+}
+.profile__name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.profile__name {
+  font-size: $ni-font-22;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 6px;
+}
+.profile__verified {
+  flex-direction: row;
+  align-items: center;
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 7px;
+  border-radius: 10px;
+  background-color: $ni-color-credit-bg;
+}
+.profile__verified-text {
+  margin-left: 2px;
+  font-size: $ni-font-10;
+  color: $ni-color-credit-deep;
+}
+.profile__user-meta {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.profile__credit {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-credit-deep;
+}
+.profile__stats {
+  margin-top: 25px;
+  flex-direction: row;
+  align-items: center;
+}
+.profile__stat {
+  flex: 1;
+  align-items: center;
+}
+.profile__stat-value {
+  font-size: $ni-font-18;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.profile__stat-label {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.profile__stat-divider {
+  width: 1px;
+  height: 24px;
+  background-color: rgba(120, 95, 75, 0.12);
+}
+.profile__body {
+  padding: 0 14px 10px;
+}
+.profile__content-card {
+  margin-top: -10px;
+  padding: 14px 4px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.profile__content-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 10px;
+  margin-bottom: 10px;
+}
+.profile__content-heading {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.profile__content-manage {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.profile__content-grid {
+  flex-direction: row;
+}
+.profile__content-item {
+  flex: 1;
+  align-items: center;
+}
+.profile__content-icon {
+  width: 39px;
+  height: 39px;
+  border-radius: 13px;
+  align-items: center;
+  justify-content: center;
+}
+.profile__content-icon--sale {
+  background-color: $ni-color-primary-bg;
+}
+.profile__content-icon--gift {
+  background-color: $ni-color-gift-bg;
+}
+.profile__content-icon--swap {
+  background-color: $ni-color-swap-bg;
+}
+.profile__content-icon--gold {
+  background-color: $ni-color-credit-bg;
+}
+.profile__content-title {
+  margin-top: 5px;
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.profile__content-count {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.profile__orders {
+  margin-top: 11px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.profile__orders-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.profile__orders-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.profile__orders-all {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.profile__orders-grid {
+  flex-direction: row;
+  margin-top: 12px;
+  overflow: visible;
+}
+.profile__order-item {
+  flex: 1;
+  align-items: center;
+  overflow: visible;
+}
+.profile__order-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+}
+.profile__order-icon--gift {
+  background-color: $ni-color-gift-bg;
+}
+.profile__order-icon--swap {
+  background-color: $ni-color-swap-bg;
+}
+.profile__order-icon--sale {
+  background-color: $ni-color-primary-bg;
+}
+.profile__order-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  border-radius: 8px;
+  background-color: $ni-color-primary;
+  border: 2px solid #ffffff;
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+}
+.profile__order-title {
+  margin-top: 5px;
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.profile__order-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.profile__menu {
+  margin-top: 11px;
+  padding: 0 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.profile__menu-row {
+  height: 63px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.profile__menu-row--last {
+  border-bottom: 0;
+}
+.profile__menu-icon {
+  width: 35px;
+  height: 35px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.profile__menu-icon--green {
+  background-color: $ni-color-gift-bg;
+}
+.profile__menu-icon--gold {
+  background-color: $ni-color-credit-bg;
+}
+.profile__menu-icon--blue {
+  background-color: $ni-color-swap-bg;
+}
+.profile__menu-copy {
+  flex: 1;
+}
+.profile__menu-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.profile__menu-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.profile__slogan {
+  margin-top: 22px;
+  margin-bottom: 22px;
+  font-size: $ni-font-10;
+  color: #b3aaa4;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.profile__bottom-space {
+  height: calc(92px + env(safe-area-inset-bottom));
+}
+</style>

@@ -1,0 +1,310 @@
+<template>
+  <scroll-view class="orders" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="orders__header">
+      <ni-status-bar />
+      <view class="orders__nav">
+        <view class="orders__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <view class="orders__nav-center">
+          <text class="orders__nav-title">我的订单</text>
+          <text class="orders__nav-sub">担保交易 · 赠与 · 互换</text>
+        </view>
+        <view class="orders__help" @click="goHelp">
+          <ni-icon name="message" :size="19" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <view class="orders__categories">
+      <view
+        v-for="category in categories"
+        :key="category.key"
+        class="orders__category"
+        :class="{ 'orders__category--active': activeType === category.key }"
+        @click="switchType(category.key)"
+      >
+        <view class="orders__category-icon" :class="`orders__category-icon--${category.key}`">
+          <ni-icon :name="category.icon" :size="18" :state="category.key === 'free' ? 'green' : category.key === 'swap' ? 'blue' : 'active'" />
+        </view>
+        <text class="orders__category-title" :class="{ 'orders__category-title--active': activeType === category.key }">{{ category.label }}</text>
+        <text class="orders__category-count">{{ countOf(category.key) }} 单</text>
+      </view>
+    </view>
+
+    <view class="orders__body">
+      <view class="orders__head">
+        <view class="orders__head-copy">
+          <text class="orders__head-title">{{ activeLabel }}</text>
+          <text class="orders__head-sub">订单状态会通过消息与通知实时同步</text>
+        </view>
+        <text class="orders__refresh" @click="refresh">刷新</text>
+      </view>
+
+      <view v-if="loading && orders.length === 0" class="orders__loading">
+        <ni-skeleton :rows="4" :avatar="false" />
+      </view>
+
+      <view v-else-if="orders.length === 0" class="orders__empty">
+        <ni-empty
+          :icon="activeIcon"
+          :title="`还没有${activeLabel}`"
+          desc="去首页看看邻居分享的好物吧"
+          action-text="去逛逛"
+          @action="goHome"
+        />
+      </view>
+
+      <view v-else class="orders__list">
+        <order-card
+          v-for="order in orders"
+          :key="order.id"
+          :order="order"
+          @contact="onContact(order)"
+          @detail="openDetail(order.id)"
+        />
+      </view>
+
+      <view class="orders__safety">
+        <ni-icon name="shield" :size="15" state="gold" />
+        <text class="orders__safety-text">担保交易请通过平台支付，线下验货满意后再确认放款；切勿私下转账。</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
+import type { Order } from '../../models'
+import { useOrderStore } from '../../stores/order.store'
+import { useToast } from '../../composables/useToast'
+import { useIM } from '../../composables/useIM'
+import { ORDER_CATEGORIES } from '../../config/constants'
+
+type OrderType = 'free' | 'swap' | 'monetary'
+
+const orderStore = useOrderStore()
+const { toast, showToast } = useToast()
+const { openChat } = useIM()
+
+const categories = ORDER_CATEGORIES
+const activeType = ref<OrderType>('monetary')
+const loading = computed(() => orderStore.loading)
+
+const orders = computed<Order[]>(() => orderStore.ordersByType[activeType.value] ?? [])
+const activeLabel = computed(() => categories.find((item) => item.key === activeType.value)?.label ?? '订单')
+const activeIcon = computed(() => categories.find((item) => item.key === activeType.value)?.icon ?? 'box')
+
+onLoad((options: any) => {
+  const requested = String(options?.type ?? 'monetary')
+  if (requested === 'free' || requested === 'swap' || requested === 'monetary') {
+    activeType.value = requested
+  }
+  loadAll()
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await loadAll()
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+async function loadAll(): Promise<void> {
+  await Promise.all([
+    orderStore.fetchOrders('free', true).catch(() => undefined),
+    orderStore.fetchOrders('swap', true).catch(() => undefined),
+    orderStore.fetchOrders('monetary', true).catch(() => undefined),
+  ])
+}
+
+async function refresh(): Promise<void> {
+  await loadAll()
+  showToast('订单已刷新')
+}
+
+function countOf(type: string): number {
+  return orderStore.ordersByType[type as OrderType]?.length ?? 0
+}
+
+function switchType(type: OrderType): void {
+  activeType.value = type
+}
+
+function openDetail(id: string): void {
+  uni.navigateTo({ url: `/pages/orders/detail?id=${id}` })
+}
+
+async function onContact(order: Order): Promise<void> {
+  const peerId = order.role === 'buyer' ? order.seller.id : order.buyer.id
+  try {
+    await openChat(peerId)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+function goHelp(): void {
+  uni.navigateTo({ url: '/pages/settings/help' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.orders {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.orders__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.orders__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.orders__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.orders__nav-center {
+  flex: 1;
+  align-items: center;
+}
+.orders__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.orders__nav-sub {
+  margin-top: 1px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.orders__help {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+}
+.orders__categories {
+  flex-direction: row;
+  height: 64px;
+  margin: 12px 14px 0;
+  padding: 4px;
+  border-radius: $ni-radius-17;
+  background-color: #eae6e2;
+}
+.orders__category {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+}
+.orders__category--active {
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(60, 45, 35, 0.09);
+}
+.orders__category-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  margin-right: 5px;
+}
+.orders__category-icon--free {
+  background-color: $ni-color-gift-bg;
+}
+.orders__category-icon--swap {
+  background-color: $ni-color-swap-bg;
+}
+.orders__category-icon--monetary {
+  background-color: $ni-color-primary-bg;
+}
+.orders__category-title {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.orders__category-title--active {
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.orders__category-count {
+  margin-left: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.orders__body {
+  padding: 14px;
+}
+.orders__head {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.orders__head-copy {
+  flex: 1;
+}
+.orders__head-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.orders__head-sub {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.orders__refresh {
+  font-size: $ni-font-8;
+  color: $ni-color-primary-dark;
+}
+.orders__loading {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.orders__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.orders__list {
+  margin-top: 2px;
+}
+.orders__safety {
+  margin-top: 4px;
+  padding: 11px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-12;
+  background-color: #fff8e8;
+}
+.orders__safety-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-service-deep;
+}
+</style>

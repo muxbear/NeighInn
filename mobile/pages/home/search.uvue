@@ -1,0 +1,613 @@
+<template>
+  <scroll-view class="search-page" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <ni-status-bar />
+    <view class="search-page__nav">
+      <view class="search-page__back" @click="goBack">
+        <ni-icon name="chevron" :size="20" state="dark" :rotate="180" />
+      </view>
+      <view class="search-page__bar">
+        <ni-search-bar
+          v-model="keyword"
+          placeholder="搜索物品、生活动态、互助服务"
+          show-filter
+          :autofocus="true"
+          @confirm="doSearch"
+          @filter="openFilter"
+        />
+      </view>
+      <text class="search-page__cancel" @click="doSearch">搜索</text>
+    </view>
+
+    <view v-if="!searched" class="search-page__discover">
+      <view class="search-page__section">
+        <view class="search-page__section-head">
+          <text class="search-page__section-title">搜索历史</text>
+          <view v-if="history.length" class="search-page__clear" @click="clearHistory">
+            <ni-icon name="alert" :size="12" state="tertiary" />
+            <text class="search-page__clear-text">清空</text>
+          </view>
+        </view>
+        <view v-if="history.length" class="search-page__chips">
+          <view v-for="item in history" :key="item" class="search-page__chip" @click="searchKeyword(item)">
+            <text class="search-page__chip-text">{{ item }}</text>
+          </view>
+        </view>
+        <text v-else class="search-page__empty-history">还没有搜索记录，试试下面的热门关键词</text>
+      </view>
+
+      <view class="search-page__section">
+        <view class="search-page__section-head">
+          <text class="search-page__section-title">大家都在搜</text>
+          <ni-icon name="spark" :size="14" state="active" />
+        </view>
+        <view class="search-page__chips">
+          <view
+            v-for="(item, index) in hotKeywords"
+            :key="item"
+            class="search-page__chip"
+            :class="{ 'search-page__chip--hot': index < 3 }"
+            @click="searchKeyword(item)"
+          >
+            <text class="search-page__chip-text" :class="{ 'search-page__chip-text--hot': index < 3 }">{{ item }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="search-page__tip-card">
+        <ni-icon name="shield" :size="18" state="green" />
+        <view class="search-page__tip-copy">
+          <text class="search-page__tip-title">只搜索本小区与邻近小区</text>
+          <text class="search-page__tip-desc">所有物品均需通过 AI 质检与人工复核，线下验货更安心。</text>
+        </view>
+      </view>
+    </view>
+
+    <view v-else class="search-page__results">
+      <view v-if="loading" class="search-page__loading">
+        <ni-skeleton :rows="4" :avatar="false" />
+      </view>
+
+      <template v-else>
+        <view class="search-page__result-head">
+          <text class="search-page__result-title">“{{ lastKeyword }}” 的搜索结果</text>
+          <text class="search-page__result-count">{{ resultCount }} 条</text>
+        </view>
+
+        <view v-if="resultCount === 0" class="search-page__empty">
+          <ni-empty
+            icon="search"
+            title="没有找到相关结果"
+            desc="换个关键词试试，或者发布一件闲置让邻居找到你"
+            action-text="清空筛选"
+            @action="resetFilter"
+          />
+        </view>
+
+        <template v-else>
+          <view v-if="filteredItems.length" class="search-page__block">
+            <view class="search-page__block-head">
+              <text class="search-page__block-title">物品</text>
+              <text class="search-page__block-count">{{ filteredItems.length }} 件</text>
+            </view>
+            <view class="search-page__grid">
+              <view
+                v-for="(item, index) in filteredItems"
+                :key="item.id"
+                class="search-page__cell"
+                :class="{ 'search-page__cell--gap': index % 2 === 0 }"
+              >
+                <product-card :item="item" show-community @tap="goItem(item.id)" @favorite="onFavorite(item)" />
+              </view>
+            </view>
+          </view>
+
+          <view v-if="result.lifePosts.length" class="search-page__block">
+            <view class="search-page__block-head">
+              <text class="search-page__block-title">生活动态</text>
+              <text class="search-page__block-count">{{ result.lifePosts.length }} 条</text>
+            </view>
+            <life-post-card
+              v-for="post in result.lifePosts"
+              :key="post.id"
+              :post="post"
+              @open="goLifeDetail(post.id)"
+              @like="onLifeLike(post)"
+              @comment="goLifeDetail(post.id)"
+            />
+          </view>
+
+          <view v-if="result.services.length" class="search-page__block">
+            <view class="search-page__block-head">
+              <text class="search-page__block-title">互助服务</text>
+              <text class="search-page__block-count">{{ result.services.length }} 条</text>
+            </view>
+            <view
+              v-for="service in result.services"
+              :key="service.id"
+              class="search-page__service"
+              @click="goZoneService"
+            >
+              <view class="search-page__service-icon">
+                <ni-icon :name="service.icon" :size="19" state="gold" />
+              </view>
+              <view class="search-page__service-copy">
+                <text class="search-page__service-title" :lines="1">{{ service.title }}</text>
+                <text class="search-page__service-meta">{{ service.kind }} · {{ service.category }} · {{ service.distance }}</text>
+              </view>
+              <ni-icon name="chevron" :size="15" state="tertiary" />
+            </view>
+          </view>
+        </template>
+      </template>
+    </view>
+
+    <ni-sheet v-model:visible="filterVisible" title="筛选结果" height="58vh">
+      <view class="search-filter">
+        <text class="search-filter__label">物品分类</text>
+        <view class="search-filter__chips">
+          <view
+            v-for="category in categories"
+            :key="category"
+            class="search-filter__chip"
+            :class="{ 'search-filter__chip--active': draftCategory === category }"
+            @click="draftCategory = category"
+          >
+            <text class="search-filter__chip-text" :class="{ 'search-filter__chip-text--active': draftCategory === category }">{{ category }}</text>
+          </view>
+        </view>
+        <text class="search-filter__label search-filter__label--gap">价格区间</text>
+        <view class="search-filter__chips">
+          <view
+            v-for="price in priceOptions"
+            :key="price.value"
+            class="search-filter__chip"
+            :class="{ 'search-filter__chip--active': draftPrice === price.value }"
+            @click="draftPrice = price.value"
+          >
+            <text class="search-filter__chip-text" :class="{ 'search-filter__chip-text--active': draftPrice === price.value }">{{ price.label }}</text>
+          </view>
+        </view>
+        <view class="search-filter__actions">
+          <view class="search-filter__reset" @click="resetDraft"><text class="search-filter__reset-text">重置</text></view>
+          <view class="search-filter__confirm" @click="applyFilter"><text class="search-filter__confirm-text">应用筛选</text></view>
+        </view>
+      </view>
+    </ni-sheet>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Item, LifePost, SearchResult } from '../../models'
+import { itemService } from '../../services/item.service'
+import { lifeService } from '../../services/life.service'
+import { useItemStore } from '../../stores/item.store'
+import { useToast } from '../../composables/useToast'
+import { ITEM_CATEGORIES } from '../../config/constants'
+
+const itemStore = useItemStore()
+const { toast, showToast } = useToast()
+
+const keyword = ref('')
+const lastKeyword = ref('')
+const searched = ref(false)
+const loading = ref(false)
+const history = ref<string[]>([])
+const hotKeywords = ref<string[]>([])
+const result = ref<SearchResult>({ keyword: '', items: [], lifePosts: [], services: [] })
+
+const categories = ['全部', ...ITEM_CATEGORIES]
+const priceOptions = [
+  { label: '不限', value: 'all' },
+  { label: '100 元以下', value: '0-100' },
+  { label: '100–500 元', value: '100-500' },
+  { label: '500 元以上', value: '500-999999' },
+]
+const filterVisible = ref(false)
+const activeCategory = ref('全部')
+const activePrice = ref('all')
+const draftCategory = ref('全部')
+const draftPrice = ref('all')
+
+const filteredItems = computed(() => {
+  return result.value.items.filter((item) => {
+    if (activeCategory.value !== '全部' && item.category !== activeCategory.value) return false
+    if (activePrice.value === 'all') return true
+    const [min, max] = activePrice.value.split('-').map((value) => Number(value))
+    const price = Number(item.price) || 0
+    return price >= min && price <= max
+  })
+})
+
+const resultCount = computed(
+  () => filteredItems.value.length + result.value.lifePosts.length + result.value.services.length,
+)
+
+onLoad((options: any) => {
+  loadDiscover()
+  if (options?.keyword) {
+    keyword.value = decodeURIComponent(options.keyword)
+    doSearch()
+  }
+})
+
+async function loadDiscover(): Promise<void> {
+  try {
+    const [historyList, hot] = await Promise.all([itemService.getSearchHistory(), itemService.getHotKeywords()])
+    history.value = historyList
+    hotKeywords.value = hot
+  } catch {
+    history.value = []
+    hotKeywords.value = []
+  }
+}
+
+async function doSearch(): Promise<void> {
+  const value = keyword.value.trim()
+  if (!value) {
+    showToast('请输入搜索关键词', 'alert')
+    return
+  }
+  searched.value = true
+  loading.value = true
+  lastKeyword.value = value
+  try {
+    result.value = await itemService.search(value)
+    history.value = await itemService.addSearchHistory(value)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '搜索失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+}
+
+function searchKeyword(value: string): void {
+  keyword.value = value
+  doSearch()
+}
+
+async function clearHistory(): Promise<void> {
+  try {
+    history.value = await itemService.clearSearchHistory()
+  } catch {
+    history.value = []
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+function goLifeDetail(id: string): void {
+  uni.navigateTo({ url: `/pages/life/detail?id=${id}` })
+}
+function goZoneService(): void {
+  uni.navigateTo({ url: '/pages/zone/index?zone=service' })
+}
+
+async function onFavorite(item: Item): Promise<void> {
+  try {
+    await itemStore.toggleFavorite(item)
+    showToast(item.favorite ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+async function onLifeLike(post: LifePost): Promise<void> {
+  const previous = Boolean(post.liked)
+  const next = !previous
+  post.liked = next
+  post.likes = Math.max(0, post.likes + (next ? 1 : -1))
+  try {
+    const res = await lifeService.toggleLike(post.id)
+    post.liked = res.liked
+    post.likes = res.likes
+  } catch {
+    post.liked = previous
+    post.likes = Math.max(0, post.likes + (previous ? 1 : -1))
+  }
+}
+
+function openFilter(): void {
+  draftCategory.value = activeCategory.value
+  draftPrice.value = activePrice.value
+  filterVisible.value = true
+}
+
+function resetDraft(): void {
+  draftCategory.value = '全部'
+  draftPrice.value = 'all'
+}
+
+function applyFilter(): void {
+  activeCategory.value = draftCategory.value
+  activePrice.value = draftPrice.value
+  filterVisible.value = false
+}
+
+function resetFilter(): void {
+  activeCategory.value = '全部'
+  activePrice.value = 'all'
+  draftCategory.value = '全部'
+  draftPrice.value = 'all'
+}
+</script>
+
+<style scoped lang="scss">
+.search-page {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.search-page__nav {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 8px;
+  padding-right: 12px;
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.search-page__back {
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+}
+.search-page__bar {
+  flex: 1;
+  margin-left: 2px;
+  margin-right: 10px;
+}
+.search-page__cancel {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.search-page__discover {
+  padding: 10px 16px 30px;
+}
+.search-page__section {
+  margin-bottom: 22px;
+}
+.search-page__section-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.search-page__section-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.search-page__clear {
+  flex-direction: row;
+  align-items: center;
+}
+.search-page__clear-text {
+  margin-left: 3px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.search-page__chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.search-page__chip {
+  height: 32px;
+  padding-left: 13px;
+  padding-right: 13px;
+  border-radius: 11px;
+  background-color: $ni-color-white;
+  border: 1px solid #eee8e2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.search-page__chip--hot {
+  background-color: $ni-color-primary-bg;
+  border-color: #ffe0cc;
+}
+.search-page__chip-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-secondary;
+}
+.search-page__chip-text--hot {
+  color: $ni-color-primary-dark;
+  font-weight: 600;
+}
+.search-page__empty-history {
+  margin-top: 10px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.search-page__tip-card {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 13px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-success-bg;
+}
+.search-page__tip-copy {
+  flex: 1;
+  margin-left: 8px;
+}
+.search-page__tip-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-success-deep;
+}
+.search-page__tip-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #6f8c7d;
+}
+.search-page__results {
+  padding: 6px 14px 30px;
+}
+.search-page__loading {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+  margin-top: 8px;
+}
+.search-page__result-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.search-page__result-title {
+  flex: 1;
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.search-page__result-count {
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.search-page__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.search-page__block {
+  margin-bottom: 18px;
+}
+.search-page__block-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+.search-page__block-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.search-page__block-count {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.search-page__grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.search-page__cell {
+  width: calc((100% - 12px) / 2);
+  margin-bottom: 12px;
+}
+.search-page__cell--gap {
+  margin-right: 12px;
+}
+.search-page__service {
+  flex-direction: row;
+  align-items: center;
+  min-height: 72px;
+  padding: 10px;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  border: $ni-border-card;
+  margin-bottom: 8px;
+}
+.search-page__service-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  background-color: $ni-color-service-bg-2;
+  align-items: center;
+  justify-content: center;
+}
+.search-page__service-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.search-page__service-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.search-page__service-meta {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.search-filter {
+  padding-bottom: 20px;
+}
+.search-filter__label {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.search-filter__label--gap {
+  margin-top: 17px;
+}
+.search-filter__chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.search-filter__chip {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.search-filter__chip--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.search-filter__chip-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.search-filter__chip-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.search-filter__actions {
+  flex-direction: row;
+  margin-top: 18px;
+}
+.search-filter__reset {
+  width: 96px;
+  height: 46px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.search-filter__reset-text {
+  font-size: $ni-font-12;
+  color: $ni-color-text-secondary;
+}
+.search-filter__confirm {
+  flex: 1;
+  height: 46px;
+  border-radius: 13px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.search-filter__confirm-text {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: #ffffff;
+}
+</style>

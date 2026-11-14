@@ -1,0 +1,56 @@
+<template>
+  <view class="ni-price">
+    <text v-if="type === 'free'" class="ni-price__free" :style="{ fontSize: freeSize + 'px' }">免费赠送</text>
+    <text v-else-if="type === 'swap'" class="ni-price__swap" :style="{ fontSize: freeSize + 'px' }">互换</text>
+    <template v-else>
+      <text class="ni-price__symbol" :style="{ fontSize: symbolSize + 'px' }">¥</text>
+      <text class="ni-price__value" :style="{ fontSize: valueSize + 'px' }">{{ display }}</text>
+    </template>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { formatPrice } from '../../utils/formatter'
+
+const props = withDefaults(
+  defineProps<{
+    value: number | string
+    type?: 'sale' | 'free' | 'swap'
+    size?: 'md' | 'lg' | 'xl'
+  }>(),
+  {
+    type: 'sale',
+    size: 'lg',
+  },
+)
+
+const display = computed(() => formatPrice(props.value, false))
+const symbolSize = computed(() => (props.size === 'md' ? 11 : props.size === 'xl' ? 15 : 15))
+const valueSize = computed(() => (props.size === 'md' ? 19 : props.size === 'xl' ? 29 : 19))
+const freeSize = computed(() => (props.size === 'md' ? 13 : props.size === 'xl' ? 18 : 14))
+</script>
+
+<style scoped lang="scss">
+.ni-price {
+  flex-direction: row;
+  align-items: baseline;
+}
+.ni-price__symbol {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.ni-price__value {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+  margin-left: 1px;
+}
+.ni-price__free {
+  color: $ni-color-gift;
+  font-weight: 700;
+}
+.ni-price__swap {
+  color: $ni-color-swap;
+  font-weight: 700;
+}
+</style>

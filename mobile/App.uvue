@@ -1,0 +1,61 @@
+<script setup lang="ts">
+import { onLaunch, onShow, onHide, onError } from '@dcloudio/uni-app'
+import { useAppStore } from './stores/app.store'
+import { useUserStore } from './stores/user.store'
+import { useNotificationStore } from './stores/notification.store'
+import { useSocialStore } from './stores/social.store'
+import { useOrderStore } from './stores/order.store'
+import { wsService } from './services/ws.service'
+import { logger } from './utils/logger'
+
+onLaunch(() => {
+  logger.info('App', 'launch', { ts: Date.now() })
+  const app = useAppStore()
+  app.bootstrap()
+
+  const user = useUserStore()
+  user.hydrate()
+  if (user.isLoggedIn) {
+    user.refreshProfile()
+    useNotificationStore().fetchUnread()
+    wsService.connect()
+  } else {
+    // 未登录默认进入登录页；生产环境可在登录成功后恢复分享深链
+    setTimeout(() => {
+      uni.reLaunch({ url: '/pages/auth/login' })
+    }, 0)
+  }
+
+  // WebSocket 下行统一在 App 分发，页面不直连长连接
+  const social = useSocialStore()
+  const orders = useOrderStore()
+  wsService.onMessage((action, payload) => {
+    if (action === 'MSG_PUSH' && payload && payload.message) {
+      social.applyIncomingMessage(payload.message)
+      return
+    }
+    if (action === 'ORDER_EVENT' && payload && payload.orderId) {
+      if (orders.currentOrder && orders.currentOrder.id === payload.orderId) {
+        orders.fetchDetail(payload.orderId).catch(() => undefined)
+      }
+    }
+  })
+})
+
+onShow(() => {
+  wsService.resume()
+})
+
+onHide(() => {
+  wsService.pause()
+})
+
+onError((err) => {
+  logger.error('App', 'uncaught', err)
+})
+</script>
+
+<style lang="scss">
+@import './styles/reset.scss';
+@import './styles/typography.scss';
+</style>

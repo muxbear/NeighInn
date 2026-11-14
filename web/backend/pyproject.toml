@@ -1,0 +1,39 @@
+[project]
+name = "neighinn-admin-api"
+version = "0.1.0"
+description = "Neighbor's Inn community operations admin API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "psycopg[binary]>=3.2.3",
+    "pydantic-settings>=2.6.1",
+    "argon2-cffi>=23.1.0",
+    "pyotp>=2.9.0",
+    "minio>=7.2.10",
+    "redis>=5.2.1",
+    "python-multipart>=0.0.17",
+    "python-dateutil>=2.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.1",
+    "ruff>=0.8.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]

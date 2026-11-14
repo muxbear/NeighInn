@@ -1,0 +1,383 @@
+<template>
+  <scroll-view class="cashier" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="cashier__header">
+      <ni-status-bar />
+      <view class="cashier__nav">
+        <view class="cashier__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="cashier__nav-title">收银台</text>
+        <view class="cashier__nav-button" @click="goHelp">
+          <ni-icon name="message" :size="18" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <view v-if="order" class="cashier__content">
+      <view class="cashier__amount-card">
+        <text class="cashier__amount-label">需支付金额</text>
+        <view class="cashier__amount-row">
+          <text class="cashier__amount-symbol">¥</text>
+          <text class="cashier__amount-value">{{ order.amount }}</text>
+        </view>
+        <text class="cashier__item-name" :lines="1">{{ order.item.title }}</text>
+        <view class="cashier__escrow">
+          <ni-icon name="shield" :size="12" state="green" />
+          <text class="cashier__escrow-text">平台担保交易 · 验货满意后放款</text>
+        </view>
+        <view class="cashier__countdown">
+          <ni-icon name="clock" :size="12" state="white" />
+          <text class="cashier__countdown-text">请在 {{ countdownText }} 内完成支付</text>
+        </view>
+      </view>
+
+      <view class="cashier__card">
+        <text class="cashier__card-title">选择支付方式</text>
+        <view
+          v-for="method in payMethods"
+          :key="method.key"
+          class="cashier__method"
+          :class="{ 'cashier__method--last': method.key === payMethods[payMethods.length - 1].key }"
+          @click="selectedMethod = method.key"
+        >
+          <view class="cashier__method-icon" :class="`cashier__method-icon--${method.key}`">
+            <ni-icon :name="method.icon" :size="20" :state="method.key === 'wechat' ? 'white' : 'blue'" />
+          </view>
+          <view class="cashier__method-copy">
+            <text class="cashier__method-title">{{ method.label }}</text>
+            <text class="cashier__method-desc">{{ method.desc }}</text>
+          </view>
+          <view class="cashier__radio" :class="{ 'cashier__radio--active': selectedMethod === method.key }">
+            <view v-if="selectedMethod === method.key" class="cashier__radio-dot" />
+          </view>
+        </view>
+      </view>
+
+      <view class="cashier__card">
+        <text class="cashier__card-title">服务保障</text>
+        <view class="cashier__guarantee">
+          <view class="cashier__guarantee-icon"><ni-icon name="check" :size="12" state="green" /></view>
+          <text class="cashier__guarantee-text">货款由平台托管，卖家无法直接提走</text>
+        </view>
+        <view class="cashier__guarantee">
+          <view class="cashier__guarantee-icon"><ni-icon name="check" :size="12" state="green" /></view>
+          <text class="cashier__guarantee-text">线下验货满意后，再确认平台放款</text>
+        </view>
+        <view class="cashier__guarantee cashier__guarantee--last">
+          <view class="cashier__guarantee-icon"><ni-icon name="check" :size="12" state="green" /></view>
+          <text class="cashier__guarantee-text">验货不满意可申请退款，平台介入调解</text>
+        </view>
+      </view>
+
+      <ni-button type="primary" size="xl" block :loading="paying" @tap="pay">
+        确认支付 ¥{{ order.amount }}
+      </ni-button>
+
+      <view class="cashier__note">
+        <ni-icon name="lock" :size="12" state="tertiary" />
+        <text class="cashier__note-text">支付信息全链路加密；平台不会以任何理由要求私下转账。</text>
+      </view>
+    </view>
+
+    <view v-else-if="loading" class="cashier__loading">
+      <ni-skeleton :rows="4" :avatar="false" />
+    </view>
+
+    <view v-else class="cashier__error">
+      <ni-empty icon="wallet" title="订单不存在" desc="订单可能已取消或链接失效" action-text="返回订单" @action="goOrders" />
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, onUnmounted, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Order } from '../../models'
+import { useOrderStore } from '../../stores/order.store'
+import { useAppStore } from '../../stores/app.store'
+import { usePay } from '../../composables/usePay'
+import { useToast } from '../../composables/useToast'
+import { formatCountdown } from '../../utils/formatter'
+
+const orderStore = useOrderStore()
+const appStore = useAppStore()
+const { paying, payOrder } = usePay()
+const { toast, showToast } = useToast()
+
+const orderId = ref('')
+const order = ref<Order | null>(null)
+const loading = ref(true)
+const selectedMethod = ref<'wechat' | 'alipay'>('wechat')
+const expireAt = ref(Date.now() + 30 * 60 * 1000)
+const remaining = ref(30 * 60 * 1000)
+let timer: any = null
+
+const payMethods = [
+  { key: 'wechat' as const, label: '微信支付', desc: '推荐使用，安全快捷', icon: 'wechat' },
+  { key: 'alipay' as const, label: '支付宝', desc: '支持花呗与余额', icon: 'wallet' },
+]
+
+const countdownText = computed(() => formatCountdown(remaining.value))
+
+onLoad(async (options: any) => {
+  orderId.value = String(options?.orderId ?? '')
+  if (!orderId.value) {
+    loading.value = false
+    return
+  }
+  expireAt.value = Date.now() + (appStore.config.payTimeoutMinutes || 30) * 60 * 1000
+  startCountdown()
+  try {
+    order.value = await orderStore.fetchDetail(orderId.value)
+    if (order.value.status !== 'PENDING_PAYMENT') {
+      showToast('该订单当前无需支付')
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+})
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
+
+function startCountdown(): void {
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    remaining.value = Math.max(0, expireAt.value - Date.now())
+    if (remaining.value <= 0) {
+      clearInterval(timer)
+      timer = null
+    }
+  }, 1000)
+}
+
+async function pay(): Promise<void> {
+  if (!order.value || paying.value) return
+  if (remaining.value <= 0) {
+    showToast('支付时间已结束，请重新下单', 'alert')
+    return
+  }
+  const success = await payOrder(order.value.id, selectedMethod.value)
+  if (success) {
+    setTimeout(() => {
+      uni.redirectTo({ url: `/pages/trade/appointment?orderId=${order.value?.id}` })
+    }, 600)
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.redirectTo({ url: '/pages/orders/index' })
+}
+function goOrders(): void {
+  uni.redirectTo({ url: '/pages/orders/index' })
+}
+function goHelp(): void {
+  uni.navigateTo({ url: '/pages/settings/help' })
+}
+</script>
+
+<style scoped lang="scss">
+.cashier {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.cashier__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.cashier__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.cashier__nav-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+}
+.cashier__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.cashier__content {
+  padding: 14px;
+}
+.cashier__amount-card {
+  padding: 18px;
+  border-radius: $ni-radius-18;
+  background-image: linear-gradient(150deg, #ff8d50 0%, #ffb066 100%);
+  box-shadow: 0 8px 24px rgba(255, 122, 61, 0.22);
+  position: relative;
+  overflow: hidden;
+}
+.cashier__amount-label {
+  font-size: $ni-font-10;
+  color: rgba(255, 255, 255, 0.86);
+}
+.cashier__amount-row {
+  flex-direction: row;
+  align-items: baseline;
+  margin-top: 3px;
+}
+.cashier__amount-symbol {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: #ffffff;
+}
+.cashier__amount-value {
+  margin-left: 2px;
+  font-size: $ni-font-29;
+  font-weight: 700;
+  color: #ffffff;
+}
+.cashier__item-name {
+  margin-top: 5px;
+  font-size: $ni-font-14;
+  color: rgba(255, 255, 255, 0.92);
+}
+.cashier__escrow {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 9px;
+  align-self: flex-start;
+  height: 22px;
+  padding-left: 7px;
+  padding-right: 8px;
+  border-radius: 11px;
+  background-color: #ffffff;
+}
+.cashier__escrow-text {
+  margin-left: 3px;
+  font-size: 7px;
+  font-weight: 600;
+  color: $ni-color-gift-deep;
+}
+.cashier__countdown {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 10px;
+}
+.cashier__countdown-text {
+  margin-left: 3px;
+  font-size: $ni-font-9;
+  color: rgba(255, 255, 255, 0.88);
+}
+.cashier__card {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.cashier__card-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.cashier__method {
+  height: 56px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.cashier__method--last {
+  border-bottom: 0;
+}
+.cashier__method-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  align-items: center;
+  justify-content: center;
+}
+.cashier__method-icon--wechat {
+  background-color: #07c160;
+}
+.cashier__method-icon--alipay {
+  background-color: $ni-color-swap-bg;
+}
+.cashier__method-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.cashier__method-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.cashier__method-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.cashier__radio {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1.5px solid #d5c9c1;
+  align-items: center;
+  justify-content: center;
+}
+.cashier__radio--active {
+  border-color: $ni-color-primary;
+}
+.cashier__radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background-color: $ni-color-primary;
+}
+.cashier__guarantee {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 9px;
+}
+.cashier__guarantee--last {
+  margin-bottom: 2px;
+}
+.cashier__guarantee-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background-color: $ni-color-success-bg;
+  align-items: center;
+  justify-content: center;
+}
+.cashier__guarantee-text {
+  margin-left: 7px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.cashier__note {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+}
+.cashier__note-text {
+  margin-left: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.cashier__loading {
+  padding: 20px 14px;
+}
+.cashier__error {
+  padding-top: 40px;
+}
+</style>

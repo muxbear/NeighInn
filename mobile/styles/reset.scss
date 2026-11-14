@@ -1,0 +1,116 @@
+@import "./tokens.scss";
+
+/**
+ * 全局基础样式与布局工具类。
+ * ucss 约束：仅 class 选择器；不依赖标签选择器与伪元素。
+ * 说明：所有文字样式必须落在 <text> 上，工具类只负责布局与容器。
+ */
+
+.ni-page {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+
+.ni-page--white {
+  flex: 1;
+  background-color: $ni-color-card;
+}
+
+.ni-row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.ni-row-top {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.ni-row-end {
+  flex-direction: row;
+  align-items: flex-end;
+}
+
+.ni-col {
+  flex-direction: column;
+}
+
+.ni-center {
+  align-items: center;
+  justify-content: center;
+}
+
+.ni-between {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ni-fill {
+  flex: 1;
+}
+
+.ni-wrap {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.ni-relative {
+  position: relative;
+}
+
+.ni-absolute {
+  position: absolute;
+}
+
+.ni-hidden {
+  display: none;
+}
+
+.ni-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ni-tap {
+  transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+.ni-tap-pressed {
+  transform: scale(0.985);
+  opacity: 0.92;
+}
+
+.ni-tap-soft-pressed {
+  transform: scale(0.96);
+}
+
+.ni-ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ni-divider {
+  height: 1px;
+  background-color: $ni-color-divider-light;
+}
+
+.ni-spacer {
+  flex: 1;
+}
+
+.ni-press-transition {
+  transition: transform 100ms ease-out;
+}
+
+// 通用页面底部为 TabBar 预留空间（92px + 安全区）
+.ni-page-with-tabbar {
+  padding-bottom: calc(#{$ni-page-bottom-reserve} + env(safe-area-inset-bottom));
+}
+
+// 通用吸顶容器（top 由页面按 statusBarHeight 内联覆盖）
+.ni-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}

@@ -1,0 +1,94 @@
+<template>
+  <view class="travel">
+    <view class="travel__head">
+      <ni-icon name="pin" :size="15" state="active" />
+      <text class="travel__title">{{ distance }} · {{ place }}</text>
+    </view>
+    <view class="travel__grid">
+      <view class="travel__cell">
+        <ni-icon name="walk" :size="22" state="green" />
+        <text class="travel__value">{{ walkText }}</text>
+        <text class="travel__label">步行</text>
+      </view>
+      <view class="travel__divider" />
+      <view class="travel__cell">
+        <ni-icon name="bike" :size="22" state="blue" />
+        <text class="travel__value">{{ bikeText }}</text>
+        <text class="travel__label">骑行</text>
+      </view>
+      <view class="travel__divider" />
+      <view class="travel__cell">
+        <ni-icon name="car" :size="22" state="gold" />
+        <text class="travel__value">{{ carText }}</text>
+        <text class="travel__label">驾车</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    distance: string
+    place?: string
+    walk: string
+    bike: string
+    car: string
+  }>(),
+  { place: '本小区' },
+)
+
+function strip(value: string, prefix: string): string {
+  const text = String(value || '')
+  return text.indexOf(prefix) === 0 ? text.slice(prefix.length) : text
+}
+
+const walkText = computed(() => strip(props.walk, '步行'))
+const bikeText = computed(() => strip(props.bike, '骑行'))
+const carText = computed(() => strip(props.car, '驾车'))
+</script>
+
+<style scoped lang="scss">
+.travel {
+  padding: 12px;
+  border-radius: $ni-radius-14;
+  background-color: #fbf8f5;
+}
+.travel__head {
+  flex-direction: row;
+  align-items: center;
+}
+.travel__title {
+  margin-left: 4px;
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-secondary;
+}
+.travel__grid {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 6px;
+}
+.travel__cell {
+  flex: 1;
+  align-items: center;
+}
+.travel__value {
+  margin-top: 3px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.travel__label {
+  margin-top: 1px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.travel__divider {
+  width: 1px;
+  height: 34px;
+  background-color: #eee7e0;
+}
+</style>

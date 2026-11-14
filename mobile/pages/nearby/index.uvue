@@ -1,0 +1,627 @@
+<template>
+  <scroll-view class="nearby" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="nearby__header">
+      <ni-status-bar />
+      <view class="nearby__head-row">
+        <view class="nearby__head-copy">
+          <text class="nearby__eyebrow">发现附近好物</text>
+          <view class="nearby__title-row">
+            <text class="nearby__title">附近</text>
+            <view class="nearby__title-dot" />
+          </view>
+        </view>
+        <view class="nearby__head-button" @click="goSearch">
+          <ni-icon name="search" :size="21" state="secondary" />
+        </view>
+      </view>
+
+      <view class="nearby__location" @click="goCommunity">
+        <ni-icon name="pin" :size="16" state="active" />
+        <text class="nearby__location-text">{{ communityName }} · {{ radiusText }}内</text>
+        <ni-icon name="chevron" :size="14" state="tertiary" />
+      </view>
+
+      <view class="nearby__summary">
+        <view class="nearby__radar">
+          <view class="nearby__radar-ring nearby__radar-ring--outer" />
+          <view class="nearby__radar-ring nearby__radar-ring--middle" />
+          <view class="nearby__radar-ring nearby__radar-ring--inner" />
+          <view class="nearby__radar-dot" />
+          <view class="nearby__radar-dot nearby__radar-dot--small" />
+        </view>
+        <view class="nearby__summary-copy">
+          <text class="nearby__summary-title">{{ allItems.length }} 件好物就在附近</text>
+          <text class="nearby__summary-sub">来自 {{ communityCount }} 个邻近小区 · 距离由服务端计算</text>
+        </view>
+        <view class="nearby__filter" @click="openFilter">
+          <ni-icon name="sliders" :size="14" state="green" />
+          <text class="nearby__filter-text">筛选</text>
+        </view>
+      </view>
+    </view>
+
+    <scroll-view class="nearby__categories-scroll" scroll-x :show-scrollbar="false">
+      <view class="nearby__categories">
+        <view
+          v-for="category in categories"
+          :key="category"
+          class="nearby__category"
+          @click="selectCategory(category)"
+        >
+          <text class="nearby__category-text" :class="{ 'nearby__category-text--active': activeCategory === category }">
+            {{ category }}
+          </text>
+          <view v-if="activeCategory === category" class="nearby__category-line" />
+        </view>
+      </view>
+    </scroll-view>
+
+    <view class="nearby__feed">
+      <view class="nearby__feed-head">
+        <text class="nearby__feed-title">邻居们正在分享</text>
+        <view class="nearby__feed-right">
+          <view class="nearby__nearby-pill">
+            <ni-icon name="shield" :size="10" state="active" />
+            <text class="nearby__nearby-pill-text">邻近小区</text>
+          </view>
+          <text class="nearby__sort" @click="openFilter">{{ activeSort }}</text>
+        </view>
+      </view>
+
+      <view v-if="loading && displayItems.length === 0" class="nearby__loading">
+        <ni-skeleton :rows="4" :avatar="false" />
+      </view>
+
+      <view v-else-if="displayItems.length === 0" class="nearby__empty">
+        <ni-empty icon="pin" title="附近暂时没有合适的好物" desc="换个分类或扩大范围看看" action-text="重置筛选" @action="resetFilter" />
+      </view>
+
+      <view v-else class="nearby__grid">
+        <view
+          v-for="(item, index) in displayItems"
+          :key="item.id"
+          class="nearby__cell"
+          :class="{ 'nearby__cell--gap': index % 2 === 0 }"
+        >
+          <product-card
+            :item="item"
+            show-community
+            @tap="goItem(item.id)"
+            @favorite="onFavorite(item)"
+          />
+        </view>
+      </view>
+
+      <view class="nearby__end">
+        <view class="nearby__end-line" />
+        <text class="nearby__end-text">{{ itemStore.nearbyHasMore ? '继续向下滑动，加载更多' : '附近的好物都在这里了' }}</text>
+        <view class="nearby__end-line" />
+      </view>
+    </view>
+
+    <view class="nearby__bottom-space" />
+    <ni-tab-bar active="nearby" :unread="socialStore.unreadTotal" />
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="92" />
+
+    <ni-sheet v-model:visible="filterVisible" title="筛选与排序" height="62vh">
+      <view class="filter">
+        <text class="filter__label">物品分类</text>
+        <view class="filter__chips">
+          <view
+            v-for="category in categories"
+            :key="category"
+            class="filter__chip"
+            :class="{ 'filter__chip--active': draftCategory === category }"
+            @click="draftCategory = category"
+          >
+            <text class="filter__chip-text" :class="{ 'filter__chip-text--active': draftCategory === category }">{{ category }}</text>
+          </view>
+        </view>
+
+        <text class="filter__label filter__label--gap">排序方式</text>
+        <view class="filter__chips">
+          <view
+            v-for="sort in sortOptions"
+            :key="sort"
+            class="filter__chip"
+            :class="{ 'filter__chip--active': draftSort === sort }"
+            @click="draftSort = sort"
+          >
+            <text class="filter__chip-text" :class="{ 'filter__chip-text--active': draftSort === sort }">{{ sort }}</text>
+          </view>
+        </view>
+
+        <text class="filter__label filter__label--gap">最大距离</text>
+        <view class="filter__chips">
+          <view
+            v-for="distance in distanceOptions"
+            :key="distance.value"
+            class="filter__chip"
+            :class="{ 'filter__chip--active': draftDistance === distance.value }"
+            @click="draftDistance = distance.value"
+          >
+            <text class="filter__chip-text" :class="{ 'filter__chip-text--active': draftDistance === distance.value }">{{ distance.label }}</text>
+          </view>
+        </view>
+
+        <view class="filter__actions">
+          <view class="filter__reset" @click="resetDraft">
+            <text class="filter__reset-text">重置</text>
+          </view>
+          <view class="filter__confirm" @click="applyFilter">
+            <text class="filter__confirm-text">查看结果（{{ previewCount }}）</text>
+          </view>
+        </view>
+      </view>
+    </ni-sheet>
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
+import type { Item } from '../../models'
+import { useItemStore } from '../../stores/item.store'
+import { useSocialStore } from '../../stores/social.store'
+import { useCommunityStore } from '../../stores/community.store'
+import { useAppStore } from '../../stores/app.store'
+import { useToast } from '../../composables/useToast'
+import { ITEM_CATEGORIES, SORT_OPTIONS } from '../../config/constants'
+
+const itemStore = useItemStore()
+const socialStore = useSocialStore()
+const communityStore = useCommunityStore()
+const appStore = useAppStore()
+const { toast, showToast } = useToast()
+
+const categories = ['全部', ...ITEM_CATEGORIES]
+const sortOptions = SORT_OPTIONS
+const distanceOptions = [
+  { label: '1km 内', value: 1 },
+  { label: '3km 内', value: 3 },
+  { label: '5km 内', value: 5 },
+]
+
+const activeCategory = ref('全部')
+const activeSort = ref('最新发布')
+const activeDistance = ref(3)
+
+const filterVisible = ref(false)
+const draftCategory = ref('全部')
+const draftSort = ref('最新发布')
+const draftDistance = ref(3)
+
+const communityName = computed(() => communityStore.current?.name ?? '阳光花园小区')
+const radiusText = computed(() => `${appStore.config.nearbyRadiusKm}km`)
+const allItems = computed(() => itemStore.nearbyItems)
+const loading = computed(() => itemStore.nearbyLoading)
+const communityCount = computed(() => {
+  const names = new Set(allItems.value.map((item) => item.community).filter(Boolean))
+  return names.size || 4
+})
+
+const displayItems = computed(() => {
+  let list = [...allItems.value]
+  if (activeCategory.value !== '全部') {
+    list = list.filter((item) => item.category === activeCategory.value)
+  }
+  list = list.filter((item) => distanceMeters(item) <= activeDistance.value * 1000)
+  if (activeSort.value === '价格从低到高') {
+    list.sort((a, b) => Number(a.price) - Number(b.price))
+  } else if (activeSort.value === '离我最近') {
+    list.sort((a, b) => distanceMeters(a) - distanceMeters(b))
+  }
+  return list
+})
+
+const previewCount = computed(() => {
+  let list = [...allItems.value]
+  if (draftCategory.value !== '全部') list = list.filter((item) => item.category === draftCategory.value)
+  return list.filter((item) => distanceMeters(item) <= draftDistance.value * 1000).length
+})
+
+function distanceMeters(item: Item): number {
+  const text = String(item.distance ?? '')
+  const value = Number.parseFloat(text.replace(/[^\d.]/g, '')) || 0
+  return text.indexOf('km') >= 0 ? value * 1000 : value
+}
+
+onLoad(() => {
+  itemStore.fetchNearby(true).catch(() => undefined)
+})
+
+onShow(() => {
+  if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
+  socialStore.fetchConversations().catch(() => undefined)
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await itemStore.fetchNearby(true)
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+onReachBottom(() => {
+  if (itemStore.nearbyHasMore && !itemStore.nearbyLoading) {
+    itemStore.fetchNearby(false).catch(() => undefined)
+  }
+})
+
+function selectCategory(category: string): void {
+  activeCategory.value = category
+}
+
+function openFilter(): void {
+  draftCategory.value = activeCategory.value
+  draftSort.value = activeSort.value
+  draftDistance.value = activeDistance.value
+  filterVisible.value = true
+}
+
+function resetDraft(): void {
+  draftCategory.value = '全部'
+  draftSort.value = '最新发布'
+  draftDistance.value = 3
+}
+
+function resetFilter(): void {
+  activeCategory.value = '全部'
+  activeSort.value = '最新发布'
+  activeDistance.value = 3
+  draftCategory.value = '全部'
+  draftSort.value = '最新发布'
+  draftDistance.value = 3
+}
+
+function applyFilter(): void {
+  activeCategory.value = draftCategory.value
+  activeSort.value = draftSort.value
+  activeDistance.value = draftDistance.value
+  filterVisible.value = false
+}
+
+function goSearch(): void {
+  uni.navigateTo({ url: '/pages/home/search' })
+}
+function goCommunity(): void {
+  uni.navigateTo({ url: '/pages/community/index' })
+}
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+
+async function onFavorite(item: Item): Promise<void> {
+  try {
+    await itemStore.toggleFavorite(item)
+    showToast(item.favorite ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.nearby {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.nearby__header {
+  padding-top: 0;
+  padding-left: 16px;
+  padding-right: 16px;
+  padding-bottom: 8px;
+  background-image: linear-gradient(160deg, #f5fcf8 0%, #fbfdfb 60%, #faf8f5 100%);
+}
+.nearby__head-row {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-top: 16px;
+}
+.nearby__head-copy {
+  flex: 1;
+}
+.nearby__eyebrow {
+  font-size: $ni-font-12;
+  color: #9a674d;
+  letter-spacing: 1px;
+}
+.nearby__title-row {
+  flex-direction: row;
+  align-items: flex-end;
+  margin-top: 3px;
+}
+.nearby__title {
+  font-size: $ni-font-27;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.5px;
+}
+.nearby__title-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background-color: $ni-color-primary;
+  margin-left: 6px;
+  margin-bottom: 8px;
+}
+.nearby__head-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(92, 73, 62, 0.06);
+  align-items: center;
+  justify-content: center;
+}
+.nearby__location {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 14px;
+}
+.nearby__location-text {
+  margin-left: 4px;
+  margin-right: 3px;
+  font-size: $ni-font-14;
+  font-weight: 600;
+  color: #4b372b;
+}
+.nearby__summary {
+  margin-top: 16px;
+  padding: 14px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-image: linear-gradient(135deg, #eaf8f0 0%, #f7fcf9 100%);
+}
+.nearby__radar {
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.nearby__radar-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(107, 184, 138, 0.35);
+}
+.nearby__radar-ring--outer {
+  width: 40px;
+  height: 40px;
+}
+.nearby__radar-ring--middle {
+  width: 27px;
+  height: 27px;
+}
+.nearby__radar-ring--inner {
+  width: 14px;
+  height: 14px;
+}
+.nearby__radar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background-color: $ni-color-primary;
+}
+.nearby__radar-dot--small {
+  position: absolute;
+  top: 8px;
+  right: 7px;
+  width: 5px;
+  height: 5px;
+  background-color: $ni-color-sage;
+}
+.nearby__summary-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.nearby__summary-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: #335a44;
+}
+.nearby__summary-sub {
+  margin-top: 3px;
+  font-size: $ni-font-11;
+  color: #668071;
+}
+.nearby__filter {
+  flex-direction: row;
+  align-items: center;
+  height: 30px;
+  padding-left: 9px;
+  padding-right: 9px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.8);
+}
+.nearby__filter-text {
+  margin-left: 3px;
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: #47735a;
+}
+.nearby__categories-scroll {
+  height: 52px;
+  background-color: $ni-color-white;
+}
+.nearby__categories {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 16px;
+  padding-right: 16px;
+  height: 52px;
+}
+.nearby__category {
+  align-items: center;
+  margin-right: 25px;
+  height: 52px;
+  justify-content: center;
+}
+.nearby__category-text {
+  font-size: $ni-font-14;
+  color: $ni-color-text-secondary;
+}
+.nearby__category-text--active {
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.nearby__category-line {
+  margin-top: 4px;
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+  background-color: $ni-color-primary;
+}
+.nearby__feed {
+  padding: 18px 14px 15px;
+}
+.nearby__feed-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.nearby__feed-title {
+  font-size: $ni-font-19;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.nearby__feed-right {
+  flex-direction: row;
+  align-items: center;
+}
+.nearby__nearby-pill {
+  flex-direction: row;
+  align-items: center;
+  height: 20px;
+  padding-left: 7px;
+  padding-right: 7px;
+  border-radius: 10px;
+  background-color: #fff0e4;
+  margin-right: 6px;
+}
+.nearby__nearby-pill-text {
+  margin-left: 2px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: #9b5a38;
+}
+.nearby__sort {
+  font-size: $ni-font-11;
+  color: $ni-color-text-tertiary;
+}
+.nearby__grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.nearby__cell {
+  width: calc((100% - 12px) / 2);
+  margin-bottom: 12px;
+}
+.nearby__cell--gap {
+  margin-right: 12px;
+}
+.nearby__loading {
+  margin-top: 12px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.nearby__empty {
+  margin-top: 10px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.nearby__end {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding-top: 24px;
+  padding-bottom: 8px;
+}
+.nearby__end-line {
+  width: 25px;
+  height: 1px;
+  background-color: #e5ded8;
+}
+.nearby__end-text {
+  margin-left: 10px;
+  margin-right: 10px;
+  font-size: $ni-font-11;
+  color: #b2aaa4;
+}
+.nearby__bottom-space {
+  height: calc(92px + env(safe-area-inset-bottom));
+}
+.filter {
+  padding-bottom: 20px;
+}
+.filter__label {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.filter__label--gap {
+  margin-top: 17px;
+}
+.filter__chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.filter__chip {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.filter__chip--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.filter__chip-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.filter__chip-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.filter__actions {
+  flex-direction: row;
+  margin-top: 18px;
+}
+.filter__reset {
+  width: 96px;
+  height: 46px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.filter__reset-text {
+  font-size: $ni-font-12;
+  color: $ni-color-text-secondary;
+}
+.filter__confirm {
+  flex: 1;
+  height: 46px;
+  border-radius: 13px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.filter__confirm-text {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: #ffffff;
+}
+</style>

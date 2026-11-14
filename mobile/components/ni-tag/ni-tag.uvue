@@ -1,0 +1,126 @@
+<template>
+  <view class="ni-tag" :class="[`ni-tag--${type}`, `ni-tag--${size}`]">
+    <ni-icon v-if="icon" :name="icon" :size="iconSize" :state="iconState" />
+    <text class="ni-tag__text" :class="[`ni-tag__text--${type}`, `ni-tag__text--${size}`]">
+      <slot />
+    </text>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+type TagType = 'sale' | 'gift' | 'swap' | 'condition' | 'verified' | 'ai' | 'service' | 'neutral'
+
+const props = withDefaults(
+  defineProps<{
+    type?: TagType
+    size?: 'xs' | 'sm' | 'md'
+    icon?: string
+  }>(),
+  {
+    type: 'neutral',
+    size: 'sm',
+    icon: '',
+  },
+)
+
+const iconSize = computed(() => (props.size === 'xs' ? 9 : props.size === 'md' ? 13 : 11))
+const iconState = computed(() => {
+  if (props.type === 'gift') return 'green'
+  if (props.type === 'swap') return 'blue'
+  if (props.type === 'sale') return 'active'
+  if (props.type === 'service' || props.type === 'verified') return 'gold'
+  if (props.type === 'ai') return 'active'
+  return 'secondary'
+})
+</script>
+
+<style scoped lang="scss">
+.ni-tag {
+  flex-direction: row;
+  align-items: center;
+  align-self: flex-start;
+}
+.ni-tag--xs {
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  border-radius: 4px;
+}
+.ni-tag--sm {
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-radius: 6px;
+}
+.ni-tag--md {
+  height: 24px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 7px;
+}
+.ni-tag__text {
+  margin-left: 2px;
+}
+.ni-tag__text--xs {
+  font-size: 6px;
+  font-weight: 600;
+}
+.ni-tag__text--sm {
+  font-size: $ni-font-9;
+  font-weight: 600;
+}
+.ni-tag__text--md {
+  font-size: $ni-font-10;
+  font-weight: 600;
+}
+.ni-tag--sale {
+  background-color: $ni-color-sale-bg-2;
+}
+.ni-tag--gift {
+  background-color: $ni-color-gift-bg;
+}
+.ni-tag--swap {
+  background-color: $ni-color-swap-bg;
+}
+.ni-tag--condition {
+  background-color: #f5f2ef;
+}
+.ni-tag--verified {
+  background-color: $ni-color-credit-bg;
+}
+.ni-tag--ai {
+  background-color: $ni-color-primary-bg;
+}
+.ni-tag--service {
+  background-color: $ni-color-service-bg-2;
+}
+.ni-tag--neutral {
+  background-color: $ni-color-fill-2;
+}
+.ni-tag__text--sale {
+  color: $ni-color-sale;
+}
+.ni-tag__text--gift {
+  color: $ni-color-gift;
+}
+.ni-tag__text--swap {
+  color: $ni-color-swap;
+}
+.ni-tag__text--condition {
+  color: $ni-color-text-secondary;
+}
+.ni-tag__text--verified {
+  color: $ni-color-credit-deep;
+}
+.ni-tag__text--ai {
+  color: #a55936;
+}
+.ni-tag__text--service {
+  color: $ni-color-service-deep;
+}
+.ni-tag__text--neutral {
+  color: $ni-color-text-tertiary;
+}
+</style>

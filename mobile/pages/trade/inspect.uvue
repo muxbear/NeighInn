@@ -1,0 +1,509 @@
+<template>
+  <scroll-view class="inspect" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="inspect__header">
+      <ni-status-bar />
+      <view class="inspect__nav">
+        <view class="inspect__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="inspect__nav-title">验货确认</text>
+        <view class="inspect__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="inspect__content">
+      <template v-if="state === 'pending'">
+        <view class="inspect__hero">
+          <view class="inspect__people">
+            <ni-avatar :src="buyerAvatar" :name="'买'" :size="52" variant="orange" />
+            <view class="inspect__swap-icon">
+              <ni-icon name="shield" :size="20" state="green" />
+            </view>
+            <ni-avatar :src="sellerAvatar" :name="'卖'" :size="52" variant="green" />
+          </view>
+          <text class="inspect__title">见面验货</text>
+          <text class="inspect__desc">请当面检查物品是否与描述一致。确认无误后，平台将向卖家放款。</text>
+        </view>
+
+        <view v-if="order" class="inspect__order">
+          <image class="inspect__order-image" :src="order.item.image" mode="aspectFill" />
+          <view class="inspect__order-copy">
+            <text class="inspect__order-title" :lines="1">{{ order.item.title }}</text>
+            <text class="inspect__order-meta">{{ order.item.condition }} · {{ order.tradeType }}</text>
+            <text v-if="order.amount > 0" class="inspect__order-amount">托管金额 ¥{{ order.amount }}</text>
+            <text v-else class="inspect__order-amount inspect__order-amount--free">无需支付资金</text>
+          </view>
+        </view>
+
+        <view class="inspect__steps">
+          <view class="inspect__step">
+            <view class="inspect__step-dot inspect__step-dot--done"><ni-icon name="check" :size="10" state="white" /></view>
+            <text class="inspect__step-text">当面验货</text>
+          </view>
+          <view class="inspect__step-line" />
+          <view class="inspect__step">
+            <view class="inspect__step-dot"><text class="inspect__step-index">2</text></view>
+            <text class="inspect__step-text">双方确认</text>
+          </view>
+          <view class="inspect__step-line" />
+          <view class="inspect__step">
+            <view class="inspect__step-dot"><text class="inspect__step-index">3</text></view>
+            <text class="inspect__step-text">平台放款</text>
+          </view>
+        </view>
+
+        <view class="inspect__tip">
+          <ni-icon name="alert" :size="15" state="gold" />
+          <text class="inspect__tip-text">确认验货后无法撤销。如物品与描述不符，请选择“不满意”并提交退款申请。</text>
+        </view>
+
+        <view class="inspect__actions">
+          <ni-button type="primary" size="lg" block :loading="submitting" @tap="confirmInspection">
+            验货满意，确认收货
+          </ni-button>
+          <view class="inspect__fail" @click="startFail">
+            <text class="inspect__fail-text">不满意，申请退款</text>
+          </view>
+        </view>
+      </template>
+
+      <template v-else-if="state === 'success'">
+        <view class="inspect__result">
+          <view class="inspect__result-icon inspect__result-icon--success">
+            <ni-icon name="check" :size="40" state="white" />
+          </view>
+          <text class="inspect__result-title">交易完成</text>
+          <text class="inspect__result-desc">感谢你完成这次邻里交易。平台已将货款放款给卖家，评价可获得信用分。</text>
+          <view class="inspect__result-actions">
+            <ni-button v-if="canReview" type="primary" size="lg" block @tap="goReview">去评价邻居</ni-button>
+            <view class="inspect__result-secondary" @click="goOrderDetail">
+              <text class="inspect__result-secondary-text">返回订单详情</text>
+            </view>
+          </view>
+        </view>
+      </template>
+
+      <template v-else-if="state === 'fail'">
+        <view class="inspect__section">
+          <text class="inspect__section-title">选择不满意原因</text>
+          <view class="inspect__reasons">
+            <view
+              v-for="reason in failReasons"
+              :key="reason"
+              class="inspect__reason"
+              :class="{ 'inspect__reason--active': selectedReason === reason }"
+              @click="selectedReason = reason"
+            >
+              <text class="inspect__reason-text" :class="{ 'inspect__reason-text--active': selectedReason === reason }">{{ reason }}</text>
+            </view>
+          </view>
+          <text class="inspect__section-title inspect__section-title--gap">补充说明</text>
+          <ni-textarea
+            v-model="failDescription"
+            placeholder="描述具体问题，便于平台介入调解与退款处理"
+            :maxlength="300"
+            :height="90"
+          />
+          <view class="inspect__tip inspect__tip--danger">
+            <ni-icon name="alert" :size="15" state="danger" />
+            <text class="inspect__tip-text inspect__tip-text--danger">提交后将暂停放款，平台客服会在 24 小时内联系双方核实。</text>
+          </view>
+          <ni-button type="primary" size="lg" block :loading="submitting" @tap="submitFail">提交退款申请</ni-button>
+          <view class="inspect__result-secondary" @click="state = 'pending'">
+            <text class="inspect__result-secondary-text">返回验货</text>
+          </view>
+        </view>
+      </template>
+
+      <template v-else-if="state === 'refunded'">
+        <view class="inspect__result">
+          <view class="inspect__result-icon inspect__result-icon--pending">
+            <ni-icon name="clock" :size="38" state="gold" />
+          </view>
+          <text class="inspect__result-title">退款申请已提交</text>
+          <text class="inspect__result-desc">平台已暂停放款，客服会在 24 小时内联系双方核实。你可以在订单详情查看进度。</text>
+          <view class="inspect__result-actions">
+            <ni-button type="primary" size="lg" block @tap="goOrderDetail">查看订单详情</ni-button>
+          </view>
+        </view>
+      </template>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Order } from '../../models'
+import { useOrderStore } from '../../stores/order.store'
+import { useToast } from '../../composables/useToast'
+import { INSPECT_FAIL_REASONS } from '../../config/constants'
+
+const orderStore = useOrderStore()
+const { toast, showToast } = useToast()
+
+const orderId = ref('')
+const order = ref<Order | null>(null)
+const state = ref<'pending' | 'success' | 'fail' | 'refunded'>('pending')
+const submitting = ref(false)
+const selectedReason = ref('')
+const failDescription = ref('')
+const failReasons = INSPECT_FAIL_REASONS
+
+const buyerAvatar = computed(() => order.value?.buyer.avatar ?? '')
+const sellerAvatar = computed(() => order.value?.seller.avatar ?? '')
+const canReview = computed(() => Boolean(order.value?.canReview || order.value?.reviewable))
+
+onLoad(async (options: any) => {
+  orderId.value = String(options?.orderId ?? '')
+  if (!orderId.value) return
+  try {
+    order.value = await orderStore.fetchDetail(orderId.value)
+    if (order.value.status === 'COMPLETED') state.value = 'success'
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  }
+})
+
+function confirmInspection(): void {
+  if (!order.value || submitting.value) return
+  uni.showModal({
+    title: '确认验货',
+    content: '确认物品与描述一致，平台将向卖家放款。确认后无法撤销。',
+    confirmText: '确认收货',
+    success: async (res) => {
+      if (!res.confirm || !order.value) return
+      submitting.value = true
+      try {
+        order.value = await orderStore.confirmInspection(order.value.id)
+        state.value = 'success'
+        showToast('交易已完成')
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '确认失败', 'alert')
+      } finally {
+        submitting.value = false
+      }
+    },
+  })
+}
+
+function startFail(): void {
+  selectedReason.value = ''
+  failDescription.value = ''
+  state.value = 'fail'
+}
+
+async function submitFail(): Promise<void> {
+  if (!order.value || submitting.value) return
+  if (!selectedReason.value) {
+    showToast('请选择不满意原因', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await orderStore.dispute(order.value.id, {
+      reason: selectedReason.value,
+      description: failDescription.value,
+      images: [],
+    })
+    state.value = 'refunded'
+    showToast('退款申请已提交')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goReview(): void {
+  if (!orderId.value) return
+  uni.redirectTo({ url: `/pages/trade/review?orderId=${orderId.value}` })
+}
+function goOrderDetail(): void {
+  if (!orderId.value) return
+  uni.redirectTo({ url: `/pages/orders/detail?id=${orderId.value}` })
+}
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else goOrderDetail()
+}
+</script>
+
+<style scoped lang="scss">
+.inspect {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.inspect__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.inspect__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.inspect__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.inspect__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.inspect__nav-placeholder {
+  width: 42px;
+}
+.inspect__content {
+  padding: 14px;
+}
+.inspect__hero {
+  align-items: center;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+.inspect__people {
+  flex-direction: row;
+  align-items: center;
+}
+.inspect__swap-icon {
+  width: 46px;
+  height: 46px;
+  margin-left: 12px;
+  margin-right: 12px;
+  border-radius: 23px;
+  background-color: $ni-color-success-bg;
+  align-items: center;
+  justify-content: center;
+}
+.inspect__title {
+  margin-top: 14px;
+  font-size: $ni-font-25;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.inspect__desc {
+  margin-top: 6px;
+  font-size: $ni-font-12;
+  line-height: 19px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 25px;
+  padding-right: 25px;
+}
+.inspect__order {
+  padding: 12px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.inspect__order-image {
+  width: 62px;
+  height: 62px;
+  border-radius: 12px;
+  background-color: #f3ede7;
+}
+.inspect__order-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.inspect__order-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.inspect__order-meta {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.inspect__order-amount {
+  margin-top: 4px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.inspect__order-amount--free {
+  color: $ni-color-gift;
+}
+.inspect__steps {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 16px;
+}
+.inspect__step {
+  align-items: center;
+  width: 72px;
+}
+.inspect__step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: #eee9e4;
+  align-items: center;
+  justify-content: center;
+}
+.inspect__step-dot--done {
+  background-color: $ni-color-gift;
+}
+.inspect__step-index {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.inspect__step-text {
+  margin-top: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.inspect__step-line {
+  flex: 1;
+  height: 2px;
+  background-color: #eee9e4;
+  margin-top: 11px;
+}
+.inspect__tip {
+  margin-top: 14px;
+  padding: 10px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+}
+.inspect__tip--danger {
+  background-color: $ni-color-danger-bg;
+  margin-bottom: 14px;
+}
+.inspect__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+.inspect__tip-text--danger {
+  color: $ni-color-danger-deep;
+}
+.inspect__actions {
+  margin-top: 16px;
+}
+.inspect__fail {
+  height: 44px;
+  margin-top: 10px;
+  border-radius: $ni-radius-13;
+  border: 1px solid #e8e1db;
+  background-color: $ni-color-white;
+  align-items: center;
+  justify-content: center;
+}
+.inspect__fail-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-secondary;
+}
+.inspect__section {
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.inspect__section-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.inspect__section-title--gap {
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.inspect__reasons {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.inspect__reason {
+  height: 32px;
+  padding-left: 11px;
+  padding-right: 11px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.inspect__reason--active {
+  background-color: $ni-color-danger-bg;
+  border: 1px solid #f2b79f;
+}
+.inspect__reason-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.inspect__reason-text--active {
+  color: $ni-color-danger-deep;
+  font-weight: 700;
+}
+.inspect__result {
+  align-items: center;
+  padding-top: 26px;
+}
+.inspect__result-icon {
+  width: 86px;
+  height: 86px;
+  border-radius: 31px;
+  align-items: center;
+  justify-content: center;
+}
+.inspect__result-icon--success {
+  background-image: $ni-gradient-success;
+  box-shadow: 0 8px 22px rgba(85, 161, 115, 0.24);
+}
+.inspect__result-icon--pending {
+  background-color: $ni-color-credit-bg;
+  border: 1px solid #f0dba4;
+}
+.inspect__result-title {
+  margin-top: 14px;
+  font-size: $ni-font-25;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.inspect__result-desc {
+  margin-top: 6px;
+  font-size: $ni-font-12;
+  line-height: 19px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+.inspect__result-actions {
+  width: 100%;
+  margin-top: 22px;
+}
+.inspect__result-secondary {
+  height: 44px;
+  margin-top: 10px;
+  border-radius: $ni-radius-13;
+  border: 1px solid #e8e1db;
+  background-color: $ni-color-white;
+  align-items: center;
+  justify-content: center;
+}
+.inspect__result-secondary-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-secondary;
+}
+</style>

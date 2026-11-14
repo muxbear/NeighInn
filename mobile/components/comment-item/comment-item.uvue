@@ -1,0 +1,80 @@
+<template>
+  <view class="comment">
+    <ni-avatar :src="comment.avatar" :name="comment.author" :size="34" variant="orange" />
+    <view class="comment__body">
+      <view class="comment__head">
+        <text class="comment__name">{{ comment.author }}</text>
+        <text class="comment__time">{{ comment.time }}</text>
+      </view>
+      <text v-if="comment.replyTo" class="comment__reply">回复 {{ comment.replyTo }}</text>
+      <text class="comment__content">{{ comment.content }}</text>
+      <view class="comment__actions">
+        <text class="comment__action" @click="onReply">回复</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import type { ItemComment } from '../../models'
+
+withDefaults(
+  defineProps<{
+    comment: ItemComment
+  }>(),
+  {},
+)
+
+const emit = defineEmits<{ (event: 'reply'): void }>()
+
+function onReply(): void {
+  emit('reply')
+}
+</script>
+
+<style scoped lang="scss">
+.comment {
+  flex-direction: row;
+  align-items: flex-start;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-bottom: $ni-border-divider;
+}
+.comment__body {
+  flex: 1;
+  margin-left: 9px;
+}
+.comment__head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.comment__name {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.comment__time {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.comment__reply {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.comment__content {
+  margin-top: 4px;
+  font-size: $ni-font-12;
+  line-height: 19px;
+  color: $ni-color-text-secondary;
+}
+.comment__actions {
+  flex-direction: row;
+  margin-top: 4px;
+}
+.comment__action {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+</style>

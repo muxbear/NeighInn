@@ -1,0 +1,185 @@
+<template>
+  <view class="ni-uploader">
+    <view class="ni-uploader__grid">
+      <view
+        v-for="(file, index) in modelValue"
+        :key="file + index"
+        class="ni-uploader__tile"
+        :class="{ 'ni-uploader__tile--gap': (index + 1) % columns !== 0 }"
+        :style="{ width: tileWidth, height: tileHeight + 'px', marginBottom: '9px' }"
+      >
+        <image class="ni-uploader__image" :src="file" mode="aspectFill" @click="preview(index)" />
+        <view class="ni-uploader__remove" @click.stop="remove(index)">
+          <ni-icon name="plus" :size="10" state="white" :rotate="45" />
+        </view>
+      </view>
+
+      <view
+        v-if="modelValue.length < max"
+        class="ni-uploader__tile ni-uploader__tile--add"
+        :class="{ 'ni-uploader__tile--gap': (modelValue.length + 1) % columns !== 0 }"
+        :style="{ width: tileWidth, height: tileHeight + 'px', marginBottom: '9px' }"
+        hover-class="ni-uploader__tile--pressed"
+        @click="choose"
+      >
+        <ni-icon name="camera" :size="24" state="active" />
+        <text class="ni-uploader__add-text">{{ addText }}</text>
+        <text class="ni-uploader__add-hint">{{ hintText }}</text>
+      </view>
+
+      <view
+        v-if="tipTile && modelValue.length === 0"
+        class="ni-uploader__tile ni-uploader__tile--tip"
+        :style="{ width: tileWidth, height: tileHeight + 'px', marginBottom: '9px' }"
+      >
+        <ni-icon name="spark" :size="23" state="green" />
+        <text class="ni-uploader__tip-title">{{ tipTitle }}</text>
+        <text class="ni-uploader__tip-desc">{{ tipDesc }}</text>
+      </view>
+    </view>
+
+    <view v-if="showCount" class="ni-uploader__count-row">
+      <text class="ni-uploader__count">{{ modelValue.length }}/{{ max }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { chooseImages, previewImages } from '../../utils/image'
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: string[]
+    max?: number
+    min?: number
+    columns?: number
+    tileHeight?: number
+    addText?: string
+    hintText?: string
+    showCount?: boolean
+    tipTile?: boolean
+    tipTitle?: string
+    tipDesc?: string
+  }>(),
+  {
+    max: 12,
+    min: 3,
+    columns: 2,
+    tileHeight: 105,
+    addText: '添加照片',
+    hintText: '',
+    showCount: true,
+    tipTile: false,
+    tipTitle: '拍得越清晰',
+    tipDesc: 'AI 检测越准确',
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: string[]): void
+  (event: 'change', value: string[]): void
+}>()
+
+const tileWidth = computed(() =>
+  props.columns === 3 ? 'calc((100% - 18px) / 3)' : 'calc((100% - 9px) / 2)',
+)
+
+async function choose(): Promise<void> {
+  const remaining = Math.max(1, props.max - props.modelValue.length)
+  const paths = await chooseImages({ count: remaining })
+  if (!paths.length) return
+  const next = [...props.modelValue, ...paths].slice(0, props.max)
+  emit('update:modelValue', next)
+  emit('change', next)
+}
+
+function remove(index: number): void {
+  const next = props.modelValue.filter((_, current) => current !== index)
+  emit('update:modelValue', next)
+  emit('change', next)
+}
+
+function preview(index: number): void {
+  previewImages(props.modelValue, props.modelValue[index])
+}
+</script>
+
+<style scoped lang="scss">
+.ni-uploader {
+  width: 100%;
+}
+.ni-uploader__grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.ni-uploader__tile {
+  position: relative;
+  border-radius: $ni-radius-12;
+  overflow: hidden;
+  background-color: #fffaF7;
+}
+.ni-uploader__tile--gap {
+  margin-right: 9px;
+}
+.ni-uploader__tile--add {
+  border: $ni-border-dashed;
+  align-items: center;
+  justify-content: center;
+  background-color: #fffaf7;
+}
+.ni-uploader__tile--tip {
+  border: 1.5px dashed #d4e9dc;
+  align-items: center;
+  justify-content: center;
+  background-color: #f8fcf9;
+}
+.ni-uploader__tip-title {
+  margin-top: 6px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-gift-deep;
+}
+.ni-uploader__tip-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: #7b9a87;
+}
+.ni-uploader__tile--pressed {
+  opacity: 0.8;
+}
+.ni-uploader__image {
+  width: 100%;
+  height: 100%;
+}
+.ni-uploader__remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background-color: rgba(30, 25, 22, 0.55);
+  align-items: center;
+  justify-content: center;
+}
+.ni-uploader__add-text {
+  margin-top: 5px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.ni-uploader__add-hint {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.ni-uploader__count-row {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+.ni-uploader__count {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+</style>

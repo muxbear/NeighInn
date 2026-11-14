@@ -1,0 +1,112 @@
+<template>
+  <view class="ni-textarea-wrap">
+    <view
+      class="ni-textarea"
+      :class="{ 'ni-textarea--error': error }"
+      :style="{ height: height + 'px' }"
+    >
+      <textarea
+        class="ni-textarea__field"
+        :value="modelValue"
+        :maxlength="maxlength"
+        :placeholder="placeholder"
+        :placeholder-class="'ni-textarea__placeholder'"
+        :disabled="disabled"
+        @input="onInput"
+        @focus="onFocus"
+        @blur="onBlur"
+      />
+    </view>
+    <view v-if="showCount" class="ni-textarea__count-row">
+      <text class="ni-textarea__error">{{ errorText }}</text>
+      <text class="ni-textarea__count">{{ currentLength }}/{{ maxlength }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    placeholder?: string
+    maxlength?: number
+    height?: number
+    error?: boolean
+    errorText?: string
+    showCount?: boolean
+    disabled?: boolean
+  }>(),
+  {
+    placeholder: '',
+    maxlength: 200,
+    height: 78,
+    error: false,
+    errorText: '',
+    showCount: true,
+    disabled: false,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: string): void
+  (event: 'focus'): void
+  (event: 'blur'): void
+}>()
+
+const currentLength = computed(() => Array.from(props.modelValue || '').length)
+
+function onInput(event: any): void {
+  emit('update:modelValue', String(event?.detail?.value ?? ''))
+}
+function onFocus(): void {
+  emit('focus')
+}
+function onBlur(): void {
+  emit('blur')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-textarea-wrap {
+  width: 100%;
+}
+.ni-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: #f8f6f4;
+  border-radius: $ni-radius-11;
+  border: 1px solid transparent;
+}
+.ni-textarea--error {
+  border-color: $ni-color-error;
+}
+.ni-textarea__field {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  font-size: $ni-font-12;
+  color: $ni-color-text-primary;
+  line-height: 19px;
+  background-color: transparent;
+}
+.ni-textarea__placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-12;
+}
+.ni-textarea__count-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.ni-textarea__error {
+  font-size: $ni-font-8;
+  color: $ni-color-error;
+}
+.ni-textarea__count {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+</style>

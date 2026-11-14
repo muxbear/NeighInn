@@ -1,0 +1,275 @@
+<template>
+  <scroll-view class="dispute" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="dispute__header">
+      <ni-status-bar />
+      <view class="dispute__nav">
+        <view class="dispute__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="dispute__nav-title">申请退款 / 纠纷</text>
+        <view class="dispute__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="dispute__content">
+      <view v-if="order" class="dispute__order">
+        <image class="dispute__order-image" :src="order.item.image" mode="aspectFill" />
+        <view class="dispute__order-copy">
+          <text class="dispute__order-title" :lines="1">{{ order.item.title }}</text>
+          <text class="dispute__order-meta">{{ order.orderNo }} · {{ order.statusText }}</text>
+        </view>
+      </view>
+
+      <view class="dispute__card">
+        <text class="dispute__card-title">选择原因</text>
+        <view class="dispute__reasons">
+          <view
+            v-for="reason in reasons"
+            :key="reason"
+            class="dispute__reason"
+            :class="{ 'dispute__reason--active': selectedReason === reason }"
+            @click="selectedReason = reason"
+          >
+            <text class="dispute__reason-text" :class="{ 'dispute__reason-text--active': selectedReason === reason }">{{ reason }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="dispute__card">
+        <view class="dispute__card-head">
+          <text class="dispute__card-title">问题描述</text>
+          <text class="dispute__count">{{ description.length }}/500</text>
+        </view>
+        <ni-textarea
+          v-model="description"
+          placeholder="请描述具体情况，包括见面时间、物品问题与沟通经过"
+          :maxlength="500"
+          :height="110"
+        />
+      </view>
+
+      <view class="dispute__card">
+        <view class="dispute__card-head">
+          <text class="dispute__card-title">上传证据</text>
+          <text class="dispute__count">{{ images.length }}/9</text>
+        </view>
+        <text class="dispute__card-desc">可上传物品实拍、聊天记录等，便于平台核实</text>
+        <ni-photo-uploader v-model="images" :max="9" :min="0" :columns="3" :tile-height="92" add-text="添加证据" show-count />
+      </view>
+
+      <view class="dispute__tip">
+        <ni-icon name="shield" :size="15" state="gold" />
+        <text class="dispute__tip-text">提交后平台将冻结托管资金并介入调解，客服会在 24 小时内联系双方。请如实描述，虚假举证将影响信用。</text>
+      </view>
+
+      <ni-button type="primary" size="lg" block :loading="submitting" @tap="submit">
+        提交申请
+      </ni-button>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Order } from '../../models'
+import { useOrderStore } from '../../stores/order.store'
+import { useToast } from '../../composables/useToast'
+import { DISPUTE_REASONS } from '../../config/constants'
+
+const orderStore = useOrderStore()
+const { toast, showToast } = useToast()
+
+const orderId = ref('')
+const order = ref<Order | null>(null)
+const selectedReason = ref('')
+const description = ref('')
+const images = ref<string[]>([])
+const submitting = ref(false)
+const reasons = DISPUTE_REASONS
+
+onLoad(async (options: any) => {
+  orderId.value = String(options?.orderId ?? '')
+  if (!orderId.value) return
+  try {
+    order.value = await orderStore.fetchDetail(orderId.value)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  }
+})
+
+async function submit(): Promise<void> {
+  if (!orderId.value || submitting.value) return
+  if (!selectedReason.value) {
+    showToast('请选择申请原因', 'alert')
+    return
+  }
+  if (!description.value.trim()) {
+    showToast('请填写问题描述', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await orderStore.dispute(orderId.value, {
+      reason: selectedReason.value,
+      description: description.value.trim(),
+      images: images.value,
+    })
+    showToast('申请已提交，平台将尽快介入')
+    setTimeout(() => {
+      uni.redirectTo({ url: `/pages/orders/detail?id=${orderId.value}` })
+    }, 600)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else if (orderId.value) uni.redirectTo({ url: `/pages/orders/detail?id=${orderId.value}` })
+  else uni.redirectTo({ url: '/pages/orders/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.dispute {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.dispute__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.dispute__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.dispute__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.dispute__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.dispute__nav-placeholder {
+  width: 42px;
+}
+.dispute__content {
+  padding: 14px;
+}
+.dispute__order {
+  padding: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.dispute__order-image {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background-color: #f3ede7;
+}
+.dispute__order-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.dispute__order-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.dispute__order-meta {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.dispute__card {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.dispute__card-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+.dispute__card-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.dispute__card-desc {
+  margin-top: 3px;
+  margin-bottom: 9px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.dispute__count {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.dispute__reasons {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.dispute__reason {
+  height: 32px;
+  padding-left: 11px;
+  padding-right: 11px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.dispute__reason--active {
+  background-color: $ni-color-danger-bg;
+  border: 1px solid #f2b79f;
+}
+.dispute__reason-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.dispute__reason-text--active {
+  color: $ni-color-danger-deep;
+  font-weight: 700;
+}
+.dispute__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+  margin-top: 10px;
+  margin-bottom: 14px;
+}
+.dispute__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

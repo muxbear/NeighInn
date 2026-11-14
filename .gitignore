@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules/
+unpackage/
+dist/
+coverage/
+.hbuilderx/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.log
+
+# 含密钥的本地 Claude 配置，禁止提交
+.claude/settings.local.json
+.claude/settings.local.json.*
+
+# 本地浏览器验收产物
+.playwright-mcp/
+/*.png

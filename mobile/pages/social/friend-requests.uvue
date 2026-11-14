@@ -1,0 +1,219 @@
+<template>
+  <scroll-view class="requests" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="requests__header">
+      <ni-status-bar />
+      <view class="requests__nav">
+        <view class="requests__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="requests__nav-title">好友申请</text>
+        <view class="requests__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="requests__content">
+      <view v-if="socialStore.requests.length === 0" class="requests__empty">
+        <ni-empty icon="friend" title="没有新的好友申请" desc="同小区的邻居申请加你为好友时会出现在这里" />
+      </view>
+
+      <view v-else class="requests__list">
+        <view v-for="request in socialStore.requests" :key="request.id" class="requests__card">
+          <ni-avatar :src="request.avatar" :name="request.name" :size="48" variant="green" />
+          <view class="requests__copy">
+            <view class="requests__name-row">
+              <text class="requests__name">{{ request.name }}</text>
+              <text class="requests__time">{{ request.time }}</text>
+            </view>
+            <text class="requests__message" :lines="2">{{ request.message }}</text>
+            <view v-if="request.status === 'PENDING'" class="requests__actions">
+              <view class="requests__reject" @click="reject(request.id)">
+                <text class="requests__reject-text">拒绝</text>
+              </view>
+              <view class="requests__accept" @click="accept(request.id)">
+                <text class="requests__accept-text">同意</text>
+              </view>
+            </view>
+            <text v-else class="requests__status" :class="{ 'requests__status--accepted': request.status === 'ACCEPTED' }">
+              {{ request.status === 'ACCEPTED' ? '已同意' : '已拒绝' }}
+            </text>
+          </view>
+        </view>
+      </view>
+
+      <view class="requests__tip">
+        <ni-icon name="shield" :size="14" state="gold" />
+        <text class="requests__tip-text">只添加认识的同小区邻居，谨防陌生人以交易名义索要个人信息。</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { onLoad } from '@dcloudio/uni-app'
+import { useSocialStore } from '../../stores/social.store'
+import { useToast } from '../../composables/useToast'
+
+const socialStore = useSocialStore()
+const { toast, showToast } = useToast()
+
+onLoad(() => {
+  socialStore.fetchRequests().catch(() => undefined)
+})
+
+async function accept(id: string): Promise<void> {
+  try {
+    await socialStore.acceptRequest(id)
+    showToast('已添加为邻居好友')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+async function reject(id: string): Promise<void> {
+  try {
+    await socialStore.rejectRequest(id)
+    showToast('已拒绝好友申请')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/messages/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.requests {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.requests__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.requests__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.requests__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.requests__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.requests__nav-placeholder {
+  width: 42px;
+}
+.requests__content {
+  padding: 14px;
+}
+.requests__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.requests__card {
+  margin-bottom: 10px;
+  padding: 13px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.requests__copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.requests__name-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.requests__name {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.requests__time {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.requests__message {
+  margin-top: 4px;
+  font-size: $ni-font-10;
+  line-height: 16px;
+  color: $ni-color-text-secondary;
+}
+.requests__actions {
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+.requests__reject {
+  height: 30px;
+  padding-left: 13px;
+  padding-right: 13px;
+  border-radius: 10px;
+  border: 1px solid #e8e1db;
+  align-items: center;
+  justify-content: center;
+  margin-right: 7px;
+}
+.requests__reject-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.requests__accept {
+  height: 30px;
+  padding-left: 13px;
+  padding-right: 13px;
+  border-radius: 10px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.requests__accept-text {
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: #ffffff;
+}
+.requests__status {
+  margin-top: 7px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.requests__status--accepted {
+  color: $ni-color-gift-deep;
+}
+.requests__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+}
+.requests__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

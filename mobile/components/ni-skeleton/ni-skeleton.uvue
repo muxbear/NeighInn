@@ -1,0 +1,73 @@
+<template>
+  <view class="ni-skeleton">
+    <view v-for="row in rows" :key="row" class="ni-skeleton__row" :class="{ 'ni-skeleton__row--avatar': avatar }">
+      <view v-if="avatar" class="ni-skeleton__avatar" />
+      <view class="ni-skeleton__lines">
+        <view class="ni-skeleton__line ni-skeleton__line--wide" />
+        <view class="ni-skeleton__line" />
+        <view v-if="row % 2 === 0" class="ni-skeleton__line ni-skeleton__line--short" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+withDefaults(
+  defineProps<{
+    rows?: number
+    avatar?: boolean
+  }>(),
+  {
+    rows: 3,
+    avatar: true,
+  },
+)
+</script>
+
+<style scoped lang="scss">
+.ni-skeleton {
+  padding: 14px;
+}
+.ni-skeleton__row {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.ni-skeleton__avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background-color: #f0ebe5;
+  margin-right: 12px;
+  animation: niSkeletonPulse 1.4s ease-in-out infinite;
+}
+.ni-skeleton__lines {
+  flex: 1;
+}
+.ni-skeleton__line {
+  height: 10px;
+  border-radius: 5px;
+  background-color: #f0ebe5;
+  margin-bottom: 8px;
+  width: 70%;
+  animation: niSkeletonPulse 1.4s ease-in-out infinite;
+}
+.ni-skeleton__line--wide {
+  width: 100%;
+  height: 13px;
+}
+.ni-skeleton__line--short {
+  width: 42%;
+}
+@keyframes niSkeletonPulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+</style>

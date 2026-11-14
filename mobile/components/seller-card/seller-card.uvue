@@ -1,0 +1,113 @@
+<template>
+  <view class="seller">
+    <ni-avatar :src="seller.avatar" :name="seller.name" :size="44" variant="orange" />
+    <view class="seller__copy">
+      <view class="seller__name-row">
+        <text class="seller__name">{{ seller.name }}</text>
+        <ni-tag v-if="seller.verified" type="verified" size="xs">已认证</ni-tag>
+      </view>
+      <text class="seller__credit">{{ seller.credit }} · 已成交 {{ seller.dealCount }} 次</text>
+      <text class="seller__area">{{ seller.area }} · 加入 {{ seller.joinedDays || 0 }} 天</text>
+    </view>
+    <view class="seller__actions">
+      <view class="seller__follow" :class="{ 'seller__follow--active': following }" @click="onFollow">
+        <text class="seller__follow-text" :class="{ 'seller__follow-text--active': following }">
+          {{ following ? '已关注' : '关注' }}
+        </text>
+      </view>
+      <view class="seller__chat" @click="onChat">
+        <ni-icon name="message" :size="14" state="active" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import type { SellerSummary } from '../../models'
+
+const props = withDefaults(
+  defineProps<{
+    seller: SellerSummary
+    following?: boolean
+  }>(),
+  { following: false },
+)
+
+const emit = defineEmits<{
+  (event: 'follow'): void
+  (event: 'chat'): void
+}>()
+
+function onFollow(): void {
+  emit('follow')
+}
+function onChat(): void {
+  emit('chat')
+}
+</script>
+
+<style scoped lang="scss">
+.seller {
+  flex-direction: row;
+  align-items: center;
+}
+.seller__copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.seller__name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.seller__name {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 5px;
+}
+.seller__credit {
+  margin-top: 3px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.seller__area {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.seller__actions {
+  flex-direction: row;
+  align-items: center;
+}
+.seller__follow {
+  height: 30px;
+  padding-left: 11px;
+  padding-right: 11px;
+  border-radius: 12px;
+  border: 1px solid #ffb68e;
+  background-color: $ni-color-white;
+  align-items: center;
+  justify-content: center;
+}
+.seller__follow--active {
+  border-color: #e6ddd6;
+  background-color: $ni-color-fill-1;
+}
+.seller__follow-text {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.seller__follow-text--active {
+  color: $ni-color-text-tertiary;
+}
+.seller__chat {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+  margin-left: 7px;
+}
+</style>

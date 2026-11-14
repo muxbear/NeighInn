@@ -1,0 +1,251 @@
+<template>
+  <scroll-view class="favorites" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="favorites__header">
+      <ni-status-bar />
+      <view class="favorites__nav">
+        <view class="favorites__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="favorites__nav-title">收藏与足迹</text>
+        <view class="favorites__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="favorites__tabs">
+      <view
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="favorites__tab"
+        :class="{ 'favorites__tab--active': activeTab === tab.key }"
+        @click="switchTab(tab.key)"
+      >
+        <text class="favorites__tab-text" :class="{ 'favorites__tab-text--active': activeTab === tab.key }">{{ tab.label }}</text>
+      </view>
+    </view>
+
+    <view class="favorites__body">
+      <view v-if="loading" class="favorites__loading">
+        <ni-skeleton :rows="4" :avatar="false" />
+      </view>
+
+      <template v-else>
+        <view v-if="activeTab === 'item'">
+          <view v-if="items.length === 0" class="favorites__empty">
+            <ni-empty icon="heart" title="还没有收藏的商品" desc="看到喜欢的好物，点一下爱心收藏起来" action-text="去逛逛" @action="goHome" />
+          </view>
+          <view v-else class="favorites__grid">
+            <view
+              v-for="(item, index) in items"
+              :key="item.id"
+              class="favorites__cell"
+              :class="{ 'favorites__cell--gap': index % 2 === 0 }"
+            >
+              <product-card :item="item" @tap="goItem(item.id)" @favorite="onFavorite(item)" />
+            </view>
+          </view>
+        </view>
+
+        <view v-else-if="activeTab === 'service'">
+          <view v-if="services.length === 0" class="favorites__empty">
+            <ni-empty icon="friend" title="还没有收藏的服务" desc="遇到靠谱的邻居服务，收藏起来方便找到" />
+          </view>
+          <view v-else>
+            <service-card
+              v-for="post in services"
+              :key="post.id"
+              :post="post"
+              fluid
+              @tap="goService"
+              @respond="goService"
+            />
+          </view>
+        </view>
+
+        <view v-else>
+          <view v-if="life.length === 0" class="favorites__empty">
+            <ni-empty icon="image" title="还没有收藏的生活动态" desc="喜欢邻居记录的生活，点个赞再收藏吧" action-text="去生活频道" @action="goLife" />
+          </view>
+          <view v-else>
+            <life-post-card
+              v-for="post in life"
+              :key="post.id"
+              :post="post"
+              @open="goLifeDetail(post.id)"
+              @like="onLifeLike(post)"
+              @comment="goLifeDetail(post.id)"
+            />
+          </view>
+        </view>
+      </template>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Item, LifePost, ServicePost } from '../../models'
+import { itemService } from '../../services/item.service'
+import { lifeService } from '../../services/life.service'
+import { useItemStore } from '../../stores/item.store'
+import { useToast } from '../../composables/useToast'
+
+const itemStore = useItemStore()
+const { toast, showToast } = useToast()
+
+const tabs = [
+  { key: 'item', label: '商品' },
+  { key: 'service', label: '服务' },
+  { key: 'life', label: '生活动态' },
+]
+const activeTab = ref<'item' | 'service' | 'life'>('item')
+const items = ref<Item[]>([])
+const services = ref<ServicePost[]>([])
+const life = ref<LifePost[]>([])
+const loading = ref(true)
+
+onLoad(() => {
+  loadFavorites('item')
+})
+
+async function switchTab(tab: 'item' | 'service' | 'life'): Promise<void> {
+  if (activeTab.value === tab) return
+  activeTab.value = tab
+  await loadFavorites(tab)
+}
+
+async function loadFavorites(tab: 'item' | 'service' | 'life'): Promise<void> {
+  loading.value = true
+  try {
+    const bundle = await itemService.getFavorites(tab)
+    items.value = bundle.items
+    services.value = bundle.services
+    life.value = bundle.life
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function onFavorite(item: Item): Promise<void> {
+  try {
+    await itemStore.toggleFavorite(item)
+    items.value = items.value.filter((entry) => entry.id !== item.id || item.favorite)
+    showToast(item.favorite ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+async function onLifeLike(post: LifePost): Promise<void> {
+  try {
+    await lifeService.toggleLike(post.id)
+  } catch {
+    // 收藏页点赞失败不阻断
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+function goService(): void {
+  uni.navigateTo({ url: '/pages/zone/index?zone=service' })
+}
+function goLife(): void {
+  uni.navigateTo({ url: '/pages/life/index' })
+}
+function goLifeDetail(id: string): void {
+  uni.navigateTo({ url: `/pages/life/detail?id=${id}` })
+}
+</script>
+
+<style scoped lang="scss">
+.favorites {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.favorites__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.favorites__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.favorites__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.favorites__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.favorites__nav-placeholder {
+  width: 42px;
+}
+.favorites__tabs {
+  flex-direction: row;
+  height: 44px;
+  padding: 6px 14px;
+  background-color: $ni-color-white;
+}
+.favorites__tab {
+  flex: 1;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+}
+.favorites__tab--active {
+  background-color: $ni-color-primary-bg;
+}
+.favorites__tab-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-secondary;
+}
+.favorites__tab-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.favorites__body {
+  padding: 14px;
+}
+.favorites__loading {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.favorites__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.favorites__grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.favorites__cell {
+  width: calc((100% - 12px) / 2);
+  margin-bottom: 12px;
+}
+.favorites__cell--gap {
+  margin-right: 12px;
+}
+</style>

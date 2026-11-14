@@ -1,0 +1,343 @@
+<template>
+  <scroll-view class="settings" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="settings__header">
+      <ni-status-bar />
+      <view class="settings__nav">
+        <view class="settings__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="settings__nav-title">设置</text>
+        <view class="settings__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="settings__content">
+      <view class="settings__account" @click="goEdit">
+        <ni-avatar :src="userStore.avatarSrc" :name="userStore.profile?.nickname" :size="54" variant="orange" />
+        <view class="settings__account-copy">
+          <view class="settings__account-row">
+            <text class="settings__account-name">{{ userStore.profile?.nickname || '温暖的邻居' }}</text>
+            <ni-tag v-if="userStore.profile?.verified" type="verified" size="xs">认证业主</ni-tag>
+          </view>
+          <text class="settings__account-phone">{{ userStore.displayPhone }}</text>
+          <text class="settings__account-community">{{ communityName }}</text>
+        </view>
+        <ni-icon name="chevron" :size="17" state="tertiary" />
+      </view>
+
+      <text class="settings__group-title">账号与安全</text>
+      <view class="settings__group">
+        <settings-row icon="phone" title="手机号" :desc="userStore.displayPhone" right-text="更换" @tap="bindPhone" />
+        <settings-row icon="wechat" icon-state="wechat" title="微信绑定" :desc="wechatBound ? '已绑定微信' : '未绑定微信'" :right-text="wechatBound ? '已绑定' : '去绑定'" @tap="bindWechat" />
+        <settings-row icon="shield" icon-state="gold" title="实名认证" :desc="realnameText" :right-text="realnameVerified ? '已认证' : '去认证'" @tap="goRealname" />
+        <settings-row icon="home" icon-state="green" title="绑定小区" :desc="communityName" right-text="管理" @tap="goCommunity" />
+      </view>
+
+      <text class="settings__group-title">通知设置</text>
+      <view class="settings__group">
+        <settings-row
+          icon="bell"
+          title="推送通知"
+          desc="接收订单、互动与小区动态提醒"
+          show-switch
+          :switch-value="notificationStore.settings.pushEnabled"
+          @switch="togglePush"
+        />
+        <settings-row
+          icon="wallet"
+          title="交易通知"
+          desc="订单状态、验货与放款提醒"
+          show-switch
+          :switch-value="notificationStore.settings.tradeEnabled"
+          @switch="toggleTrade"
+        />
+        <settings-row
+          icon="megaphone"
+          icon-state="gold"
+          title="小区动态"
+          desc="喇叭站、生活频道与社区通知"
+          show-switch
+          :switch-value="notificationStore.settings.communityEnabled"
+          @switch="toggleCommunity"
+        />
+        <settings-row
+          icon="eye"
+          icon-state="blue"
+          title="长辈模式"
+          desc="字号加大、按钮热区增强"
+          show-switch
+          :switch-value="appStore.settings.elderMode"
+          @switch="toggleElder"
+        />
+      </view>
+
+      <text class="settings__group-title">隐私与安全</text>
+      <view class="settings__group">
+        <settings-row icon="lock" title="隐私设置" desc="手机号、地址与个人描述的展示范围" @tap="goPrivacy" />
+        <settings-row icon="friend" title="黑名单" desc="管理被屏蔽的邻居" @tap="openBlacklist" />
+        <settings-row icon="alert" icon-state="danger" title="社区内容与安全" desc="内容审核、举报与账号安全" @tap="openContentSafety" />
+      </view>
+
+      <text class="settings__group-title">通用</text>
+      <view class="settings__group">
+        <settings-row icon="box" title="清理缓存" :desc="cacheText" @tap="clearCache" />
+        <settings-row icon="message" icon-state="blue" title="帮助与反馈" desc="常见问题、在线客服与意见反馈" @tap="goHelp" />
+        <settings-row icon="spark" title="关于邻里小栈" :desc="`版本 ${version}`" @tap="showAbout" />
+      </view>
+
+      <view class="settings__logout" @click="confirmLogout">
+        <text class="settings__logout-text">退出登录</text>
+      </view>
+
+      <text class="settings__footer">邻里小栈 · 真实邻居，安心流转</text>
+      <text class="settings__footer">版本 {{ version }}</text>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { NotificationSettings } from '../../models'
+import { useUserStore } from '../../stores/user.store'
+import { useAppStore } from '../../stores/app.store'
+import { useNotificationStore } from '../../stores/notification.store'
+import { useCommunityStore } from '../../stores/community.store'
+import { useToast } from '../../composables/useToast'
+import { APP_INFO } from '../../config/env'
+import { STORAGE_KEYS } from '../../config/constants'
+import { removeStorage } from '../../utils/storage'
+
+const userStore = useUserStore()
+const appStore = useAppStore()
+const notificationStore = useNotificationStore()
+const communityStore = useCommunityStore()
+const { toast, showToast } = useToast()
+
+const version = APP_INFO.version
+const wechatBound = ref(true)
+const realnameVerified = computed(
+  () => userStore.profile?.authStatus === 'VERIFIED_OWNER' || userStore.profile?.authStatus === 'VERIFIED_UNOWNER',
+)
+const realnameText = computed(() => (realnameVerified.value ? '已实名认证' : '未完成实名认证'))
+const communityName = computed(() => communityStore.current?.name || userStore.profile?.communityName || '阳光花园小区')
+const cacheText = ref('约 2.4MB')
+
+onLoad(() => {
+  notificationStore.fetchSettings().catch(() => undefined)
+  communityStore.fetchMine().catch(() => undefined)
+})
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+
+function goEdit(): void {
+  uni.navigateTo({ url: '/pages/profile/edit' })
+}
+
+function bindPhone(): void {
+  uni.showModal({
+    title: '更换手机号',
+    content: '更换手机号需要完成短信验证与实名核验，当前演示环境暂未开放。',
+    showCancel: false,
+    confirmText: '我知道了',
+  })
+}
+
+function bindWechat(): void {
+  wechatBound.value = !wechatBound.value
+  showToast(wechatBound.value ? '微信已绑定' : '微信已解绑')
+}
+
+function goRealname(): void {
+  uni.navigateTo({ url: '/pages/auth/realname' })
+}
+function goCommunity(): void {
+  uni.navigateTo({ url: '/pages/community/index' })
+}
+
+async function updateNotification(payload: Partial<NotificationSettings>): Promise<void> {
+  try {
+    await notificationStore.updateSettings(payload)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '设置失败', 'alert')
+  }
+}
+
+function togglePush(value: boolean): void {
+  updateNotification({ pushEnabled: value })
+  showToast(value ? '已开启推送通知' : '已关闭推送通知')
+}
+function toggleTrade(value: boolean): void {
+  updateNotification({ tradeEnabled: value })
+  showToast(value ? '已开启交易通知' : '已关闭交易通知')
+}
+function toggleCommunity(value: boolean): void {
+  updateNotification({ communityEnabled: value })
+  showToast(value ? '已开启小区动态' : '已关闭小区动态')
+}
+function toggleElder(value: boolean): void {
+  appStore.updateSetting('elderMode', value)
+  showToast(value ? '长辈模式已开启' : '长辈模式已关闭')
+}
+
+function goPrivacy(): void {
+  uni.navigateTo({ url: '/pages/profile/edit' })
+}
+function openBlacklist(): void {
+  showToast('暂无被屏蔽的邻居')
+}
+function openContentSafety(): void {
+  uni.showModal({
+    title: '社区内容与安全',
+    content: '平台对生活频道、服务互助、留言与私信进行内容安全审核。如遇不良信息，可在详情页举报。',
+    showCancel: false,
+    confirmText: '我知道了',
+  })
+}
+
+function clearCache(): void {
+  removeStorage(STORAGE_KEYS.homeFeed)
+  removeStorage(STORAGE_KEYS.searchHistory)
+  removeStorage(STORAGE_KEYS.viewHistory)
+  cacheText.value = '0MB'
+  showToast('缓存已清理')
+}
+
+function goHelp(): void {
+  uni.navigateTo({ url: '/pages/settings/help' })
+}
+
+function showAbout(): void {
+  uni.showModal({
+    title: '关于邻里小栈',
+    content: `${APP_INFO.name} v${version}\n${APP_INFO.slogan}\n\n面向同一小区及邻近小区业主的闲置物品共享交易平台。`,
+    showCancel: false,
+    confirmText: '我知道了',
+  })
+}
+
+function confirmLogout(): void {
+  uni.showModal({
+    title: '退出登录',
+    content: '退出后需要重新登录才能发布物品与查看订单，确认退出吗？',
+    confirmText: '退出登录',
+    confirmColor: '#E85D20',
+    success: async (res) => {
+      if (!res.confirm) return
+      await userStore.logout()
+    },
+  })
+}
+</script>
+
+<style scoped lang="scss">
+.settings {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.settings__header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 64px;
+  background-color: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #f0ece8;
+}
+.settings__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.settings__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.settings__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.settings__nav-placeholder {
+  width: 42px;
+}
+.settings__content {
+  padding: 14px;
+}
+.settings__account {
+  min-height: 93px;
+  padding: 15px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-19;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.settings__account-copy {
+  flex: 1;
+  margin-left: 11px;
+}
+.settings__account-row {
+  flex-direction: row;
+  align-items: center;
+}
+.settings__account-name {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 5px;
+}
+.settings__account-phone {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.settings__account-community {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.settings__group-title {
+  margin: 20px 4px 8px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: #968b84;
+}
+.settings__group {
+  padding: 0 13px;
+  border-radius: $ni-radius-17;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.settings__logout {
+  height: 48px;
+  margin-top: 18px;
+  border-radius: $ni-radius-15;
+  background-color: $ni-color-white;
+  border: 1px solid #f3e4da;
+  align-items: center;
+  justify-content: center;
+}
+.settings__logout-text {
+  font-size: $ni-font-13;
+  font-weight: 600;
+  color: #c85f35;
+}
+.settings__footer {
+  margin-top: 10px;
+  font-size: $ni-font-8;
+  color: #b5aca6;
+  text-align: center;
+}
+</style>

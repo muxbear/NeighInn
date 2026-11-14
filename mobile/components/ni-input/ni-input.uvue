@@ -1,0 +1,122 @@
+<template>
+  <view
+    class="ni-input"
+    :class="{ 'ni-input--error': error, 'ni-input--disabled': disabled }"
+    :style="{ height: height + 'px' }"
+  >
+    <ni-icon v-if="prefixIcon" :name="prefixIcon" :size="17" :state="error ? 'danger' : 'tertiary'" />
+    <input
+      class="ni-input__field"
+      :class="{ 'ni-input__field--with-prefix': !!prefixIcon }"
+      :value="modelValue"
+      :type="nativeType"
+      :password="type === 'password'"
+      :maxlength="maxlength"
+      :disabled="disabled"
+      :placeholder="placeholder"
+      :placeholder-class="'ni-input__placeholder'"
+      :style="{ fontSize: fontSize + 'px' }"
+      @input="onInput"
+      @focus="onFocus"
+      @blur="onBlur"
+      @confirm="onConfirm"
+    />
+    <view v-if="clearable && modelValue && !disabled" class="ni-input__clear" @click="onClear">
+      <ni-icon name="plus" :size="12" state="tertiary" :rotate="45" />
+    </view>
+    <slot name="suffix" />
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    placeholder?: string
+    type?: 'text' | 'number' | 'password' | 'digit'
+    maxlength?: number
+    clearable?: boolean
+    error?: boolean
+    disabled?: boolean
+    prefixIcon?: string
+    height?: number
+    fontSize?: number
+  }>(),
+  {
+    placeholder: '',
+    type: 'text',
+    maxlength: 140,
+    clearable: false,
+    error: false,
+    disabled: false,
+    prefixIcon: '',
+    height: 50,
+    fontSize: 13,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: string): void
+  (event: 'focus'): void
+  (event: 'blur'): void
+  (event: 'confirm', value: string): void
+}>()
+
+const nativeType = computed(() => (props.type === 'text' ? 'text' : props.type === 'password' ? 'text' : 'number'))
+
+function onInput(event: any): void {
+  emit('update:modelValue', String(event?.detail?.value ?? ''))
+}
+function onFocus(): void {
+  emit('focus')
+}
+function onBlur(): void {
+  emit('blur')
+}
+function onConfirm(event: any): void {
+  emit('confirm', String(event?.detail?.value ?? props.modelValue))
+}
+function onClear(): void {
+  emit('update:modelValue', '')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-input {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 13px;
+  padding-right: 11px;
+  background-color: $ni-color-input-2;
+  border-radius: $ni-radius-12;
+  border: 1px solid transparent;
+}
+.ni-input--error {
+  border-color: $ni-color-error;
+  background-color: #fff8f7;
+}
+.ni-input--disabled {
+  background-color: $ni-color-fill-2;
+}
+.ni-input__field {
+  flex: 1;
+  height: 100%;
+  color: $ni-color-text-primary;
+  background-color: transparent;
+}
+.ni-input__field--with-prefix {
+  margin-left: 8px;
+}
+.ni-input__placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-12;
+}
+.ni-input__clear {
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+}
+</style>

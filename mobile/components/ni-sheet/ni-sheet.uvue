@@ -1,0 +1,126 @@
+<template>
+  <view v-if="visible" class="ni-sheet">
+    <view class="ni-sheet__mask" @click="onMask" />
+    <view class="ni-sheet__panel" :style="{ height: height }">
+      <view class="ni-sheet__handle" />
+      <view v-if="title" class="ni-sheet__header">
+        <text class="ni-sheet__title">{{ title }}</text>
+        <view class="ni-sheet__close" @click="close">
+          <ni-icon name="plus" :size="18" state="tertiary" :rotate="45" />
+        </view>
+      </view>
+      <scroll-view class="ni-sheet__body" scroll-y :show-scrollbar="false">
+        <slot />
+      </scroll-view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    title?: string
+    height?: string
+    maskClosable?: boolean
+  }>(),
+  {
+    title: '',
+    height: '84vh',
+    maskClosable: true,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:visible', visible: boolean): void
+  (event: 'close'): void
+}>()
+
+function close(): void {
+  emit('update:visible', false)
+  emit('close')
+}
+
+function onMask(): void {
+  if (props.maskClosable) close()
+}
+</script>
+
+<style scoped lang="scss">
+.ni-sheet {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 400;
+}
+.ni-sheet__mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background-color: $ni-color-mask;
+  animation: niMaskIn 0.2s ease-out;
+}
+.ni-sheet__panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-left: 15px;
+  padding-right: 15px;
+  padding-top: 9px;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  background-color: $ni-color-white;
+  border-top-left-radius: $ni-radius-24;
+  border-top-right-radius: $ni-radius-24;
+  box-shadow: $ni-shadow-sheet;
+  animation: niSheetIn 0.24s ease-out;
+}
+.ni-sheet__handle {
+  align-self: center;
+  width: 34px;
+  height: 4px;
+  border-radius: 3px;
+  background-color: #d9d2cd;
+}
+.ni-sheet__header {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  padding-bottom: 6px;
+}
+.ni-sheet__title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.ni-sheet__close {
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+}
+.ni-sheet__body {
+  flex: 1;
+}
+@keyframes niMaskIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes niSheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+</style>

@@ -1,0 +1,391 @@
+<template>
+  <view class="product-card" hover-class="product-card--pressed" :hover-stay-time="100" @click="onTap">
+    <view class="product-card__media">
+      <image class="product-card__image" :src="imageSrc" mode="aspectFill" lazy-load @error="imageFailed = true" />
+
+      <view v-if="item.aiVerified" class="product-card__ai">
+        <ni-icon name="spark" :size="10" state="white" />
+        <text class="product-card__ai-text">AI 验真</text>
+      </view>
+      <view class="product-card__fav" :class="{ 'product-card__fav--active': item.favorite }" @click.stop="onFavorite">
+        <ni-icon name="heart" :size="16" :state="item.favorite ? 'active' : 'white'" :filled="item.favorite" />
+      </view>
+      <view class="product-card__tag">
+        <trade-tag :type="item.type" size="xs" />
+      </view>
+      <view v-if="item.distance" class="product-card__distance-badge">
+        <ni-icon name="pin" :size="10" state="green" />
+        <text class="product-card__distance-badge-text">{{ distanceShort }}</text>
+      </view>
+    </view>
+
+    <view class="product-card__body">
+      <text class="product-card__title" :lines="1">{{ item.title }}</text>
+
+      <view class="product-card__price-row">
+        <ni-price
+          :value="item.price"
+          :type="item.type === '免费' ? 'free' : item.type === '互换' ? 'swap' : 'sale'"
+          size="md"
+        />
+        <view class="product-card__condition">
+          <text class="product-card__condition-text">{{ item.condition }}</text>
+        </view>
+      </view>
+
+      <view v-if="item.distance" class="product-card__distance">
+        <view class="product-card__distance-left">
+          <ni-icon name="walk" :size="12" state="green" />
+          <text class="product-card__distance-text">{{ walkText }}</text>
+        </view>
+        <text class="product-card__time">{{ publishedText }}</text>
+      </view>
+
+      <view v-if="seller" class="product-card__owner">
+        <ni-avatar :src="seller.avatar" :name="seller.name" :size="28" variant="orange" />
+        <view class="product-card__owner-copy">
+          <view class="product-card__owner-name-row">
+            <text class="product-card__owner-name">{{ seller.name }}</text>
+            <view class="product-card__level">
+              <text class="product-card__level-text">LV.{{ sellerLevel }}</text>
+            </view>
+            <view v-if="seller.verified" class="product-card__verified">
+              <ni-icon name="shield" :size="8" state="green" />
+              <text class="product-card__verified-text">已认证</text>
+            </view>
+          </view>
+
+          <view class="product-card__trust-row">
+            <view class="product-card__community" :class="{ 'product-card__community--nearby': !isSameCommunity }">
+              <ni-icon name="home" :size="8" :state="isSameCommunity ? 'green' : 'blue'" />
+              <text class="product-card__community-text" :class="{ 'product-card__community-text--nearby': !isSameCommunity }">
+                {{ communityLabel }}
+              </text>
+            </view>
+            <view class="product-card__credit">
+              <ni-icon name="spark" :size="8" state="gold" />
+              <text class="product-card__credit-text">信用 {{ creditRating }}</text>
+            </view>
+            <text class="product-card__deals">成交 {{ seller.dealCount }} 次</text>
+          </view>
+
+        </view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import type { Item } from '../../models'
+import { ERROR_IMAGE } from '../../utils/image'
+import { formatRelativeTime } from '../../utils/formatter'
+
+const props = withDefaults(
+  defineProps<{
+    item: Item
+    showCommunity?: boolean
+  }>(),
+  { showCommunity: false },
+)
+
+const emit = defineEmits<{
+  (event: 'tap'): void
+  (event: 'favorite'): void
+}>()
+
+const imageFailed = ref(false)
+const imageSrc = computed(() => (imageFailed.value ? ERROR_IMAGE : props.item.image))
+const seller = computed(() => props.item.seller ?? null)
+const publishedText = computed(() => {
+  if (props.item.createdAt) return formatRelativeTime(props.item.createdAt)
+  return props.item.time || ''
+})
+const distanceShort = computed(() => String(props.item.distance || '').replace(/^约\s*/, ''))
+const walkText = computed(() => {
+  const text = String(props.item.walk || '')
+  if (!text) return '距离很近'
+  if (text.indexOf('步行') === 0) return `${text}可达`
+  if (text === '自家物品') return text
+  return `${text}可达`
+})
+const sellerLevel = computed(() => {
+  if (props.item.seller?.level) return props.item.seller.level
+  const deals = props.item.seller?.dealCount || 0
+  return Math.min(9, Math.max(1, Math.floor(deals / 5) + 1))
+})
+const creditRating = computed(() => {
+  const credit = String(props.item.seller?.credit || '')
+  const matched = credit.match(/\d+(\.\d+)?/)
+  return matched ? matched[0] : credit || '良好'
+})
+const isSameCommunity = computed(() => {
+  const area = String(props.item.seller?.area || '')
+  return area.indexOf('阳光花园') >= 0
+})
+const communityLabel = computed(() => {
+  if (isSameCommunity.value) return '同小区'
+  const community = String(props.item.community || '').trim()
+  if (community) return community
+  const area = String(props.item.seller?.area || '')
+  const name = area.split('·')[0].trim()
+  return name || '邻近小区'
+})
+
+watch(
+  () => props.item.image,
+  () => {
+    imageFailed.value = false
+  },
+)
+
+function onTap(): void {
+  emit('tap')
+}
+
+function onFavorite(): void {
+  emit('favorite')
+}
+</script>
+
+<style scoped lang="scss">
+.product-card {
+  width: 100%;
+  border-radius: $ni-radius-15;
+  background-color: $ni-color-white;
+  box-shadow: 0 4px 14px rgba(58, 39, 28, 0.07);
+  overflow: hidden;
+  transition: transform 100ms ease-out;
+}
+.product-card--pressed {
+  transform: scale(0.985);
+}
+.product-card__media {
+  width: calc(100% - 12px);
+  height: 164px;
+  margin-left: 6px;
+  margin-right: 6px;
+  margin-top: 6px;
+  position: relative;
+  border-radius: $ni-radius-12;
+  overflow: hidden;
+  background-color: #f3ede7;
+}
+.product-card__image {
+  width: 100%;
+  height: 100%;
+}
+.product-card__ai {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  flex-direction: row;
+  align-items: center;
+  height: 19px;
+  padding-left: 5px;
+  padding-right: 6px;
+  border-radius: 6px;
+  background-color: rgba(30, 25, 22, 0.45);
+}
+.product-card__ai-text {
+  margin-left: 2px;
+  font-size: 7px;
+  color: #ffffff;
+}
+.product-card__fav {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 31px;
+  height: 31px;
+  border-radius: 16px;
+  background-color: rgba(20, 18, 16, 0.25);
+  align-items: center;
+  justify-content: center;
+}
+.product-card__fav--active {
+  background-color: rgba(255, 255, 255, 0.9);
+}
+.product-card__tag {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+}
+.product-card__distance-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  height: 22px;
+  padding-left: 6px;
+  padding-right: 7px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 7px;
+  background-color: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 8px rgba(58, 39, 28, 0.14);
+}
+.product-card__distance-badge-text {
+  margin-left: 2px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: #3f7e58;
+}
+.product-card__body {
+  padding: 9px 10px 10px;
+}
+.product-card__title {
+  width: 100%;
+  font-size: $ni-font-13;
+  line-height: 18px;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.product-card__price-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+.product-card__condition {
+  padding-left: 5px;
+  padding-right: 5px;
+  height: 17px;
+  border-radius: 4px;
+  background-color: #f4f1ee;
+  align-items: center;
+  justify-content: center;
+}
+.product-card__condition-text {
+  font-size: $ni-font-9;
+  color: #7c716b;
+}
+.product-card__distance {
+  margin-top: 6px;
+  padding: 4px 7px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 7px;
+  background-color: #f1f8f4;
+}
+.product-card__distance-left {
+  flex-direction: row;
+  align-items: center;
+}
+.product-card__distance-text {
+  margin-left: 3px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: #3f7e58;
+}
+.product-card__time {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.product-card__owner {
+  margin-top: 8px;
+  padding: 7px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-10;
+  background-color: #f4f1ef;
+}
+.product-card__owner-copy {
+  flex: 1;
+  margin-left: 6px;
+}
+.product-card__owner-name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.product-card__owner-name {
+  max-width: 74px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: #4e4844;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.product-card__level {
+  height: 15px;
+  padding-left: 4px;
+  padding-right: 4px;
+  margin-left: 3px;
+  border-radius: 4px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.product-card__level-text {
+  font-size: 7px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.product-card__verified {
+  flex-direction: row;
+  align-items: center;
+  height: 15px;
+  padding-left: 4px;
+  padding-right: 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  background-color: $ni-color-gift-bg;
+}
+.product-card__verified-text {
+  margin-left: 1px;
+  font-size: 6px;
+  font-weight: 700;
+  color: #397b54;
+}
+.product-card__trust-row {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 3px;
+}
+.product-card__community {
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 4px;
+  background-color: #eaf7ef;
+}
+.product-card__community--nearby {
+  background-color: #eaf5fb;
+}
+.product-card__community-text {
+  margin-left: 2px;
+  font-size: 7px;
+  font-weight: 600;
+  color: #397b54;
+}
+.product-card__community-text--nearby {
+  color: #447fa7;
+}
+.product-card__credit {
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  margin-left: 4px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 4px;
+  background-color: #fff5dc;
+}
+.product-card__credit-text {
+  margin-left: 2px;
+  font-size: 7px;
+  font-weight: 700;
+  color: #9a702e;
+}
+.product-card__deals {
+  margin-left: 5px;
+  font-size: 7px;
+  color: #8f8782;
+}
+</style>

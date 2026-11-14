@@ -1,0 +1,100 @@
+<template>
+  <view class="ni-search" @click="onTap">
+    <ni-icon name="search" :size="18" state="tertiary" />
+    <input
+      v-if="!readonly"
+      class="ni-search__input"
+      :value="modelValue"
+      :placeholder="placeholder"
+      :placeholder-class="'ni-search__placeholder'"
+      :focus="autofocus"
+      confirm-type="search"
+      @input="onInput"
+      @confirm="onConfirm"
+    />
+    <text v-else class="ni-search__text" :class="{ 'ni-search__text--placeholder': !modelValue }">
+      {{ modelValue || placeholder }}
+    </text>
+    <view v-if="showFilter" class="ni-search__filter" @click.stop="onFilter">
+      <ni-icon name="sliders" :size="18" state="active" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    modelValue?: string
+    placeholder?: string
+    readonly?: boolean
+    showFilter?: boolean
+    autofocus?: boolean
+  }>(),
+  {
+    modelValue: '',
+    placeholder: '搜索小区好物、互助服务',
+    readonly: false,
+    showFilter: false,
+    autofocus: false,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: string): void
+  (event: 'tap'): void
+  (event: 'confirm', value: string): void
+  (event: 'filter'): void
+}>()
+
+function onInput(event: any): void {
+  emit('update:modelValue', String(event?.detail?.value ?? ''))
+}
+function onConfirm(event: any): void {
+  emit('confirm', String(event?.detail?.value ?? props.modelValue))
+}
+function onTap(): void {
+  if (props.readonly) emit('tap')
+}
+function onFilter(): void {
+  emit('filter')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-search {
+  flex-direction: row;
+  align-items: center;
+  height: 46px;
+  padding-left: 14px;
+  padding-right: 12px;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  box-shadow: 0 4px 18px rgba(85, 56, 39, 0.07);
+}
+.ni-search__input {
+  flex: 1;
+  height: 100%;
+  margin-left: 8px;
+  font-size: $ni-font-14;
+  color: $ni-color-text-primary;
+}
+.ni-search__placeholder {
+  color: #aaaaaa;
+  font-size: $ni-font-14;
+}
+.ni-search__text {
+  flex: 1;
+  margin-left: 8px;
+  font-size: $ni-font-13;
+  color: $ni-color-text-secondary;
+}
+.ni-search__text--placeholder {
+  color: #aaaaaa;
+}
+.ni-search__filter {
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+}
+</style>

@@ -1,0 +1,228 @@
+<template>
+  <view
+    class="service-preview"
+    :class="{ 'service-preview--offer': isOffer }"
+    hover-class="service-preview--pressed"
+    :hover-stay-time="100"
+    @click="onTap"
+  >
+    <view class="service-preview__top">
+      <view class="service-preview__icon" :class="{ 'service-preview__icon--offer': isOffer }">
+        <ni-icon :name="post.icon" :size="21" :state="isOffer ? 'green' : 'active'" />
+      </view>
+      <view class="service-preview__copy">
+        <view class="service-preview__meta-row">
+          <view class="service-preview__kind" :class="{ 'service-preview__kind--offer': isOffer }">
+            <text class="service-preview__kind-text" :class="{ 'service-preview__kind-text--offer': isOffer }">
+              {{ isOffer ? '邻里服务' : '邻里求助' }}
+            </text>
+          </view>
+          <view class="service-preview__category">
+            <text class="service-preview__category-text">{{ post.category }}</text>
+          </view>
+          <text
+            v-if="isOffer"
+            class="service-preview__price"
+            :class="{ 'service-preview__price--free': (post.price || '').indexOf('免费') >= 0 }"
+          >{{ post.price || post.reward }}</text>
+        </view>
+        <text class="service-preview__title" :lines="1">{{ post.title }}</text>
+        <view class="service-preview__time-row">
+          <ni-icon name="clock" :size="10" state="tertiary" />
+          <text class="service-preview__time">{{ post.time }}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="service-preview__footer">
+      <ni-avatar :src="post.avatar" :name="post.author" :size="25" :variant="isOffer ? 'green' : 'orange'" />
+      <view v-if="isOffer" class="service-preview__provider">
+        <view class="service-preview__provider-name-row">
+          <text class="service-preview__author">{{ post.author }}</text>
+          <view class="service-preview__verified">
+            <ni-icon name="shield" :size="8" state="green" />
+            <text class="service-preview__verified-text">业主认证</text>
+          </view>
+        </view>
+        <text class="service-preview__provider-meta" :lines="1">
+          {{ post.credit || '信用良好' }} · 服务 {{ post.serviceCount || 0 }} 次 · 评价 {{ post.rating || '4.9' }}
+        </text>
+      </view>
+      <template v-else>
+        <text class="service-preview__author-meta" :lines="1">{{ post.author }} · {{ post.distance }}</text>
+        <text class="service-preview__responses">{{ post.responses }} 人响应</text>
+      </template>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { ServicePost } from '../../models'
+
+const props = defineProps<{ post: ServicePost }>()
+const emit = defineEmits<{ (event: 'tap'): void }>()
+
+const isOffer = computed(() => props.post.kind === '提供')
+
+function onTap(): void {
+  emit('tap')
+}
+</script>
+
+<style scoped lang="scss">
+.service-preview {
+  width: 100%;
+  min-height: 132px;
+  padding: 13px;
+  border-radius: $ni-radius-17;
+  border: 1px solid #f0d8cb;
+  background-image: linear-gradient(160deg, #fffdfb 0%, #ffffff 62%);
+  box-shadow: 0 4px 14px rgba(62, 43, 31, 0.045);
+  margin-bottom: 10px;
+  transition: transform 100ms ease-out;
+}
+.service-preview--pressed {
+  transform: scale(0.985);
+}
+.service-preview--offer {
+  border-color: #cee5d7;
+  background-image: linear-gradient(160deg, #f8fdfa 0%, #ffffff 62%);
+}
+.service-preview__top {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.service-preview__icon {
+  width: 39px;
+  height: 39px;
+  border-radius: 13px;
+  background-color: #fff0e7;
+  align-items: center;
+  justify-content: center;
+  margin-right: 9px;
+}
+.service-preview__icon--offer {
+  background-color: #eaf7ef;
+}
+.service-preview__copy {
+  flex: 1;
+}
+.service-preview__meta-row {
+  flex-direction: row;
+  align-items: center;
+}
+.service-preview__kind {
+  height: 19px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-radius: 5px;
+  background-color: #fff0e7;
+  align-items: center;
+  justify-content: center;
+}
+.service-preview__kind--offer {
+  background-color: #eaf7ef;
+}
+.service-preview__kind-text {
+  font-size: 7px;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.service-preview__kind-text--offer {
+  color: #4d8966;
+}
+.service-preview__category {
+  height: 19px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin-left: 5px;
+  border-radius: 5px;
+  background-color: #f4f1ef;
+  align-items: center;
+  justify-content: center;
+}
+.service-preview__category-text {
+  font-size: 7px;
+  color: #847a74;
+}
+.service-preview__price {
+  flex: 1;
+  text-align: right;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.service-preview__price--free {
+  color: $ni-color-gift;
+}
+.service-preview__title {
+  margin-top: 6px;
+  font-size: $ni-font-13;
+  line-height: 18px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.service-preview__time-row {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 6px;
+}
+.service-preview__time {
+  margin-left: 3px;
+  font-size: $ni-font-8;
+  color: #988e88;
+}
+.service-preview__footer {
+  margin-top: 10px;
+  padding-top: 9px;
+  flex-direction: row;
+  align-items: center;
+  border-top: 1px solid #f0edea;
+}
+.service-preview__provider {
+  flex: 1;
+  margin-left: 6px;
+}
+.service-preview__provider-name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.service-preview__author {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: #4d4642;
+  margin-right: 5px;
+}
+.service-preview__verified {
+  flex-direction: row;
+  align-items: center;
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  border-radius: 5px;
+  background-color: #eaf7ef;
+}
+.service-preview__verified-text {
+  margin-left: 2px;
+  font-size: 6px;
+  font-weight: 700;
+  color: #3f8059;
+}
+.service-preview__provider-meta {
+  margin-top: 4px;
+  font-size: 7px;
+  color: #8c837d;
+}
+.service-preview__author-meta {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-8;
+  color: #837a74;
+}
+.service-preview__responses {
+  font-size: $ni-font-8;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+</style>

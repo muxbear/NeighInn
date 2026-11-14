@@ -1,0 +1,50 @@
+<template>
+  <view class="ni-loading">
+    <view
+      class="ni-loading__spinner"
+      :style="{ width: size + 'px', height: size + 'px', borderWidth: size > 24 ? '3px' : '2px' }"
+    />
+    <text v-if="text" class="ni-loading__text" :style="{ fontSize: size > 24 ? '11px' : '9px' }">{{ text }}</text>
+  </view>
+</template>
+
+<script setup lang="ts">
+withDefaults(
+  defineProps<{
+    size?: number
+    text?: string
+  }>(),
+  {
+    size: 20,
+    text: '',
+  },
+)
+</script>
+
+<style scoped lang="scss">
+.ni-loading {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+}
+.ni-loading__spinner {
+  border-style: solid;
+  border-color: #f3e6dd;
+  border-top-color: $ni-color-primary;
+  border-radius: 50%;
+  animation: niLoadingSpin 1s linear infinite;
+}
+.ni-loading__text {
+  margin-left: 7px;
+  color: $ni-color-text-tertiary;
+}
+@keyframes niLoadingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

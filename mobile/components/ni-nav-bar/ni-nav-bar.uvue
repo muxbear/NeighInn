@@ -1,0 +1,139 @@
+<template>
+  <view
+    class="ni-nav"
+    :class="{ 'ni-nav--transparent': transparent, 'ni-nav--bordered': bordered }"
+    :style="{ height: height + 'px' }"
+  >
+    <view class="ni-nav__side" @click="onBack">
+      <ni-icon
+        v-if="back"
+        name="chevron"
+        :size="20"
+        :state="tone === 'light' ? 'white' : 'dark'"
+        :rotate="180"
+      />
+    </view>
+
+    <view class="ni-nav__center">
+      <text class="ni-nav__title" :class="{ 'ni-nav__title--light': tone === 'light' }" :style="{ fontSize: titleSize + 'px' }">
+        {{ title }}
+      </text>
+      <text v-if="subtitle" class="ni-nav__subtitle" :class="{ 'ni-nav__subtitle--light': tone === 'light' }">
+        {{ subtitle }}
+      </text>
+    </view>
+
+    <view class="ni-nav__side ni-nav__side--right" @click="onRight">
+      <slot name="right">
+        <ni-icon
+          v-if="rightIcon"
+          :name="rightIcon"
+          :size="20"
+          :state="tone === 'light' ? 'white' : 'dark'"
+        />
+        <text v-if="rightText" class="ni-nav__right-text">{{ rightText }}</text>
+      </slot>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    title?: string
+    subtitle?: string
+    back?: boolean
+    rightIcon?: string
+    rightText?: string
+    transparent?: boolean
+    bordered?: boolean
+    tone?: 'dark' | 'light'
+    height?: number
+    titleSize?: number
+  }>(),
+  {
+    title: '',
+    subtitle: '',
+    back: true,
+    rightIcon: '',
+    rightText: '',
+    transparent: false,
+    bordered: false,
+    tone: 'dark',
+    height: 48,
+    titleSize: 16,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'back'): void
+  (event: 'right'): void
+}>()
+
+function onBack(): void {
+  if (!props.back) return
+  emit('back')
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) {
+    uni.navigateBack({ delta: 1 })
+  } else {
+    uni.switchTab({ url: '/pages/home/index' })
+  }
+}
+
+function onRight(): void {
+  emit('right')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-nav {
+  flex-direction: row;
+  align-items: center;
+  background-color: $ni-color-card;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.ni-nav--transparent {
+  background-color: transparent;
+}
+.ni-nav--bordered {
+  border-bottom: $ni-border-divider;
+}
+.ni-nav__side {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.ni-nav__side--right {
+  flex-direction: row;
+}
+.ni-nav__center {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+.ni-nav__title {
+  color: $ni-color-text-primary;
+  font-weight: 600;
+  text-align: center;
+}
+.ni-nav__title--light {
+  color: $ni-color-white;
+}
+.ni-nav__subtitle {
+  margin-top: 1px;
+  font-size: $ni-font-7;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+}
+.ni-nav__subtitle--light {
+  color: rgba(255, 255, 255, 0.8);
+}
+.ni-nav__right-text {
+  font-size: $ni-font-12;
+  color: $ni-color-primary;
+  font-weight: 600;
+}
+</style>

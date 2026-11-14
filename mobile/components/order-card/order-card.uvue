@@ -1,0 +1,330 @@
+<template>
+  <view class="order-card">
+    <view class="order-card__head">
+      <view class="order-card__type">
+        <ni-tag :type="tradeTagType" size="xs">{{ order.tradeType }}</ni-tag>
+        <text class="order-card__no">{{ order.orderNo }}</text>
+      </view>
+      <text class="order-card__status">{{ order.statusText }}</text>
+    </view>
+
+    <template v-if="isSwap">
+      <view class="order-card__swap">
+        <view class="order-card__swap-side">
+          <image class="order-card__swap-image" :src="myItemImage" mode="aspectFill" />
+          <text class="order-card__swap-label">我提供 {{ order.offeredItems?.length || 1 }} 件</text>
+        </view>
+        <view class="order-card__swap-center">
+          <ni-icon name="swap" :size="18" state="blue" />
+        </view>
+        <view class="order-card__swap-side">
+          <image class="order-card__swap-image" :src="order.item.image" mode="aspectFill" />
+          <text class="order-card__swap-label">想换取 1 件</text>
+        </view>
+      </view>
+      <text class="order-card__swap-title" :lines="2">{{ order.item.title }}</text>
+      <view class="order-card__swap-progress">
+        <view v-for="(step, index) in swapSteps" :key="step.label" class="order-card__swap-step">
+          <view
+            class="order-card__step-dot"
+            :class="{ 'order-card__step-dot--done': step.done, 'order-card__step-dot--active': step.active }"
+          >
+            <ni-icon v-if="step.done" name="check" :size="7" state="white" />
+          </view>
+          <text
+            class="order-card__step-label"
+            :class="{ 'order-card__step-label--done': step.done, 'order-card__step-label--active': step.active }"
+          >{{ step.label }}</text>
+          <view v-if="index < swapSteps.length - 1" class="order-card__step-line" :class="{ 'order-card__step-line--done': step.done }" />
+        </view>
+      </view>
+    </template>
+
+    <template v-else>
+      <view class="order-card__product">
+        <image class="order-card__product-image" :src="order.item.image" mode="aspectFill" />
+        <view class="order-card__product-copy">
+          <text class="order-card__product-title" :lines="2">{{ order.item.title }}</text>
+          <text class="order-card__product-desc" :lines="1">
+            {{ order.createdAtText }} · {{ order.role === 'buyer' ? '买家' : '卖家' }}
+          </text>
+          <view class="order-card__price-row">
+            <text v-if="order.amount > 0" class="order-card__amount">¥{{ order.amount }}</text>
+            <text v-else class="order-card__free">{{ order.tradeType === '免费' ? '免费赠与' : '物品互换' }}</text>
+            <text class="order-card__role">{{ order.statusText }}</text>
+          </view>
+        </view>
+      </view>
+    </template>
+
+    <view v-if="order.canReview" class="order-card__review-tip">
+      <ni-icon name="spark" :size="12" state="gold" />
+      <text class="order-card__review-text">订单已完成，评价邻居可获得信用分</text>
+    </view>
+
+    <view class="order-card__actions">
+      <view class="order-card__action order-card__action--ghost" @click="onContact">
+        <text class="order-card__action-text order-card__action-text--ghost">联系对方</text>
+      </view>
+      <view class="order-card__action" @click="onDetail">
+        <text class="order-card__action-text">{{ primaryAction }}</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { Order } from '../../models'
+
+const props = defineProps<{ order: Order }>()
+const emit = defineEmits<{
+  (event: 'contact'): void
+  (event: 'detail'): void
+}>()
+
+const isSwap = computed(() => props.order.tradeType === '互换')
+const tradeTagType = computed(() => {
+  if (props.order.tradeType === '免费') return 'gift'
+  if (props.order.tradeType === '互换') return 'swap'
+  return 'sale'
+})
+const myItemImage = computed(() => props.order.offeredItems?.[0]?.image ?? props.order.item.image)
+const swapSteps = computed(() => {
+  const status = props.order.status
+  return [
+    { label: '已提交申请', done: true, active: false },
+    {
+      label: '对方确认',
+      done: status === 'CONFIRMED' || status === 'COMPLETED',
+      active: status === 'PENDING_CONFIRM',
+    },
+    {
+      label: '见面互换',
+      done: status === 'COMPLETED',
+      active: status === 'CONFIRMED',
+    },
+  ]
+})
+const primaryAction = computed(() => {
+  const order = props.order
+  if (
+    order.canConfirmApplication ||
+    (order.role === 'seller' && order.status === 'PENDING_CONFIRM' && order.tradeType !== '出售')
+  ) {
+    return '确认申请'
+  }
+  if (order.canCompleteTrade || (order.tradeType !== '出售' && order.status === 'CONFIRMED')) {
+    return '确认完成'
+  }
+  if (order.canPay) return '去支付'
+  if (order.canAppointment) return '预约验货'
+  if (order.canInspect) return '确认验货'
+  if (order.canReview) return '去评价'
+  return '查看详情'
+})
+
+function onContact(): void {
+  emit('contact')
+}
+function onDetail(): void {
+  emit('detail')
+}
+</script>
+
+<style scoped lang="scss">
+.order-card {
+  width: 100%;
+  padding: 13px;
+  border-radius: $ni-radius-18;
+  background-color: $ni-color-white;
+  border: $ni-border-card;
+  box-shadow: $ni-shadow-card;
+  margin-bottom: 12px;
+}
+.order-card__head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.order-card__type {
+  flex-direction: row;
+  align-items: center;
+}
+.order-card__no {
+  margin-left: 6px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.order-card__status {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.order-card__swap {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 11px;
+}
+.order-card__swap-side {
+  flex: 1;
+  align-items: center;
+}
+.order-card__swap-image {
+  width: 100%;
+  height: 68px;
+  border-radius: $ni-radius-12;
+  background-color: #f3ede7;
+}
+.order-card__swap-label {
+  margin-top: 4px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.order-card__swap-center {
+  width: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.order-card__swap-title {
+  margin-top: 7px;
+  font-size: $ni-font-10;
+  line-height: 15px;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.order-card__swap-progress {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 10px;
+}
+.order-card__swap-step {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+}
+.order-card__step-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: #eee9e4;
+  align-items: center;
+  justify-content: center;
+}
+.order-card__step-dot--done {
+  background-color: $ni-color-gift;
+}
+.order-card__step-dot--active {
+  background-color: $ni-color-primary;
+}
+.order-card__step-label {
+  margin-left: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.order-card__step-label--done {
+  color: $ni-color-gift-deep;
+}
+.order-card__step-label--active {
+  color: $ni-color-primary-dark;
+  font-weight: 600;
+}
+.order-card__step-line {
+  flex: 1;
+  height: 1px;
+  background-color: #eee9e4;
+  margin-left: 4px;
+  margin-right: 4px;
+}
+.order-card__step-line--done {
+  background-color: $ni-color-gift;
+}
+.order-card__product {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 11px;
+}
+.order-card__product-image {
+  width: 68px;
+  height: 68px;
+  border-radius: $ni-radius-12;
+  background-color: #f3ede7;
+}
+.order-card__product-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.order-card__product-title {
+  font-size: $ni-font-10;
+  line-height: 15px;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.order-card__product-desc {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.order-card__price-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+.order-card__amount {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.order-card__free {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-gift;
+}
+.order-card__role {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.order-card__review-tip {
+  flex-direction: row;
+  align-items: center;
+  height: 28px;
+  padding-left: 8px;
+  padding-right: 8px;
+  margin-top: 9px;
+  border-radius: $ni-radius-8;
+  background-color: $ni-color-credit-bg-2;
+}
+.order-card__review-text {
+  margin-left: 4px;
+  font-size: 7px;
+  color: $ni-color-credit-deep;
+}
+.order-card__actions {
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.order-card__action {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+}
+.order-card__action--ghost {
+  background-color: $ni-color-white;
+  border: 1px solid #ffb68e;
+}
+.order-card__action-text {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.order-card__action-text--ghost {
+  color: $ni-color-primary-dark;
+}
+</style>

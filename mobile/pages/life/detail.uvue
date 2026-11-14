@@ -1,0 +1,636 @@
+<template>
+  <scroll-view class="ldetail" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="ldetail__header">
+      <ni-status-bar />
+      <view class="ldetail__nav">
+        <view class="ldetail__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="ldetail__nav-title">生活动态</text>
+        <view class="ldetail__nav-button" @click="onShare">
+          <ni-icon name="share" :size="18" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <template v-if="post">
+      <view class="ldetail__media">
+        <template v-if="post.type === 'video'">
+          <image class="ldetail__video" :src="post.cover || post.images[0]" mode="aspectFill" />
+          <view class="ldetail__video-overlay" @click="toggleVideo">
+            <view class="ldetail__play">
+              <ni-icon :name="playing ? 'check' : 'play'" :size="24" state="white" :filled="!playing" />
+            </view>
+            <text class="ldetail__play-text">{{ playing ? '正在播放' : '点击播放视频' }}</text>
+          </view>
+          <text v-if="post.duration" class="ldetail__duration">{{ post.duration }}</text>
+        </template>
+
+        <view v-else class="ldetail__gallery">
+          <view class="ldetail__gallery-left" @click="previewImage(0)">
+            <image class="ldetail__gallery-main" :src="post.images[0]" mode="aspectFill" />
+          </view>
+          <view class="ldetail__gallery-right">
+            <image
+              v-if="post.images[1]"
+              class="ldetail__gallery-item"
+              :src="post.images[1]"
+              mode="aspectFill"
+              @click="previewImage(1)"
+            />
+            <image
+              v-if="post.images[2]"
+              class="ldetail__gallery-item ldetail__gallery-item--gap"
+              :src="post.images[2]"
+              mode="aspectFill"
+              @click="previewImage(2)"
+            />
+          </view>
+          <view v-if="post.images.length > 3" class="ldetail__more" @click="previewAll">
+            <text class="ldetail__more-text">查看全部 {{ post.images.length }} 张</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="ldetail__article">
+        <view class="ldetail__author">
+          <ni-avatar :src="post.avatar" :name="post.author" :size="43" variant="orange" />
+          <view class="ldetail__author-copy">
+            <view class="ldetail__author-row">
+              <text class="ldetail__author-name">{{ post.author }}</text>
+              <ni-icon name="shield" :size="10" state="gold" />
+              <text class="ldetail__verified">认证业主</text>
+            </view>
+            <text class="ldetail__author-meta">{{ post.area }} · {{ post.time }}</text>
+          </view>
+          <view class="ldetail__follow" :class="{ 'ldetail__follow--active': following }" @click="onFollow">
+            <text class="ldetail__follow-text" :class="{ 'ldetail__follow-text--active': following }">
+              {{ following ? '已关注' : '关注' }}
+            </text>
+          </view>
+        </view>
+
+        <view class="ldetail__tag-row">
+          <ni-tag type="neutral" size="sm">{{ post.category }}</ni-tag>
+          <text class="ldetail__meta">{{ post.area }} · {{ post.time }}</text>
+        </view>
+
+        <text class="ldetail__title">{{ post.title }}</text>
+        <text class="ldetail__body">{{ post.description }}</text>
+
+        <view class="ldetail__stats">
+          <view class="ldetail__stat">
+            <ni-icon name="eye" :size="15" state="tertiary" />
+            <text class="ldetail__stat-text">{{ post.views }}</text>
+          </view>
+          <view class="ldetail__stat">
+            <ni-icon name="heart" :size="15" :state="post.liked ? 'active' : 'tertiary'" :filled="post.liked" />
+            <text class="ldetail__stat-text">{{ post.likes }}</text>
+          </view>
+          <view class="ldetail__stat">
+            <ni-icon name="message" :size="15" state="tertiary" />
+            <text class="ldetail__stat-text">{{ post.comments }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="ldetail__comments">
+        <view class="ldetail__comments-head">
+          <view class="ldetail__comments-title-row">
+            <text class="ldetail__comments-title">评论</text>
+            <text class="ldetail__comments-count">{{ comments.length }}</text>
+          </view>
+          <text class="ldetail__comments-sort">按时间</text>
+        </view>
+
+        <view v-if="comments.length === 0" class="ldetail__comments-empty">
+          <text class="ldetail__comments-empty-text">还没有评论，来说点什么吧</text>
+        </view>
+
+        <view v-for="comment in comments" :key="comment.id" class="ldetail__comment">
+          <ni-avatar :src="comment.avatar" :name="comment.author" :size="34" variant="blue" />
+          <view class="ldetail__comment-body">
+            <view class="ldetail__comment-head">
+              <view class="ldetail__comment-name-row">
+                <text class="ldetail__comment-name">{{ comment.author }}</text>
+                <ni-tag v-if="comment.verified" type="verified" size="xs">认证</ni-tag>
+              </view>
+              <text class="ldetail__comment-time">{{ comment.time }}</text>
+            </view>
+            <text class="ldetail__comment-content">{{ comment.content }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="ldetail__bottom-space" />
+
+      <view class="ldetail__bar">
+        <view class="ldetail__bar-input" @click="openComment">
+          <ni-icon name="message" :size="16" state="tertiary" />
+          <text class="ldetail__bar-input-text">说点什么…</text>
+        </view>
+        <view class="ldetail__bar-action" @click="onLike">
+          <ni-icon name="heart" :size="20" :state="post.liked ? 'active' : 'secondary'" :filled="post.liked" />
+          <text class="ldetail__bar-label">{{ post.likes }}</text>
+        </view>
+        <view class="ldetail__bar-action" @click="onShare">
+          <ni-icon name="share" :size="20" state="secondary" />
+          <text class="ldetail__bar-label">分享</text>
+        </view>
+      </view>
+
+      <ni-sheet v-model:visible="commentVisible" title="发表评论" height="44vh">
+        <view class="ldetail__comment-sheet">
+          <ni-textarea
+            v-model="commentText"
+            placeholder="友善评论，和邻居分享你的感受…"
+            :maxlength="200"
+            :height="96"
+          />
+          <ni-button type="primary" size="lg" block :loading="commentSubmitting" @tap="submitComment">
+            发布评论
+          </ni-button>
+        </view>
+      </ni-sheet>
+    </template>
+
+    <view v-else-if="loading" class="ldetail__loading">
+      <ni-skeleton :rows="4" :avatar="true" />
+    </view>
+
+    <view v-else class="ldetail__error">
+      <ni-empty icon="image" title="动态不存在或已删除" desc="去看看其他邻居的生活记录吧" action-text="返回生活频道" @action="goLife" />
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="100" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
+import type { LifeComment, LifePost } from '../../models'
+import { useLifeStore } from '../../stores/life.store'
+import { useToast } from '../../composables/useToast'
+import { previewImages } from '../../utils/image'
+
+const lifeStore = useLifeStore()
+const { toast, showToast } = useToast()
+
+const postId = ref('')
+const post = ref<LifePost | null>(null)
+const comments = ref<LifeComment[]>([])
+const loading = ref(true)
+const following = ref(false)
+const playing = ref(false)
+const commentVisible = ref(false)
+const commentText = ref('')
+const commentSubmitting = ref(false)
+
+const images = computed(() => post.value?.images ?? [])
+
+onShareAppMessage(() => ({
+  title: post.value?.title ?? '邻里小栈 · 生活频道',
+  path: `/pages/life/detail?id=${postId.value}`,
+  imageUrl: post.value?.cover ?? '',
+}))
+
+onLoad(async (options: any) => {
+  postId.value = String(options?.id ?? '')
+  if (!postId.value) {
+    loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const [detail, commentList] = await Promise.all([
+      lifeStore.fetchDetail(postId.value),
+      lifeStore.fetchComments(postId.value),
+    ])
+    post.value = detail
+    comments.value = commentList
+    following.value = Boolean(detail.following)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+})
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.navigateTo({ url: '/pages/life/index' })
+}
+function goLife(): void {
+  uni.redirectTo({ url: '/pages/life/index' })
+}
+
+function toggleVideo(): void {
+  playing.value = !playing.value
+  showToast(playing.value ? '正在播放（演示环境）' : '已暂停')
+}
+
+function previewImage(index: number): void {
+  previewImages(images.value, images.value[index])
+}
+function previewAll(): void {
+  previewImages(images.value, images.value[0])
+}
+
+function onFollow(): void {
+  following.value = !following.value
+  if (post.value) post.value.following = following.value
+  showToast(following.value ? '已关注该邻居' : '已取消关注')
+}
+
+async function onLike(): Promise<void> {
+  if (!post.value) return
+  try {
+    await lifeStore.toggleLike(post.value)
+    showToast(post.value.liked ? '已点赞' : '已取消点赞')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '点赞失败', 'alert')
+  }
+}
+
+function onShare(): void {
+  if (!post.value) return
+  uni.showActionSheet({
+    itemList: ['微信好友', '复制链接'],
+    success: (res: any) => {
+      if (Number(res.tapIndex) === 1) {
+        uni.setClipboardData({
+          data: `https://www.neighinn.com/life/${post.value?.id}`,
+          success: () => showToast('链接已复制'),
+        })
+      } else {
+        showToast('请在微信中分享给邻居')
+      }
+    },
+  })
+}
+
+function openComment(): void {
+  commentVisible.value = true
+}
+
+async function submitComment(): Promise<void> {
+  if (!post.value) return
+  if (!commentText.value.trim()) {
+    showToast('评论内容不能为空', 'alert')
+    return
+  }
+  commentSubmitting.value = true
+  try {
+    const comment = await lifeStore.addComment(post.value.id, commentText.value)
+    comments.value = [comment, ...comments.value]
+    post.value.comments += 1
+    commentText.value = ''
+    commentVisible.value = false
+    showToast('评论已发布')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '评论失败', 'alert')
+  } finally {
+    commentSubmitting.value = false
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.ldetail {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.ldetail__header {
+  background-color: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #f0ece8;
+}
+.ldetail__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.ldetail__nav-button {
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+}
+.ldetail__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.ldetail__media {
+  width: 100%;
+  position: relative;
+  background-color: #e9e5e2;
+}
+.ldetail__video {
+  width: 100%;
+  height: 286px;
+}
+.ldetail__video-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(20, 18, 16, 0.18);
+}
+.ldetail__play {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background-color: rgba(20, 18, 16, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  align-items: center;
+  justify-content: center;
+}
+.ldetail__play-text {
+  margin-top: 7px;
+  font-size: 8px;
+  color: #ffffff;
+}
+.ldetail__duration {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding-left: 7px;
+  padding-right: 7px;
+  height: 20px;
+  border-radius: 7px;
+  background-color: rgba(20, 18, 16, 0.5);
+  color: #ffffff;
+  font-size: 8px;
+}
+.ldetail__gallery {
+  flex-direction: row;
+  padding: 3px;
+  position: relative;
+}
+.ldetail__gallery-left {
+  width: 50%;
+  height: 423px;
+  padding-right: 1.5px;
+}
+.ldetail__gallery-main {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+}
+.ldetail__gallery-right {
+  flex: 1;
+  padding-left: 1.5px;
+}
+.ldetail__gallery-item {
+  width: 100%;
+  height: 210px;
+  border-radius: 3px;
+}
+.ldetail__gallery-item--gap {
+  margin-top: 3px;
+}
+.ldetail__more {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  height: 24px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: 12px;
+  background-color: rgba(20, 18, 16, 0.5);
+  align-items: center;
+  justify-content: center;
+}
+.ldetail__more-text {
+  font-size: 8px;
+  color: #ffffff;
+}
+.ldetail__article {
+  background-color: $ni-color-white;
+  padding: 15px;
+}
+.ldetail__author {
+  flex-direction: row;
+  align-items: center;
+}
+.ldetail__author-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.ldetail__author-row {
+  flex-direction: row;
+  align-items: center;
+}
+.ldetail__author-name {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.ldetail__verified {
+  margin-left: 2px;
+  font-size: 6px;
+  color: $ni-color-credit-deep;
+}
+.ldetail__author-meta {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__follow {
+  height: 29px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  border: 1px solid #ffb68e;
+  align-items: center;
+  justify-content: center;
+}
+.ldetail__follow--active {
+  border-color: #e6ddd6;
+  background-color: $ni-color-fill-1;
+}
+.ldetail__follow-text {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.ldetail__follow-text--active {
+  color: $ni-color-text-tertiary;
+}
+.ldetail__tag-row {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 12px;
+}
+.ldetail__meta {
+  margin-left: 7px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__title {
+  margin-top: 9px;
+  font-size: $ni-font-20;
+  line-height: 29px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.ldetail__body {
+  margin-top: 8px;
+  font-size: $ni-font-12;
+  line-height: 21px;
+  color: $ni-color-text-secondary;
+}
+.ldetail__stats {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: $ni-border-divider;
+}
+.ldetail__stat {
+  flex-direction: row;
+  align-items: center;
+  margin-right: 20px;
+}
+.ldetail__stat-text {
+  margin-left: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__comments {
+  margin-top: 10px;
+  padding: 15px;
+  background-color: $ni-color-white;
+}
+.ldetail__comments-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ldetail__comments-title-row {
+  flex-direction: row;
+  align-items: center;
+}
+.ldetail__comments-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.ldetail__comments-count {
+  margin-left: 5px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__comments-sort {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__comments-empty {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.ldetail__comments-empty-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__comment {
+  flex-direction: row;
+  align-items: flex-start;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  border-bottom: $ni-border-divider;
+}
+.ldetail__comment-body {
+  flex: 1;
+  margin-left: 9px;
+}
+.ldetail__comment-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.ldetail__comment-name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.ldetail__comment-name {
+  margin-right: 4px;
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.ldetail__comment-time {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__comment-content {
+  margin-top: 4px;
+  font-size: $ni-font-10;
+  line-height: 17px;
+  color: $ni-color-text-secondary;
+}
+.ldetail__bottom-space {
+  height: calc(80px + env(safe-area-inset-bottom));
+}
+.ldetail__bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  min-height: 70px;
+  padding-left: 13px;
+  padding-right: 13px;
+  padding-top: 9px;
+  padding-bottom: calc(13px + env(safe-area-inset-bottom));
+  flex-direction: row;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -5px 20px rgba(65, 45, 32, 0.06);
+}
+.ldetail__bar-input {
+  flex: 1;
+  height: 43px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 13px;
+  border-radius: $ni-radius-13;
+  background-color: #f6f3f1;
+  margin-right: 9px;
+}
+.ldetail__bar-input-text {
+  margin-left: 5px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-placeholder;
+}
+.ldetail__bar-action {
+  width: 37px;
+  align-items: center;
+  justify-content: center;
+}
+.ldetail__bar-label {
+  margin-top: 1px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.ldetail__comment-sheet {
+  padding-top: 6px;
+  padding-bottom: 16px;
+}
+.ldetail__loading {
+  padding-top: 20px;
+}
+.ldetail__error {
+  padding-top: 40px;
+}
+</style>

@@ -1,0 +1,304 @@
+<template>
+  <scroll-view class="credit-page" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="credit-page__header">
+      <ni-status-bar />
+      <view class="credit-page__nav">
+        <view class="credit-page__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="credit-page__nav-title">信用中心</text>
+        <view class="credit-page__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="credit-page__content">
+      <view class="credit-page__hero">
+        <view class="credit-page__hero-head">
+          <view class="credit-page__hero-icon">
+            <ni-icon name="shield" :size="24" state="gold" />
+          </view>
+          <view class="credit-page__hero-copy">
+            <text class="credit-page__hero-level">{{ credit.level }}</text>
+            <text class="credit-page__hero-desc">{{ credit.nextLevel }}</text>
+          </view>
+        </view>
+        <view class="credit-page__score-row">
+          <text class="credit-page__score">{{ credit.score }}</text>
+          <text class="credit-page__score-unit">分</text>
+        </view>
+        <ni-progress :percent="credit.score" :height="6" color="#D4A055" />
+        <view class="credit-page__score-labels">
+          <text class="credit-page__score-label">0</text>
+          <text class="credit-page__score-label">100</text>
+        </view>
+      </view>
+
+      <view class="credit-page__levels">
+        <view v-for="level in levels" :key="level.name" class="credit-page__level" :class="{ 'credit-page__level--active': level.active }">
+          <text class="credit-page__level-name" :class="{ 'credit-page__level-name--active': level.active }">{{ level.name }}</text>
+          <text class="credit-page__level-range">{{ level.range }}</text>
+        </view>
+      </view>
+
+      <view class="credit-page__records">
+        <view class="credit-page__records-head">
+          <text class="credit-page__records-title">信用明细</text>
+          <text class="credit-page__records-sub">近 90 天</text>
+        </view>
+        <view v-for="record in credit.records" :key="record.id" class="credit-page__record">
+          <view class="credit-page__record-icon">
+            <ni-icon name="spark" :size="14" state="gold" />
+          </view>
+          <view class="credit-page__record-copy">
+            <text class="credit-page__record-title">{{ record.title }}</text>
+            <text class="credit-page__record-time">{{ record.time }}</text>
+          </view>
+          <text class="credit-page__record-delta">+{{ record.delta }}</text>
+        </view>
+      </view>
+
+      <view class="credit-page__rules">
+        <text class="credit-page__rules-title">如何提升信用分</text>
+        <text class="credit-page__rules-item">· 完成担保交易、按时赴约、收到好评</text>
+        <text class="credit-page__rules-item">· 参与邻里互助、服务响应及时</text>
+        <text class="credit-page__rules-item">· 遵守平台规则，不发布违禁物品</text>
+        <text class="credit-page__rules-item">· 违规、爽约、恶意评价会扣减信用分</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { CreditInfo } from '../../models'
+import { itemService } from '../../services/item.service'
+import { useToast } from '../../composables/useToast'
+
+const { toast, showToast } = useToast()
+
+const credit = ref<CreditInfo>({
+  score: 92,
+  level: '信用极好',
+  nextLevel: '距离下一等级还差 8 分',
+  records: [],
+})
+const levels = [
+  { name: '待提升', range: '0–59', active: false },
+  { name: '一般', range: '60–74', active: false },
+  { name: '良好', range: '75–89', active: false },
+  { name: '极好', range: '90–100', active: true },
+]
+
+onLoad(async () => {
+  try {
+    credit.value = await itemService.getCreditInfo()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '信用信息加载失败', 'alert')
+  }
+})
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.credit-page {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.credit-page__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.credit-page__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.credit-page__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.credit-page__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.credit-page__nav-placeholder {
+  width: 42px;
+}
+.credit-page__content {
+  padding: 14px;
+}
+.credit-page__hero {
+  padding: 16px;
+  border-radius: $ni-radius-18;
+  background-image: $ni-gradient-credit;
+  border: 1px solid #f4e2b5;
+}
+.credit-page__hero-head {
+  flex-direction: row;
+  align-items: center;
+}
+.credit-page__hero-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  background-color: rgba(255, 255, 255, 0.7);
+  align-items: center;
+  justify-content: center;
+}
+.credit-page__hero-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.credit-page__hero-level {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-credit-deep;
+}
+.credit-page__hero-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: #9b7e45;
+}
+.credit-page__score-row {
+  flex-direction: row;
+  align-items: baseline;
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+.credit-page__score {
+  font-size: 38px;
+  font-weight: 700;
+  color: $ni-color-credit-deep;
+}
+.credit-page__score-unit {
+  margin-left: 3px;
+  font-size: $ni-font-11;
+  color: #9b7e45;
+}
+.credit-page__score-labels {
+  flex-direction: row;
+  justify-content: space-between;
+  margin-top: 3px;
+}
+.credit-page__score-label {
+  font-size: 7px;
+  color: #b29a69;
+}
+.credit-page__levels {
+  flex-direction: row;
+  margin-top: 10px;
+  padding: 11px;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.credit-page__level {
+  flex: 1;
+  align-items: center;
+}
+.credit-page__level--active {
+  background-color: $ni-color-credit-bg-2;
+  border-radius: 10px;
+}
+.credit-page__level-name {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-text-secondary;
+}
+.credit-page__level-name--active {
+  color: $ni-color-credit-deep;
+}
+.credit-page__level-range {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.credit-page__records {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.credit-page__records-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.credit-page__records-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.credit-page__records-sub {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.credit-page__record {
+  min-height: 54px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.credit-page__record-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background-color: $ni-color-credit-bg-2;
+  align-items: center;
+  justify-content: center;
+}
+.credit-page__record-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.credit-page__record-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.credit-page__record-time {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.credit-page__record-delta {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-gift;
+}
+.credit-page__rules {
+  margin-top: 10px;
+  padding: 13px;
+  border-radius: $ni-radius-14;
+  background-color: #fff8e8;
+}
+.credit-page__rules-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-service-deep;
+}
+.credit-page__rules-item {
+  margin-top: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

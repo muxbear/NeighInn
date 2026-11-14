@@ -1,0 +1,752 @@
+<template>
+  <scroll-view class="odetail" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="odetail__header">
+      <ni-status-bar />
+      <view class="odetail__nav">
+        <view class="odetail__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="odetail__nav-title">订单详情</text>
+        <view class="odetail__nav-button" @click="goHelp">
+          <ni-icon name="message" :size="18" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <template v-if="order">
+      <view class="odetail__status" :class="`odetail__status--${statusTone}`">
+        <view class="odetail__status-icon">
+          <ni-icon :name="statusIcon" :size="24" :state="statusTone === 'success' ? 'white' : statusTone === 'danger' ? 'danger' : 'active'" />
+        </view>
+        <view class="odetail__status-copy">
+          <text class="odetail__status-title" :class="{ 'odetail__status-title--light': statusTone === 'success' }">{{ order.statusText }}</text>
+          <text class="odetail__status-desc" :class="{ 'odetail__status-desc--light': statusTone === 'success' }">{{ statusDesc }}</text>
+        </view>
+      </view>
+
+      <view class="odetail__card">
+        <view class="odetail__item">
+          <image class="odetail__item-image" :src="order.item.image" mode="aspectFill" @click="goItem" />
+          <view class="odetail__item-copy">
+            <text class="odetail__item-title" :lines="2">{{ order.item.title }}</text>
+            <view class="odetail__item-meta">
+              <trade-tag :type="order.tradeType" size="xs" />
+              <text class="odetail__item-condition">{{ order.item.condition }}</text>
+            </view>
+            <text v-if="order.amount > 0" class="odetail__item-amount">¥{{ order.amount }}</text>
+            <text v-else class="odetail__item-free">{{ order.tradeType === '免费' ? '免费赠与' : '物品互换' }}</text>
+          </view>
+        </view>
+
+        <view v-if="order.tradeType === '互换' && order.offeredItems?.length" class="odetail__swap">
+          <text class="odetail__swap-label">我提供的物品</text>
+          <view v-for="item in order.offeredItems" :key="item.id" class="odetail__swap-row" @click="goItemById(item.id)">
+            <image class="odetail__swap-image" :src="item.image" mode="aspectFill" />
+            <view class="odetail__swap-copy">
+              <text class="odetail__swap-title" :lines="1">{{ item.title }}</text>
+              <text class="odetail__swap-meta">{{ item.condition }} · {{ item.type }}</text>
+            </view>
+            <ni-icon name="chevron" :size="14" state="tertiary" />
+          </view>
+        </view>
+      </view>
+
+      <view v-if="order.appointment" class="odetail__card">
+        <view class="odetail__card-head">
+          <text class="odetail__card-title">见面安排</text>
+          <view class="odetail__appointment-status">
+            <ni-icon name="check" :size="11" state="green" />
+            <text class="odetail__appointment-status-text">{{ order.appointment.status === 'CONFIRMED' ? '已确认' : '待确认' }}</text>
+          </view>
+        </view>
+        <view class="odetail__appointment">
+          <view class="odetail__appointment-icon"><ni-icon name="clock" :size="18" state="active" /></view>
+          <view class="odetail__appointment-copy">
+            <text class="odetail__appointment-time">{{ order.appointment.time }}</text>
+            <text class="odetail__appointment-place">{{ order.appointment.place }}</text>
+          </view>
+        </view>
+        <view v-if="order.canInspect" class="odetail__appointment-actions">
+          <view class="odetail__appointment-action" @click="goInspect">
+            <text class="odetail__appointment-action-text">已到现场，确认验货</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="odetail__card">
+        <text class="odetail__card-title">订单信息</text>
+        <view class="odetail__info-row">
+          <text class="odetail__info-label">订单编号</text>
+          <text class="odetail__info-value">{{ order.orderNo }}</text>
+        </view>
+        <view class="odetail__info-row">
+          <text class="odetail__info-label">交易方式</text>
+          <text class="odetail__info-value">{{ order.tradeType }} · {{ order.tradeType === '出售' ? '担保支付' : order.tradeType === '免费' ? '免费赠与' : '以物换物' }}</text>
+        </view>
+        <view class="odetail__info-row">
+          <text class="odetail__info-label">创建时间</text>
+          <text class="odetail__info-value">{{ order.createdAtText }}</text>
+        </view>
+        <view class="odetail__info-row">
+          <text class="odetail__info-label">我的身份</text>
+          <text class="odetail__info-value">{{ order.role === 'buyer' ? '买家 / 领取方' : '卖家 / 赠与方' }}</text>
+        </view>
+        <view class="odetail__info-row odetail__info-row--last">
+          <text class="odetail__info-label">交易对象</text>
+          <view class="odetail__peer" @click="onContact">
+            <ni-avatar :src="peer.avatar" :name="peer.name" :size="24" variant="green" />
+            <text class="odetail__peer-name">{{ peer.name }}</text>
+            <ni-icon name="message" :size="13" state="active" />
+          </view>
+        </view>
+      </view>
+
+      <view class="odetail__card">
+        <text class="odetail__card-title">订单进度</text>
+        <view class="odetail__timeline">
+          <view v-for="(step, index) in order.timeline" :key="step.key" class="odetail__timeline-item">
+            <view class="odetail__timeline-left">
+              <view
+                class="odetail__timeline-dot"
+                :class="{ 'odetail__timeline-dot--done': step.done, 'odetail__timeline-dot--active': step.active }"
+              >
+                <ni-icon v-if="step.done" name="check" :size="9" state="white" />
+              </view>
+              <view v-if="index < order.timeline.length - 1" class="odetail__timeline-line" :class="{ 'odetail__timeline-line--done': step.done }" />
+            </view>
+            <view class="odetail__timeline-copy">
+              <text class="odetail__timeline-title" :class="{ 'odetail__timeline-title--active': step.active }">{{ step.title }}</text>
+              <text v-if="step.time" class="odetail__timeline-time">{{ step.time }}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view class="odetail__secondary-actions">
+        <view v-if="canCompleteTrade" class="odetail__secondary" @click="goAppointment">
+          <text class="odetail__secondary-text">预约见面</text>
+        </view>
+        <view v-if="order.canCancel" class="odetail__secondary" @click="onCancel">
+          <text class="odetail__secondary-text">取消订单</text>
+        </view>
+        <view v-if="order.canDispute" class="odetail__secondary" @click="goDispute">
+          <text class="odetail__secondary-text">申请退款 / 纠纷</text>
+        </view>
+        <view class="odetail__secondary" @click="onContact">
+          <text class="odetail__secondary-text">联系对方</text>
+        </view>
+      </view>
+
+      <view class="odetail__bottom-space" />
+      <view class="odetail__bar">
+        <view v-if="order.canPay" class="odetail__bar-amount">
+          <text class="odetail__bar-label">待支付</text>
+          <text class="odetail__bar-value">¥{{ order.amount }}</text>
+        </view>
+        <ni-button type="primary" size="lg" block :disabled="!primaryAction" @tap="onPrimary">
+          {{ primaryText }}
+        </ni-button>
+      </view>
+    </template>
+
+    <view v-else-if="loading" class="odetail__loading">
+      <ni-skeleton :rows="4" :avatar="false" />
+    </view>
+
+    <view v-else class="odetail__error">
+      <ni-empty icon="order" title="订单不存在" desc="订单可能已被删除或链接失效" action-text="返回订单列表" @action="goOrders" />
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="90" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Order } from '../../models'
+import { useOrderStore } from '../../stores/order.store'
+import { useToast } from '../../composables/useToast'
+import { useIM } from '../../composables/useIM'
+
+const orderStore = useOrderStore()
+const { toast, showToast } = useToast()
+const { openChat } = useIM()
+
+const orderId = ref('')
+const order = ref<Order | null>(null)
+const loading = ref(true)
+
+const peer = computed(() => {
+  if (!order.value) return { id: '', name: '', avatar: '' }
+  return order.value.role === 'buyer' ? order.value.seller : order.value.buyer
+})
+
+const statusTone = computed(() => {
+  const status = order.value?.status
+  if (status === 'COMPLETED') return 'success'
+  if (status === 'CANCELLED' || status === 'REFUNDED') return 'muted'
+  if (status === 'DISPUTING') return 'danger'
+  return 'active'
+})
+
+const statusIcon = computed(() => {
+  if (statusTone.value === 'success') return 'check'
+  if (statusTone.value === 'danger') return 'alert'
+  if (statusTone.value === 'muted') return 'clock'
+  return 'order'
+})
+
+const statusDesc = computed(() => {
+  if (!order.value) return ''
+  if (order.value.canPay) return '请在 30 分钟内完成支付，货款将由平台托管'
+  if (order.value.canAppointment) return '与邻居约定见面时间与地点，线下验货'
+  if (order.value.canInspect) return '确认物品无误后，平台将向卖家放款'
+  if (order.value.canReview) return '交易已完成，评价邻居可获得信用分'
+  return '订单状态会通过消息与通知实时同步'
+})
+
+const canConfirmApplication = computed(() => {
+  if (!order.value) return false
+  return (
+    order.value.canConfirmApplication ||
+    (order.value.role === 'seller' &&
+      order.value.status === 'PENDING_CONFIRM' &&
+      order.value.tradeType !== '出售')
+  )
+})
+
+const canCompleteTrade = computed(() => {
+  if (!order.value) return false
+  return (
+    order.value.canCompleteTrade ||
+    (order.value.tradeType !== '出售' && order.value.status === 'CONFIRMED')
+  )
+})
+
+const primaryAction = computed(() => {
+  if (!order.value) return ''
+  if (canConfirmApplication.value) return 'confirm-application'
+  if (canCompleteTrade.value) return 'complete-trade'
+  if (order.value.canPay) return 'pay'
+  if (order.value.canAppointment) return 'appointment'
+  if (order.value.canInspect) return 'inspect'
+  if (order.value.canReview) return 'review'
+  return 'contact'
+})
+
+const primaryText = computed(() => {
+  if (primaryAction.value === 'confirm-application') return '确认邻居申请'
+  if (primaryAction.value === 'complete-trade') return '确认完成交割'
+  if (primaryAction.value === 'pay') return '去支付'
+  if (primaryAction.value === 'appointment') return '预约见面验货'
+  if (primaryAction.value === 'inspect') return '确认验货'
+  if (primaryAction.value === 'review') return '评价邻居'
+  return '联系对方'
+})
+
+onLoad(async (options: any) => {
+  orderId.value = String(options?.id ?? '')
+  if (!orderId.value) {
+    loading.value = false
+    return
+  }
+  try {
+    order.value = await orderStore.fetchDetail(orderId.value)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+})
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.redirectTo({ url: '/pages/orders/index' })
+}
+function goOrders(): void {
+  uni.redirectTo({ url: '/pages/orders/index' })
+}
+function goHelp(): void {
+  uni.navigateTo({ url: '/pages/settings/help' })
+}
+function goItem(): void {
+  if (!order.value) return
+  uni.navigateTo({ url: `/pages/item/detail?id=${order.value.item.id}` })
+}
+function goItemById(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+function goInspect(): void {
+  if (!order.value) return
+  uni.navigateTo({ url: `/pages/trade/inspect?orderId=${order.value.id}` })
+}
+function goAppointment(): void {
+  if (!order.value) return
+  uni.navigateTo({ url: `/pages/trade/appointment?orderId=${order.value.id}` })
+}
+function goDispute(): void {
+  if (!order.value) return
+  uni.navigateTo({ url: `/pages/trade/dispute?orderId=${order.value.id}` })
+}
+
+function onPrimary(): void {
+  if (!order.value) return
+  const action = primaryAction.value
+  if (action === 'confirm-application') {
+    confirmApplication()
+  } else if (action === 'complete-trade') {
+    completeTrade()
+  } else if (action === 'pay') {
+    uni.navigateTo({ url: `/pages/pay/cashier?orderId=${order.value.id}` })
+  } else if (action === 'appointment') {
+    uni.navigateTo({ url: `/pages/trade/appointment?orderId=${order.value.id}` })
+  } else if (action === 'inspect') {
+    goInspect()
+  } else if (action === 'review') {
+    uni.navigateTo({ url: `/pages/trade/review?orderId=${order.value.id}` })
+  } else {
+    onContact()
+  }
+}
+
+function confirmApplication(): void {
+  if (!order.value) return
+  uni.showModal({
+    title: '确认邻居申请',
+    content: '确认接受这次申请后，请与邻居约定见面交割时间。',
+    confirmText: '确认接受',
+    success: async (res) => {
+      if (!res.confirm || !order.value) return
+      try {
+        order.value = await orderStore.confirmApplication(order.value.id)
+        showToast('已确认申请，等待见面交割')
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+      }
+    },
+  })
+}
+
+function completeTrade(): void {
+  if (!order.value) return
+  uni.showModal({
+    title: '确认完成交割',
+    content: '请确认已与邻居见面并完成物品交割。确认后订单完成，双方可以互相评价。',
+    confirmText: '确认完成',
+    success: async (res) => {
+      if (!res.confirm || !order.value) return
+      try {
+        order.value = await orderStore.confirmInspection(order.value.id)
+        showToast('交易已完成，去评价邻居吧')
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+      }
+    },
+  })
+}
+
+function onCancel(): void {
+  if (!order.value) return
+  uni.showModal({
+    title: '取消订单',
+    content: '取消后物品将重新上架，确认取消该订单吗？',
+    confirmText: '确认取消',
+    confirmColor: '#E85D20',
+    success: async (res) => {
+      if (!res.confirm || !order.value) return
+      try {
+        order.value = await orderStore.cancel(order.value.id)
+        showToast('订单已取消')
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '取消失败', 'alert')
+      }
+    },
+  })
+}
+
+async function onContact(): Promise<void> {
+  if (!order.value) return
+  try {
+    await openChat(peer.value.id)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.odetail {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.odetail__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.odetail__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.odetail__nav-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+}
+.odetail__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.odetail__status {
+  margin: 12px 14px 0;
+  padding: 15px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-18;
+}
+.odetail__status--active {
+  background-image: linear-gradient(135deg, #fff1e6 0%, #fff9f3 100%);
+  border: 1px solid #ffe0cc;
+}
+.odetail__status--success {
+  background-image: $ni-gradient-success;
+}
+.odetail__status--muted {
+  background-color: $ni-color-fill-2;
+}
+.odetail__status--danger {
+  background-color: $ni-color-danger-bg;
+}
+.odetail__status-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  background-color: rgba(255, 255, 255, 0.22);
+  align-items: center;
+  justify-content: center;
+}
+.odetail__status-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.odetail__status-title {
+  font-size: $ni-font-20;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.odetail__status-title--light {
+  color: #ffffff;
+}
+.odetail__status-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-text-secondary;
+}
+.odetail__status-desc--light {
+  color: rgba(255, 255, 255, 0.88);
+}
+.odetail__card {
+  margin: 10px 14px 0;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.odetail__item {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.odetail__item-image {
+  width: 76px;
+  height: 76px;
+  border-radius: $ni-radius-13;
+  background-color: #f3ede7;
+}
+.odetail__item-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.odetail__item-title {
+  font-size: $ni-font-13;
+  line-height: 19px;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.odetail__item-meta {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 5px;
+}
+.odetail__item-condition {
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.odetail__item-amount {
+  margin-top: 5px;
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.odetail__item-free {
+  margin-top: 5px;
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-gift;
+}
+.odetail__swap {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: $ni-border-divider;
+}
+.odetail__swap-label {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.odetail__swap-row {
+  margin-top: 8px;
+  padding: 8px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-fill-1;
+}
+.odetail__swap-image {
+  width: 48px;
+  height: 48px;
+  border-radius: 9px;
+  background-color: #e9e3dd;
+}
+.odetail__swap-copy {
+  flex: 1;
+  margin-left: 8px;
+}
+.odetail__swap-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.odetail__swap-meta {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.odetail__card-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.odetail__card-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.odetail__appointment-status {
+  flex-direction: row;
+  align-items: center;
+}
+.odetail__appointment-status-text {
+  margin-left: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-gift-deep;
+}
+.odetail__appointment {
+  margin-top: 11px;
+  padding: 10px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-primary-bg;
+}
+.odetail__appointment-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.odetail__appointment-copy {
+  flex: 1;
+  margin-left: 8px;
+}
+.odetail__appointment-time {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.odetail__appointment-place {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.odetail__appointment-actions {
+  margin-top: 9px;
+}
+.odetail__appointment-action {
+  height: 34px;
+  border-radius: 10px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.odetail__appointment-action-text {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: #ffffff;
+}
+.odetail__info-row {
+  min-height: 42px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: $ni-border-divider;
+}
+.odetail__info-row--last {
+  border-bottom: 0;
+}
+.odetail__info-label {
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.odetail__info-value {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.odetail__peer {
+  flex-direction: row;
+  align-items: center;
+}
+.odetail__peer-name {
+  margin-left: 5px;
+  margin-right: 5px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.odetail__timeline {
+  margin-top: 12px;
+}
+.odetail__timeline-item {
+  flex-direction: row;
+  align-items: flex-start;
+  min-height: 44px;
+}
+.odetail__timeline-left {
+  width: 18px;
+  align-items: center;
+}
+.odetail__timeline-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background-color: #eee9e4;
+  align-items: center;
+  justify-content: center;
+}
+.odetail__timeline-dot--done {
+  background-color: $ni-color-gift;
+}
+.odetail__timeline-dot--active {
+  background-color: $ni-color-primary;
+}
+.odetail__timeline-line {
+  flex: 1;
+  width: 2px;
+  background-color: #eee9e4;
+  margin-top: 3px;
+  margin-bottom: 3px;
+}
+.odetail__timeline-line--done {
+  background-color: $ni-color-gift;
+}
+.odetail__timeline-copy {
+  flex: 1;
+  margin-left: 9px;
+  padding-top: 1px;
+}
+.odetail__timeline-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-secondary;
+}
+.odetail__timeline-title--active {
+  color: $ni-color-primary-dark;
+}
+.odetail__timeline-time {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.odetail__secondary-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  padding-left: 14px;
+  margin-top: 12px;
+}
+.odetail__secondary {
+  height: 34px;
+  padding-left: 13px;
+  padding-right: 13px;
+  border-radius: 11px;
+  border: 1px solid #e8e1db;
+  background-color: $ni-color-white;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.odetail__secondary-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.odetail__bottom-space {
+  height: calc(82px + env(safe-area-inset-bottom));
+}
+.odetail__bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  min-height: 76px;
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-top: 9px;
+  padding-bottom: calc(13px + env(safe-area-inset-bottom));
+  flex-direction: row;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -5px 20px rgba(65, 45, 32, 0.06);
+}
+.odetail__bar-amount {
+  margin-right: 14px;
+}
+.odetail__bar-label {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.odetail__bar-value {
+  margin-top: 1px;
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.odetail__loading {
+  padding: 20px 14px;
+}
+.odetail__error {
+  padding-top: 40px;
+}
+</style>

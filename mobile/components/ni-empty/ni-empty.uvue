@@ -1,0 +1,85 @@
+<template>
+  <view class="ni-empty">
+    <view class="ni-empty__icon">
+      <ni-icon :name="icon" :size="38" state="active" />
+    </view>
+    <text class="ni-empty__title">{{ title }}</text>
+    <text v-if="desc" class="ni-empty__desc">{{ desc }}</text>
+    <view v-if="actionText" class="ni-empty__action" hover-class="ni-empty__action--pressed" @click="onAction">
+      <text class="ni-empty__action-text">{{ actionText }}</text>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    icon?: string
+    title?: string
+    desc?: string
+    actionText?: string
+  }>(),
+  {
+    icon: 'box',
+    title: '这里还空空的',
+    desc: '',
+    actionText: '',
+  },
+)
+
+const emit = defineEmits<{ (event: 'action'): void }>()
+
+function onAction(): void {
+  if (props.actionText) emit('action')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-empty {
+  align-items: center;
+  padding-top: 54px;
+  padding-bottom: 54px;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+.ni-empty__icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 30px;
+  background-color: #fff1e5;
+  align-items: center;
+  justify-content: center;
+}
+.ni-empty__title {
+  margin-top: 16px;
+  font-size: $ni-font-16;
+  font-weight: 600;
+  color: #555555;
+  text-align: center;
+}
+.ni-empty__desc {
+  margin-top: 7px;
+  font-size: $ni-font-13;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+  line-height: 20px;
+}
+.ni-empty__action {
+  margin-top: 18px;
+  height: 38px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.ni-empty__action--pressed {
+  opacity: 0.8;
+}
+.ni-empty__action-text {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-primary;
+}
+</style>

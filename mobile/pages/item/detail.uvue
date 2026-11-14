@@ -1,0 +1,772 @@
+<template>
+  <scroll-view class="detail" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <template v-if="item">
+      <view class="detail__gallery">
+        <swiper
+          class="detail__swiper"
+          :current="currentImage"
+          :circular="false"
+          @change="onSwiperChange"
+        >
+          <swiper-item v-for="(image, index) in gallery" :key="image + index">
+            <image class="detail__swiper-image" :src="image" mode="aspectFill" @click="preview(index)" />
+          </swiper-item>
+        </swiper>
+        <view class="detail__gallery-mask" />
+
+        <view class="detail__nav" :style="{ top: statusBarHeight + 10 + 'px' }">
+          <view class="detail__circle" @click="goBack">
+            <ni-icon name="chevron" :size="19" state="white" :rotate="180" />
+          </view>
+          <view class="detail__nav-right">
+            <view class="detail__circle" @click="onFavorite">
+              <ni-icon name="heart" :size="19" :state="item.favorite ? 'active' : 'white'" :filled="item.favorite" />
+            </view>
+            <view class="detail__circle detail__circle--gap" @click="onShare">
+              <ni-icon name="share" :size="19" state="white" />
+            </view>
+          </view>
+        </view>
+
+        <template v-if="gallery.length > 1">
+          <view class="detail__arrow detail__arrow--left" :class="{ 'detail__arrow--disabled': currentImage === 0 }" @click="prevImage">
+            <ni-icon name="chevron" :size="18" state="white" :rotate="180" />
+          </view>
+          <view class="detail__arrow detail__arrow--right" :class="{ 'detail__arrow--disabled': currentImage >= gallery.length - 1 }" @click="nextImage">
+            <ni-icon name="chevron" :size="18" state="white" />
+          </view>
+          <view class="detail__indicator">
+            <view
+              v-for="(image, index) in gallery"
+              :key="'dot-' + index"
+              class="detail__indicator-dot"
+              :class="{ 'detail__indicator-dot--active': index === currentImage }"
+            />
+          </view>
+          <text class="detail__page">{{ currentImage + 1 }}/{{ gallery.length }}</text>
+        </template>
+      </view>
+
+      <view class="detail__main">
+        <view class="detail__price-row">
+          <ni-price
+            :value="item.price"
+            :type="item.type === '免费' ? 'free' : item.type === '互换' ? 'swap' : 'sale'"
+            size="xl"
+          />
+          <trade-tag :type="item.type" size="md" />
+        </view>
+
+        <text class="detail__title">{{ item.title }}</text>
+
+        <view class="detail__tags">
+          <view class="detail__tag-cell">
+            <ni-tag type="condition" size="sm">{{ item.condition }}</ni-tag>
+          </view>
+          <view class="detail__tag-cell">
+            <ni-tag type="neutral" size="sm">{{ item.community || '本小区' }}</ni-tag>
+          </view>
+          <view v-if="item.aiVerified" class="detail__tag-cell">
+            <ni-tag type="ai" size="sm" icon="spark">AI 验真</ni-tag>
+          </view>
+        </view>
+
+        <view class="detail__travel">
+          <travel-panel
+            :distance="item.distance"
+            :place="item.time"
+            :walk="item.walk"
+            :bike="distanceInfo.bike"
+            :car="distanceInfo.car"
+          />
+        </view>
+      </view>
+
+      <view class="detail__section">
+        <text class="detail__section-label">邻居信息</text>
+        <seller-card
+          v-if="item.seller"
+          :seller="item.seller"
+          :following="following"
+          @follow="onFollow"
+          @chat="onChat"
+        />
+      </view>
+
+      <view class="detail__section">
+        <text class="detail__section-label">物品详情</text>
+        <text class="detail__desc">{{ item.description || '邻居暂时没有填写更多描述。' }}</text>
+
+        <view v-if="item.type === '互换' && item.barterExpect" class="detail__barter">
+          <text class="detail__barter-label">期望交换</text>
+          <text class="detail__barter-value">{{ item.barterExpect }}</text>
+        </view>
+
+        <view v-if="item.aiVerified" class="detail__ai" @click="showAiReport">
+          <view class="detail__ai-icon">
+            <ni-icon name="spark" :size="18" state="green" />
+          </view>
+          <view class="detail__ai-copy">
+            <text class="detail__ai-title">AI 品质检测已通过</text>
+            <text class="detail__ai-desc">图像质量、图文一致、合规检查均已验证</text>
+          </view>
+          <ni-icon name="chevron" :size="14" state="green" />
+        </view>
+      </view>
+
+      <view class="detail__section">
+        <view class="detail__comments-head">
+          <view class="detail__comments-title-row">
+            <text class="detail__section-label detail__section-label--inline">邻里留言</text>
+            <text class="detail__comments-count">{{ comments.length }}</text>
+          </view>
+          <text class="detail__comments-more" @click="openCommentSheet">查看全部</text>
+        </view>
+
+        <view v-if="comments.length === 0" class="detail__comments-empty">
+          <text class="detail__comments-empty-text">还没有留言，来和邻居聊聊吧</text>
+        </view>
+        <comment-item v-for="comment in comments.slice(0, 3)" :key="comment.id" :comment="comment" @reply="openCommentSheet" />
+
+        <view class="detail__comment-entry" @click="openCommentSheet">
+          <ni-icon name="message" :size="15" state="tertiary" />
+          <text class="detail__comment-entry-text">写下你的留言…</text>
+        </view>
+      </view>
+
+      <view class="detail__bottom-space" />
+
+      <view class="detail__bottom-bar">
+        <view class="detail__bar-action" @click="openCommentSheet">
+          <ni-icon name="message" :size="20" state="secondary" />
+          <text class="detail__bar-label">留言</text>
+        </view>
+        <view class="detail__bar-action" @click="onChat">
+          <ni-icon name="friend" :size="20" state="secondary" />
+          <text class="detail__bar-label">私信</text>
+        </view>
+        <view class="detail__bar-action" @click="onFavorite">
+          <ni-icon name="heart" :size="20" :state="item.favorite ? 'active' : 'secondary'" :filled="item.favorite" />
+          <text class="detail__bar-label">收藏</text>
+        </view>
+        <view class="detail__buy">
+          <ni-button
+            :type="item.type === '免费' ? 'gift' : item.type === '互换' ? 'swap' : 'primary'"
+            size="lg"
+            block
+            :disabled="primaryDisabled"
+            :icon="primaryButton.icon"
+            @tap="onPrimary"
+          >
+            {{ primaryDisabledText || primaryButton.text }}
+          </ni-button>
+        </view>
+      </view>
+
+      <swap-picker
+        v-model:visible="swapVisible"
+        :target-item="item"
+        :offered-items="myOfferedItems"
+        @confirm="onSwapConfirm"
+      />
+
+      <ni-sheet v-model:visible="commentVisible" title="写下留言" height="44vh">
+        <view class="comment-sheet">
+          <ni-textarea
+            v-model="commentText"
+            placeholder="和邻居打个招呼，问问物品细节吧…"
+            :maxlength="200"
+            :height="96"
+          />
+          <ni-button type="primary" size="lg" block :loading="commentSubmitting" @tap="submitComment">
+            发布留言
+          </ni-button>
+          <text class="comment-sheet__tip">友善交流，共同维护温暖的邻里氛围</text>
+        </view>
+      </ni-sheet>
+    </template>
+
+    <view v-else-if="loading" class="detail__loading">
+      <ni-skeleton :rows="4" :avatar="false" />
+      <ni-skeleton :rows="3" :avatar="true" />
+    </view>
+
+    <view v-else class="detail__error">
+      <ni-empty icon="box" title="物品不存在或已下架" desc="去看看其他邻居分享的好物吧" action-text="返回首页" @action="goHome" />
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="100" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
+import type { DistanceInfo, Item, ItemComment } from '../../models'
+import { useItemStore } from '../../stores/item.store'
+import { useOrderStore } from '../../stores/order.store'
+import { useToast } from '../../composables/useToast'
+import { useSystemMetrics } from '../../composables/useSystemMetrics'
+import { useIM } from '../../composables/useIM'
+import { itemService } from '../../services/item.service'
+import { previewImages } from '../../utils/image'
+import { TRADE_METHOD_BUTTON } from '../../config/constants'
+
+const itemStore = useItemStore()
+const orderStore = useOrderStore()
+const { toast, showToast } = useToast()
+const { statusBarHeight } = useSystemMetrics()
+const { openChat } = useIM()
+
+const itemId = ref('')
+const item = ref<Item | null>(null)
+const comments = ref<ItemComment[]>([])
+const distanceInfo = ref<DistanceInfo>({ distance: '', walk: '', bike: '骑行3分钟', car: '驾车2分钟', meters: 0 })
+const currentImage = ref(0)
+const loading = ref(true)
+const following = ref(false)
+const commentVisible = ref(false)
+const commentText = ref('')
+const commentSubmitting = ref(false)
+const swapVisible = ref(false)
+const creatingOrder = ref(false)
+
+const gallery = computed(() => {
+  if (!item.value) return []
+  if (item.value.images && item.value.images.length) return item.value.images
+  if (item.value.gallery && item.value.gallery.length) return item.value.gallery
+  return item.value.image ? [item.value.image] : []
+})
+
+const primaryButton = computed(() => TRADE_METHOD_BUTTON[item.value?.type ?? '出售'])
+const primaryDisabled = computed(() => {
+  if (!item.value) return true
+  if (item.value.status === 'RESERVED') return true
+  if (item.value.status === 'SOLD' || item.value.status === 'OFF_SHELF') return true
+  return creatingOrder.value
+})
+const primaryDisabledText = computed(() => {
+  if (!item.value) return ''
+  if (item.value.status === 'RESERVED') return '已被预约'
+  if (item.value.status === 'SOLD') return '已售出'
+  if (item.value.status === 'OFF_SHELF') return '已下架'
+  return ''
+})
+const myOfferedItems = computed(() =>
+  itemStore.myItems.filter((entry) => entry.id !== item.value?.id && entry.status === 'ON_SALE'),
+)
+
+onLoad(async (options: any) => {
+  itemId.value = String(options?.id ?? '')
+  await loadDetail()
+})
+
+onShareAppMessage(() => ({
+  title: item.value?.title ?? '邻里小栈 · 同小区好物',
+  path: `/pages/item/detail?id=${itemId.value}`,
+  imageUrl: item.value?.image ?? '',
+}))
+
+async function loadDetail(): Promise<void> {
+  if (!itemId.value) {
+    loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const [detail, commentList] = await Promise.all([
+      itemStore.fetchDetail(itemId.value, true),
+      itemStore.fetchComments(itemId.value),
+    ])
+    item.value = detail
+    comments.value = commentList
+    following.value = Boolean(detail.seller?.following)
+    try {
+      distanceInfo.value = await itemService.getDistance(itemId.value)
+    } catch {
+      distanceInfo.value = {
+        distance: detail.distance,
+        walk: detail.walk,
+        bike: '骑行3分钟',
+        car: '驾车2分钟',
+        meters: 0,
+      }
+    }
+  } catch (error) {
+    item.value = null
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+}
+
+function onSwiperChange(event: any): void {
+  currentImage.value = event?.detail?.current ?? 0
+}
+
+function prevImage(): void {
+  currentImage.value = Math.max(0, currentImage.value - 1)
+}
+function nextImage(): void {
+  currentImage.value = Math.min(gallery.value.length - 1, currentImage.value + 1)
+}
+function preview(index: number): void {
+  previewImages(gallery.value, gallery.value[index])
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+
+async function onFavorite(): Promise<void> {
+  if (!item.value) return
+  try {
+    await itemStore.toggleFavorite(item.value)
+    showToast(item.value.favorite ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+function onShare(): void {
+  if (!item.value) return
+  uni.showActionSheet({
+    itemList: ['微信好友', '复制链接'],
+    success: (res: any) => {
+      if (Number(res.tapIndex) === 1) {
+        uni.setClipboardData({
+          data: `https://www.neighinn.com/item/${item.value?.id}`,
+          success: () => showToast('链接已复制'),
+        })
+      } else {
+        showToast('请在微信中分享给邻居')
+      }
+    },
+  })
+}
+
+function onFollow(): void {
+  following.value = !following.value
+  showToast(following.value ? '已关注该邻居' : '已取消关注')
+}
+
+function onChat(): void {
+  if (!item.value?.seller) return
+  openChat(item.value.seller.id, item.value.id).catch((error) => {
+    showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
+  })
+}
+
+function openCommentSheet(): void {
+  commentVisible.value = true
+}
+
+async function submitComment(): Promise<void> {
+  if (!item.value) return
+  if (!commentText.value.trim()) {
+    showToast('留言内容不能为空', 'alert')
+    return
+  }
+  commentSubmitting.value = true
+  try {
+    const comment = await itemStore.addComment(item.value.id, commentText.value)
+    comments.value = [comment, ...comments.value]
+    commentText.value = ''
+    commentVisible.value = false
+    showToast('留言已发布')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '留言失败', 'alert')
+  } finally {
+    commentSubmitting.value = false
+  }
+}
+
+function showAiReport(): void {
+  uni.showModal({
+    title: 'AI 质检报告',
+    content: '综合得分 92 分\n图像质量 95 · 图文一致 92 · 合规检查 90 · 物品状态 91\n\n检测时间：2026-11-14\n报告编号：audit-20261114-8f3a2c',
+    showCancel: false,
+    confirmText: '我知道了',
+  })
+}
+
+async function onPrimary(): Promise<void> {
+  if (!item.value || primaryDisabled.value) return
+  if (item.value.type === '出售') {
+    await goCashier()
+    return
+  }
+  if (item.value.type === '免费') {
+    uni.showModal({
+      title: '申请免费领取',
+      content: '免费赠与不涉及资金，请在小区公共区域当面领取。确认申请吗？',
+      confirmText: '确认申请',
+      success: async (res) => {
+        if (!res.confirm) return
+        await createOrderAndGo()
+      },
+    })
+    return
+  }
+  await openSwapPicker()
+}
+
+async function goCashier(): Promise<void> {
+  if (!item.value || creatingOrder.value) return
+  creatingOrder.value = true
+  try {
+    const orderId = await orderStore.create({ itemId: item.value.id, tradeType: '出售' })
+    uni.navigateTo({ url: `/pages/pay/cashier?orderId=${orderId}` })
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '创建订单失败', 'alert')
+  } finally {
+    creatingOrder.value = false
+  }
+}
+
+async function createOrderAndGo(): Promise<void> {
+  if (!item.value || creatingOrder.value) return
+  creatingOrder.value = true
+  try {
+    const orderId = await orderStore.create({ itemId: item.value.id, tradeType: '免费' })
+    showToast('申请已提交，等待邻居确认')
+    setTimeout(() => {
+      uni.navigateTo({ url: `/pages/orders/detail?id=${orderId}` })
+    }, 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '申请失败', 'alert')
+  } finally {
+    creatingOrder.value = false
+  }
+}
+
+async function openSwapPicker(): Promise<void> {
+  if (!itemStore.myItems.length) {
+    await itemStore.fetchMyItems().catch(() => undefined)
+  }
+  if (!myOfferedItems.value.length) {
+    showToast('你还没有在架物品，先发布一件再来互换吧', 'alert')
+    return
+  }
+  swapVisible.value = true
+}
+
+async function onSwapConfirm(ids: string[]): Promise<void> {
+  if (!item.value || creatingOrder.value) return
+  creatingOrder.value = true
+  try {
+    const orderId = await orderStore.create({
+      itemId: item.value.id,
+      tradeType: '互换',
+      offeredItemIds: ids,
+    })
+    showToast('互换申请已提交，等待邻居确认')
+    setTimeout(() => {
+      uni.navigateTo({ url: `/pages/orders/detail?id=${orderId}` })
+    }, 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '互换申请失败', 'alert')
+  } finally {
+    creatingOrder.value = false
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.detail {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.detail__gallery {
+  width: 100%;
+  height: 398px;
+  position: relative;
+  background-color: #e8e1db;
+}
+.detail__swiper {
+  width: 100%;
+  height: 398px;
+}
+.detail__swiper-image {
+  width: 100%;
+  height: 398px;
+}
+.detail__gallery-mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 90px;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0));
+}
+.detail__nav {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.detail__nav-right {
+  flex-direction: row;
+}
+.detail__circle {
+  width: 39px;
+  height: 39px;
+  border-radius: 20px;
+  background-color: rgba(28, 25, 23, 0.34);
+  align-items: center;
+  justify-content: center;
+}
+.detail__circle--gap {
+  margin-left: 8px;
+}
+.detail__arrow {
+  position: absolute;
+  top: 50%;
+  margin-top: -18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  background-color: rgba(28, 25, 23, 0.28);
+  align-items: center;
+  justify-content: center;
+}
+.detail__arrow--left {
+  left: 12px;
+}
+.detail__arrow--right {
+  right: 12px;
+}
+.detail__arrow--disabled {
+  opacity: 0.35;
+}
+.detail__indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+}
+.detail__indicator-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.55);
+  margin-left: 3px;
+  margin-right: 3px;
+}
+.detail__indicator-dot--active {
+  width: 15px;
+  background-color: #ffffff;
+}
+.detail__page {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  padding-left: 10px;
+  padding-right: 10px;
+  height: 20px;
+  border-radius: 13px;
+  background-color: rgba(0, 0, 0, 0.42);
+  color: #ffffff;
+  font-size: $ni-font-10;
+}
+.detail__main {
+  margin-top: -13px;
+  padding: 17px 16px;
+  border-top-left-radius: $ni-radius-20;
+  border-top-right-radius: $ni-radius-20;
+  background-color: $ni-color-white;
+  position: relative;
+  z-index: 2;
+}
+.detail__price-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.detail__title {
+  margin-top: 9px;
+  margin-bottom: 10px;
+  font-size: $ni-font-21;
+  line-height: 29px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.detail__tags {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.detail__tag-cell {
+  margin-right: 6px;
+  margin-bottom: 3px;
+}
+.detail__travel {
+  margin-top: 16px;
+}
+.detail__section {
+  margin-top: 10px;
+  padding: 17px 16px;
+  background-color: $ni-color-white;
+}
+.detail__section-label {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-bottom: 12px;
+}
+.detail__section-label--inline {
+  margin-bottom: 0;
+}
+.detail__desc {
+  font-size: $ni-font-14;
+  line-height: 23px;
+  color: #555555;
+}
+.detail__barter {
+  margin-top: 12px;
+  padding: 11px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-swap-bg-2;
+}
+.detail__barter-label {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-swap-deep;
+}
+.detail__barter-value {
+  margin-top: 4px;
+  font-size: $ni-font-12;
+  line-height: 19px;
+  color: #445f70;
+}
+.detail__ai {
+  margin-top: 13px;
+  padding: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-image: linear-gradient(135deg, #eff9f3 0%, #f8fdf9 100%);
+}
+.detail__ai-icon {
+  width: 33px;
+  height: 33px;
+  border-radius: 11px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.detail__ai-copy {
+  flex: 1;
+  margin-left: 8px;
+}
+.detail__ai-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-success-deep;
+}
+.detail__ai-desc {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: #6f8c7d;
+}
+.detail__comments-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.detail__comments-title-row {
+  flex-direction: row;
+  align-items: center;
+}
+.detail__comments-count {
+  margin-left: 5px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-tertiary;
+}
+.detail__comments-more {
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.detail__comments-empty {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.detail__comments-empty-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-tertiary;
+}
+.detail__comment-entry {
+  margin-top: 10px;
+  height: 42px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 12px;
+  border-radius: $ni-radius-12;
+  background-color: #f6f3f1;
+}
+.detail__comment-entry-text {
+  margin-left: 6px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-placeholder;
+}
+.detail__bottom-space {
+  height: calc(86px + env(safe-area-inset-bottom));
+}
+.detail__bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  min-height: 76px;
+  padding-left: 12px;
+  padding-right: 12px;
+  padding-top: 8px;
+  padding-bottom: calc(13px + env(safe-area-inset-bottom));
+  flex-direction: row;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -5px 20px rgba(65, 45, 32, 0.06);
+}
+.detail__bar-action {
+  width: 43px;
+  align-items: center;
+  justify-content: center;
+}
+.detail__bar-label {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.detail__buy {
+  flex: 1;
+  margin-left: 6px;
+}
+.detail__loading {
+  padding-top: 20px;
+}
+.detail__error {
+  padding-top: 40px;
+}
+.comment-sheet {
+  padding-top: 6px;
+  padding-bottom: 16px;
+}
+.comment-sheet__tip {
+  margin-top: 8px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+}
+</style>

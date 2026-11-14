@@ -1,0 +1,113 @@
+<template>
+  <view
+    class="settings-row"
+    :class="{ 'settings-row--bordered': bordered }"
+    @click="onTap"
+  >
+    <view v-if="icon" class="settings-row__icon" :class="{ 'settings-row__icon--danger': danger }">
+      <ni-icon :name="icon" :size="17" :state="danger ? 'danger' : iconState" />
+    </view>
+    <view class="settings-row__copy">
+      <text class="settings-row__title" :class="{ 'settings-row__title--danger': danger }">{{ title }}</text>
+      <text v-if="desc" class="settings-row__desc" :lines="1">{{ desc }}</text>
+    </view>
+    <view class="settings-row__right">
+      <text v-if="rightText" class="settings-row__right-text">{{ rightText }}</text>
+      <ni-switch v-if="showSwitch" :model-value="switchValue" @update:model-value="onSwitch" />
+      <ni-icon v-else-if="arrow" name="chevron" :size="16" state="tertiary" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+const props = withDefaults(
+  defineProps<{
+    icon?: string
+    iconState?: string
+    title: string
+    desc?: string
+    rightText?: string
+    showSwitch?: boolean
+    switchValue?: boolean
+    arrow?: boolean
+    bordered?: boolean
+    danger?: boolean
+  }>(),
+  {
+    icon: '',
+    iconState: 'active',
+    desc: '',
+    rightText: '',
+    showSwitch: false,
+    switchValue: false,
+    arrow: true,
+    bordered: true,
+    danger: false,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'tap'): void
+  (event: 'update:switchValue', value: boolean): void
+  (event: 'switch', value: boolean): void
+}>()
+
+function onTap(): void {
+  if (!props.showSwitch) emit('tap')
+}
+function onSwitch(value: boolean): void {
+  emit('update:switchValue', value)
+  emit('switch', value)
+}
+</script>
+
+<style scoped lang="scss">
+.settings-row {
+  min-height: 65px;
+  flex-direction: row;
+  align-items: center;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.settings-row--bordered {
+  border-bottom: $ni-border-divider;
+}
+.settings-row__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.settings-row__icon--danger {
+  background-color: $ni-color-danger-bg;
+}
+.settings-row__copy {
+  flex: 1;
+}
+.settings-row__title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.settings-row__title--danger {
+  color: #c85f35;
+}
+.settings-row__desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.settings-row__right {
+  flex-direction: row;
+  align-items: center;
+  margin-left: 8px;
+}
+.settings-row__right-text {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+  margin-right: 4px;
+}
+</style>

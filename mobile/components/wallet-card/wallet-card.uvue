@@ -1,0 +1,94 @@
+<template>
+  <view class="wallet" @click="onOpen">
+    <view class="wallet__icon">
+      <ni-icon name="wallet" :size="20" state="active" />
+    </view>
+    <view class="wallet__copy">
+      <text class="wallet__label">我的钱包</text>
+      <view class="wallet__amount-row">
+        <text class="wallet__symbol">¥</text>
+        <text class="wallet__amount">{{ balanceText }}</text>
+        <text class="wallet__escrow">担保中 ¥{{ escrowText }}</text>
+      </view>
+    </view>
+    <text class="wallet__action">查看</text>
+    <ni-icon name="chevron" :size="14" state="tertiary" />
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { formatAmount } from '../../utils/formatter'
+
+const props = withDefaults(
+  defineProps<{
+    balance: number
+    escrow?: number
+  }>(),
+  { escrow: 0 },
+)
+
+const balanceText = computed(() => formatAmount(props.balance))
+const escrowText = computed(() => formatAmount(props.escrow))
+
+const emit = defineEmits<{ (event: 'open'): void }>()
+
+function onOpen(): void {
+  emit('open')
+}
+</script>
+
+<style scoped lang="scss">
+.wallet {
+  min-height: 76px;
+  padding: 12px 13px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  border: $ni-border-card;
+  box-shadow: $ni-shadow-md;
+}
+.wallet__icon {
+  width: 39px;
+  height: 39px;
+  border-radius: 13px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.wallet__copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.wallet__label {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.wallet__amount-row {
+  flex-direction: row;
+  align-items: baseline;
+  margin-top: 2px;
+}
+.wallet__symbol {
+  font-size: $ni-font-9;
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.wallet__amount {
+  margin-left: 1px;
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.wallet__escrow {
+  margin-left: 8px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.wallet__action {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+  margin-right: 2px;
+}
+</style>

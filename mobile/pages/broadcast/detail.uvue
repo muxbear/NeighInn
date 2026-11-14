@@ -1,0 +1,561 @@
+<template>
+  <scroll-view class="broadcast-detail" :class="`broadcast-detail--${tone}`" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="broadcast-detail__header" :class="`broadcast-detail__header--${tone}`">
+      <ni-status-bar />
+      <view class="broadcast-detail__nav">
+        <view class="broadcast-detail__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="broadcast-detail__nav-title">小区喇叭站</text>
+        <view class="broadcast-detail__nav-button" @click="onShare">
+          <ni-icon name="share" :size="18" state="secondary" />
+        </view>
+      </view>
+
+      <template v-if="broadcast">
+        <view class="broadcast-detail__hero">
+          <view class="broadcast-detail__hero-icon" :class="`broadcast-detail__hero-icon--${tone}`">
+            <ni-icon :name="broadcast.icon" :size="31" :state="heroIconState" />
+          </view>
+          <view class="broadcast-detail__type" :class="`broadcast-detail__type--${tone}`">
+            <text class="broadcast-detail__type-text" :class="`broadcast-detail__type-text--${tone}`">{{ broadcast.type }}</text>
+          </view>
+          <text class="broadcast-detail__title">{{ broadcast.title }}</text>
+          <text class="broadcast-detail__desc">{{ broadcast.detail }}</text>
+          <view class="broadcast-detail__source">
+            <ni-icon name="megaphone" :size="14" state="tertiary" />
+            <text class="broadcast-detail__source-text">{{ broadcast.publisher?.name || '邻里小栈' }} · {{ broadcast.meta }}</text>
+          </view>
+        </view>
+      </template>
+    </view>
+
+    <template v-if="broadcast">
+      <view class="broadcast-detail__facts">
+        <view v-for="fact in facts" :key="fact.label" class="broadcast-detail__fact">
+          <ni-icon :name="fact.icon" :size="18" :state="heroIconState" />
+          <text class="broadcast-detail__fact-label">{{ fact.label }}</text>
+          <text class="broadcast-detail__fact-value">{{ fact.value }}</text>
+        </view>
+      </view>
+
+      <view class="broadcast-detail__card">
+        <text class="broadcast-detail__card-title">详细说明</text>
+        <text class="broadcast-detail__card-body">{{ broadcast.description || broadcast.detail }}</text>
+        <view class="broadcast-detail__tip" :class="`broadcast-detail__tip--${tone}`">
+          <ni-icon name="shield" :size="14" :state="tipIconState" />
+          <text class="broadcast-detail__tip-text" :class="`broadcast-detail__tip-text--${tone}`">{{ broadcast.tip || '请在小区公共区域交接，注意保护个人隐私。' }}</text>
+        </view>
+      </view>
+
+      <view v-if="broadcast.publisher" class="broadcast-detail__card broadcast-detail__publisher-card">
+        <view class="broadcast-detail__publisher">
+          <ni-avatar :src="broadcast.publisher.avatar" :name="broadcast.publisher.name" :size="43" variant="orange" />
+          <view class="broadcast-detail__publisher-copy">
+            <view class="broadcast-detail__publisher-row">
+              <text class="broadcast-detail__publisher-name">{{ broadcast.publisher.name }}</text>
+              <ni-icon v-if="broadcast.publisher.verified" name="shield" :size="9" state="gold" />
+              <text class="broadcast-detail__publisher-verified">认证业主</text>
+            </view>
+            <text class="broadcast-detail__publisher-meta">发布者 · 阳光花园小区</text>
+          </view>
+          <view class="broadcast-detail__message" @click="onChat">
+            <ni-icon name="message" :size="14" state="active" />
+            <text class="broadcast-detail__message-text">私信</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="broadcast-detail__card broadcast-detail__responses" @click="onRespond">
+        <view class="broadcast-detail__avatar-stack">
+          <ni-avatar
+            v-for="(avatar, index) in responderAvatars"
+            :key="avatar + index"
+            :src="avatar"
+            :name="'邻'"
+            :size="27"
+            variant="green"
+            :class="{ 'broadcast-detail__stack-avatar--gap': index > 0 }"
+          />
+        </view>
+        <view class="broadcast-detail__response-copy">
+          <text class="broadcast-detail__response-title">已有 {{ broadcast.responseCount || 0 }} 位邻居响应</text>
+          <text class="broadcast-detail__response-desc">邻居就在身边，互相搭把手</text>
+        </view>
+        <ni-icon name="chevron" :size="15" state="tertiary" />
+      </view>
+
+      <view class="broadcast-detail__safety">
+        <ni-icon name="shield" :size="16" state="gold" />
+        <text class="broadcast-detail__safety-text">平台建议：接送、上门等服务请在物业登记；不要向陌生人透露门牌号与验证码。</text>
+      </view>
+
+      <view class="broadcast-detail__bottom-space" />
+
+      <view class="broadcast-detail__bar">
+        <view class="broadcast-detail__favorite" @click="onFavorite">
+          <ni-icon name="heart" :size="21" :state="broadcast.favorited ? 'active' : 'secondary'" :filled="broadcast.favorited" />
+          <text class="broadcast-detail__favorite-text">{{ broadcast.favorited ? '已收藏' : '收藏' }}</text>
+        </view>
+        <view class="broadcast-detail__primary">
+          <ni-button
+            :type="tone === 'free' ? 'gift' : tone === 'reward' ? 'gold' : 'primary'"
+            size="lg"
+            block
+            @tap="onRespond"
+          >
+            {{ broadcast.action }}
+          </ni-button>
+        </view>
+      </view>
+    </template>
+
+    <view v-else-if="loading" class="broadcast-detail__loading">
+      <ni-skeleton :rows="4" :avatar="false" />
+    </view>
+
+    <view v-else class="broadcast-detail__error">
+      <ni-empty icon="megaphone" title="播报不存在或已结束" desc="去首页看看邻里的最新动态吧" action-text="返回首页" @action="goHome" />
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="90" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
+import type { Broadcast } from '../../models'
+import { useNotificationStore } from '../../stores/notification.store'
+import { useToast } from '../../composables/useToast'
+import { useIM } from '../../composables/useIM'
+import { notificationService } from '../../services/notification.service'
+
+const notificationStore = useNotificationStore()
+const { toast, showToast } = useToast()
+const { openChat } = useIM()
+
+const broadcastId = ref('')
+const broadcast = ref<Broadcast | null>(null)
+const loading = ref(true)
+
+const tone = computed(() => broadcast.value?.tone ?? 'urgent')
+const heroIconState = computed(() => {
+  if (tone.value === 'free') return 'green'
+  if (tone.value === 'reward') return 'gold'
+  if (tone.value === 'urgent') return 'danger'
+  return 'active'
+})
+const tipIconState = computed(() => 'gold')
+const facts = computed(() => {
+  if (!broadcast.value) return []
+  if (broadcast.value.facts && broadcast.value.facts.length) return broadcast.value.facts
+  return [
+    { icon: 'clock', label: '时间', value: '今天 17:20' },
+    { icon: 'pin', label: '地点', value: '小区北门' },
+    { icon: 'friend', label: '邻里', value: '认证业主' },
+  ]
+})
+const responderAvatars = computed(() => broadcast.value?.responderAvatars ?? [])
+
+onShareAppMessage(() => ({
+  title: broadcast.value?.title ?? '邻里小栈 · 小区喇叭站',
+  path: `/pages/broadcast/detail?id=${broadcastId.value}`,
+}))
+
+onLoad(async (options: any) => {
+  broadcastId.value = String(options?.id ?? '')
+  if (!broadcastId.value) {
+    loading.value = false
+    return
+  }
+  try {
+    broadcast.value = await notificationStore.fetchBroadcastDetail(broadcastId.value)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+})
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+
+async function onFavorite(): Promise<void> {
+  if (!broadcast.value) return
+  try {
+    await notificationStore.toggleBroadcastFavorite(broadcast.value.id)
+    showToast(broadcast.value.favorited ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+async function onRespond(): Promise<void> {
+  if (!broadcast.value) return
+  try {
+    const result = await notificationService.respondBroadcast(broadcast.value.id)
+    broadcast.value.responseCount = result.responseCount
+    showToast('已响应，发布者会收到提醒')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '响应失败', 'alert')
+  }
+}
+
+function onChat(): void {
+  const publisher = broadcast.value?.publisher
+  if (!publisher) return
+  openChat(publisher.id, broadcast.value?.id).catch((error) => {
+    showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
+  })
+}
+
+function onShare(): void {
+  if (!broadcast.value) return
+  uni.setClipboardData({
+    data: `https://www.neighinn.com/broadcast/${broadcast.value.id}`,
+    success: () => showToast('播报链接已复制'),
+  })
+}
+</script>
+
+<style scoped lang="scss">
+.broadcast-detail {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.broadcast-detail__header {
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-bottom: 18px;
+}
+.broadcast-detail__header--urgent {
+  background-image: linear-gradient(160deg, #fff1ea 0%, #fff8f4 62%, #faf8f5 100%);
+}
+.broadcast-detail__header--free {
+  background-image: linear-gradient(160deg, #ecf9f2 0%, #f7fdf9 62%, #faf8f5 100%);
+}
+.broadcast-detail__header--reward {
+  background-image: linear-gradient(160deg, #fff7e2 0%, #fffdf6 62%, #faf8f5 100%);
+}
+.broadcast-detail__header--new {
+  background-image: linear-gradient(160deg, #fff5ed 0%, #fffaf6 62%, #faf8f5 100%);
+}
+.broadcast-detail__nav {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.broadcast-detail__nav-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.82);
+  align-items: center;
+  justify-content: center;
+}
+.broadcast-detail__nav-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.broadcast-detail__hero {
+  align-items: center;
+  padding-top: 8px;
+}
+.broadcast-detail__hero-icon {
+  width: 62px;
+  height: 62px;
+  border-radius: 21px;
+  align-items: center;
+  justify-content: center;
+}
+.broadcast-detail__hero-icon--urgent {
+  background-color: #ffe8db;
+}
+.broadcast-detail__hero-icon--free {
+  background-color: $ni-color-gift-bg;
+}
+.broadcast-detail__hero-icon--reward {
+  background-color: $ni-color-service-bg-2;
+}
+.broadcast-detail__hero-icon--new {
+  background-color: $ni-color-primary-bg;
+}
+.broadcast-detail__type {
+  height: 22px;
+  padding-left: 9px;
+  padding-right: 9px;
+  border-radius: 11px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+}
+.broadcast-detail__type--urgent {
+  background-color: $ni-color-danger-bg;
+}
+.broadcast-detail__type--free {
+  background-color: $ni-color-gift-bg;
+}
+.broadcast-detail__type--reward {
+  background-color: $ni-color-service-bg;
+}
+.broadcast-detail__type--new {
+  background-color: $ni-color-primary-bg;
+}
+.broadcast-detail__type-text {
+  font-size: $ni-font-8;
+  font-weight: 700;
+}
+.broadcast-detail__type-text--urgent {
+  color: $ni-color-danger-deep;
+}
+.broadcast-detail__type-text--free {
+  color: $ni-color-gift-deep;
+}
+.broadcast-detail__type-text--reward {
+  color: $ni-color-service-deep;
+}
+.broadcast-detail__type-text--new {
+  color: $ni-color-primary-dark;
+}
+.broadcast-detail__title {
+  margin-top: 8px;
+  font-size: $ni-font-22;
+  line-height: 30px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  text-align: center;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+.broadcast-detail__desc {
+  margin-top: 6px;
+  font-size: $ni-font-11;
+  line-height: 18px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+.broadcast-detail__source {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 8px;
+}
+.broadcast-detail__source-text {
+  margin-left: 4px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.broadcast-detail__facts {
+  margin: -6px 14px 0;
+  padding: 13px;
+  flex-direction: row;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-md;
+}
+.broadcast-detail__fact {
+  flex: 1;
+  align-items: center;
+  border-right: 1px solid #f0ece8;
+}
+.broadcast-detail__fact-label {
+  margin-top: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.broadcast-detail__fact-value {
+  margin-top: 2px;
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  text-align: center;
+}
+.broadcast-detail__card {
+  margin: 10px 14px 0;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+}
+.broadcast-detail__card-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.broadcast-detail__card-body {
+  margin-top: 7px;
+  font-size: $ni-font-11;
+  line-height: 18px;
+  color: $ni-color-text-secondary;
+}
+.broadcast-detail__tip {
+  margin-top: 11px;
+  padding: 10px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-10;
+}
+.broadcast-detail__tip--urgent {
+  background-color: $ni-color-danger-bg;
+}
+.broadcast-detail__tip--free {
+  background-color: $ni-color-gift-bg-2;
+}
+.broadcast-detail__tip--reward {
+  background-color: $ni-color-service-bg-2;
+}
+.broadcast-detail__tip--new {
+  background-color: $ni-color-primary-bg;
+}
+.broadcast-detail__tip-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+}
+.broadcast-detail__tip-text--urgent {
+  color: $ni-color-danger-deep;
+}
+.broadcast-detail__tip-text--free {
+  color: $ni-color-gift-deep;
+}
+.broadcast-detail__tip-text--reward {
+  color: $ni-color-service-deep;
+}
+.broadcast-detail__tip-text--new {
+  color: $ni-color-primary-dark;
+}
+.broadcast-detail__publisher-card {
+  padding: 13px 14px;
+}
+.broadcast-detail__publisher {
+  flex-direction: row;
+  align-items: center;
+}
+.broadcast-detail__publisher-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.broadcast-detail__publisher-row {
+  flex-direction: row;
+  align-items: center;
+}
+.broadcast-detail__publisher-name {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.broadcast-detail__publisher-verified {
+  margin-left: 2px;
+  font-size: 6px;
+  color: $ni-color-credit-deep;
+}
+.broadcast-detail__publisher-meta {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.broadcast-detail__message {
+  flex-direction: row;
+  align-items: center;
+  height: 30px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: 10px;
+  border: 1px solid #ffb68e;
+}
+.broadcast-detail__message-text {
+  margin-left: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-primary-dark;
+  font-weight: 600;
+}
+.broadcast-detail__responses {
+  flex-direction: row;
+  align-items: center;
+}
+.broadcast-detail__avatar-stack {
+  flex-direction: row;
+  align-items: center;
+}
+.broadcast-detail__stack-avatar--gap {
+  margin-left: -7px;
+}
+.broadcast-detail__response-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.broadcast-detail__response-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.broadcast-detail__response-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.broadcast-detail__safety {
+  margin: 10px 14px 0;
+  padding: 11px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-12;
+  background-color: #fff8e8;
+}
+.broadcast-detail__safety-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-service-deep;
+}
+.broadcast-detail__bottom-space {
+  height: calc(86px + env(safe-area-inset-bottom));
+}
+.broadcast-detail__bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  min-height: 76px;
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-top: 9px;
+  padding-bottom: calc(13px + env(safe-area-inset-bottom));
+  flex-direction: row;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -5px 20px rgba(65, 45, 32, 0.06);
+}
+.broadcast-detail__favorite {
+  width: 72px;
+  align-items: center;
+  justify-content: center;
+}
+.broadcast-detail__favorite-text {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.broadcast-detail__primary {
+  flex: 1;
+}
+.broadcast-detail__loading {
+  padding: 20px 14px;
+}
+.broadcast-detail__error {
+  padding-top: 40px;
+}
+</style>

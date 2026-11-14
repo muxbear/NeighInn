@@ -1,0 +1,404 @@
+<template>
+  <scroll-view class="notifications" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="notifications__header">
+      <ni-status-bar />
+      <view class="notifications__nav">
+        <view class="notifications__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <view class="notifications__nav-center">
+          <text class="notifications__nav-title">通知中心</text>
+          <text class="notifications__nav-sub">交易、互动与小区动态</text>
+        </view>
+        <view class="notifications__read-all" :class="{ 'notifications__read-all--disabled': notificationStore.unread === 0 }" @click="readAll">
+          <text class="notifications__read-all-text">全部已读</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="notifications__overview" :class="{ 'notifications__overview--clear': notificationStore.unread === 0 }">
+      <view class="notifications__overview-icon">
+        <ni-icon :name="notificationStore.unread === 0 ? 'check' : 'bell'" :size="20" :state="notificationStore.unread === 0 ? 'green' : 'white'" />
+      </view>
+      <view class="notifications__overview-copy">
+        <text class="notifications__overview-title">
+          {{ notificationStore.unread === 0 ? '所有通知都已读完' : `还有 ${notificationStore.unread} 条未读通知` }}
+        </text>
+        <text class="notifications__overview-desc">
+          {{ notificationStore.unread === 0 ? '新的邻里动态会第一时间提醒你' : '点击通知可查看详情并自动标记为已读' }}
+        </text>
+      </view>
+      <view class="notifications__settings" @click="goSettings">
+        <ni-icon name="settings" :size="14" :state="notificationStore.unread === 0 ? 'green' : 'white'" />
+        <text class="notifications__settings-text" :class="{ 'notifications__settings-text--clear': notificationStore.unread === 0 }">设置</text>
+      </view>
+    </view>
+
+    <view class="notifications__tabs">
+      <view
+        v-for="category in categories"
+        :key="category"
+        class="notifications__tab"
+        :class="{ 'notifications__tab--active': activeCategory === category }"
+        @click="switchCategory(category)"
+      >
+        <ni-icon
+          v-if="category !== '全部'"
+          :name="categoryIcon(category)"
+          :size="13"
+          :state="categoryIconState(category)"
+        />
+        <text class="notifications__tab-text" :class="{ 'notifications__tab-text--active': activeCategory === category }">{{ category }}</text>
+        <text v-if="categoryCount(category) > 0" class="notifications__tab-count">{{ categoryCount(category) }}</text>
+      </view>
+    </view>
+
+    <view class="notifications__list-head">
+      <text class="notifications__list-title">{{ activeCategory === '全部' ? '最近通知' : `${activeCategory}通知` }}</text>
+      <text class="notifications__list-count">{{ filtered.length }} 条</text>
+    </view>
+
+    <view v-if="loading" class="notifications__loading">
+      <ni-skeleton :rows="4" :avatar="true" />
+    </view>
+
+    <view v-else-if="filtered.length === 0" class="notifications__empty">
+      <ni-empty icon="bell" title="暂时没有通知" desc="新的交易、互动和小区动态会出现在这里" />
+    </view>
+
+    <view v-else class="notifications__list">
+      <template v-for="group in groups" :key="group.label">
+        <view class="notifications__date">
+          <text class="notifications__date-text">{{ group.label }}</text>
+        </view>
+        <notification-card
+          v-for="notification in group.items"
+          :key="notification.id"
+          :notification="notification"
+          @tap="openNotification(notification)"
+        />
+      </template>
+    </view>
+
+    <view class="notifications__safety">
+      <ni-icon name="shield" :size="16" state="gold" />
+      <text class="notifications__safety-text">平台不会通过通知索要验证码、支付密码或要求私下转账，请提高警惕。</text>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import type { AppNotification } from '../../models'
+import { useNotificationStore } from '../../stores/notification.store'
+import { useToast } from '../../composables/useToast'
+
+const notificationStore = useNotificationStore()
+const { toast, showToast } = useToast()
+
+const categories = ['全部', '交易', '互动', '社区']
+const activeCategory = ref('全部')
+const loading = computed(() => notificationStore.loading)
+
+const filtered = computed(() => {
+  if (activeCategory.value === '全部') return notificationStore.list
+  return notificationStore.list.filter((item) => item.category === activeCategory.value)
+})
+
+const groups = computed(() => {
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000
+  const today = filtered.value.filter((item) => item.createdAt >= startOfToday)
+  const yesterday = filtered.value.filter(
+    (item) => item.createdAt < startOfToday && item.createdAt >= startOfYesterday,
+  )
+  const earlier = filtered.value.filter((item) => item.createdAt < startOfYesterday)
+  return [
+    { label: '今天', items: today },
+    { label: '昨天', items: yesterday },
+    { label: '更早', items: earlier },
+  ].filter((group) => group.items.length > 0)
+})
+
+onLoad(() => {
+  loadData()
+})
+
+onShow(() => {
+  loadData()
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await loadData(true)
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+async function loadData(refresh = false): Promise<void> {
+  try {
+    await Promise.all([
+      notificationStore.fetchNotifications('全部', refresh),
+      notificationStore.fetchUnread(),
+    ])
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  }
+}
+
+function categoryCount(category: string): number {
+  if (category === '全部') return notificationStore.list.filter((item) => !item.read).length
+  return notificationStore.list.filter((item) => item.category === category && !item.read).length
+}
+
+function categoryIcon(category: string): string {
+  if (category === '交易') return 'wallet'
+  if (category === '互动') return 'message'
+  return 'megaphone'
+}
+
+function categoryIconState(category: string): string {
+  if (category === '互动') return 'green'
+  if (category === '社区') return 'blue'
+  return 'active'
+}
+
+function switchCategory(category: string): void {
+  activeCategory.value = category
+}
+
+async function readAll(): Promise<void> {
+  if (notificationStore.unread === 0) return
+  try {
+    await notificationStore.readAll()
+    showToast('已全部标记为已读')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+async function openNotification(notification: AppNotification): Promise<void> {
+  try {
+    await notificationStore.markRead(notification.id)
+  } catch {
+    // 标记已读失败不阻断跳转
+  }
+  const route = notification.route
+  if (route.type === 'item') {
+    uni.navigateTo({ url: `/pages/item/detail?id=${route.id}` })
+  } else if (route.type === 'life') {
+    uni.navigateTo({ url: `/pages/life/detail?id=${route.id}` })
+  } else if (route.type === 'broadcast') {
+    uni.navigateTo({ url: `/pages/broadcast/detail?id=${route.id}` })
+  } else if (route.type === 'zone') {
+    uni.navigateTo({ url: `/pages/zone/index?zone=${route.zone}` })
+  } else if (route.type === 'order') {
+    uni.navigateTo({ url: `/pages/orders/detail?id=${route.id}` })
+  } else {
+    uni.switchTab({ url: '/pages/messages/index' })
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+function goSettings(): void {
+  uni.navigateTo({ url: '/pages/settings/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.notifications {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.notifications__header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 64px;
+  background-color: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid #f0ece8;
+}
+.notifications__nav {
+  height: 46px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.notifications__nav-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+}
+.notifications__nav-center {
+  flex: 1;
+  align-items: center;
+}
+.notifications__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.notifications__nav-sub {
+  margin-top: 1px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.notifications__read-all {
+  width: 64px;
+  align-items: flex-end;
+}
+.notifications__read-all--disabled {
+  opacity: 0.45;
+}
+.notifications__read-all-text {
+  font-size: $ni-font-8;
+  color: $ni-color-primary-dark;
+}
+.notifications__overview {
+  margin: 12px 14px 0;
+  min-height: 75px;
+  padding: 13px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-18;
+  background-image: linear-gradient(135deg, #ff8d50 0%, #ffb066 100%);
+  box-shadow: 0 6px 18px rgba(255, 122, 61, 0.2);
+}
+.notifications__overview--clear {
+  background-image: $ni-gradient-success;
+  box-shadow: 0 6px 18px rgba(85, 161, 115, 0.2);
+}
+.notifications__overview-icon {
+  width: 43px;
+  height: 43px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.2);
+  align-items: center;
+  justify-content: center;
+}
+.notifications__overview-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.notifications__overview-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: #ffffff;
+}
+.notifications__overview-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: rgba(255, 255, 255, 0.85);
+}
+.notifications__settings {
+  flex-direction: row;
+  align-items: center;
+}
+.notifications__settings-text {
+  margin-left: 2px;
+  font-size: $ni-font-8;
+  color: #ffffff;
+}
+.notifications__settings-text--clear {
+  color: #ffffff;
+}
+.notifications__tabs {
+  flex-direction: row;
+  height: 39px;
+  margin: 12px 14px 0;
+  padding: 3px;
+  border-radius: $ni-radius-15;
+  background-color: #eae6e2;
+}
+.notifications__tab {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+.notifications__tab--active {
+  background-color: #ffffff;
+  box-shadow: 0 1px 4px rgba(60, 45, 35, 0.08);
+}
+.notifications__tab-text {
+  margin-left: 3px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.notifications__tab-text--active {
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.notifications__tab-count {
+  margin-left: 3px;
+  font-size: 7px;
+  color: $ni-color-primary;
+  font-weight: 700;
+}
+.notifications__list-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 2px;
+}
+.notifications__list-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.notifications__list-count {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.notifications__loading {
+  margin: 12px 14px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.notifications__empty {
+  margin: 12px 14px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.notifications__list {
+  padding: 4px 14px 0;
+}
+.notifications__date {
+  padding-top: 10px;
+  padding-bottom: 6px;
+}
+.notifications__date-text {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.notifications__safety {
+  margin: 4px 14px 0;
+  padding: 11px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-12;
+  background-color: #fff8e8;
+}
+.notifications__safety-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-service-deep;
+}
+</style>

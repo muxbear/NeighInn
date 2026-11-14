@@ -1,0 +1,54 @@
+@import "./tokens.scss";
+
+/**
+ * 排版工具类（必须作用于 <text>）。
+ * 字号取 Figma 原值，不整体缩放。
+ */
+
+.ni-type-kicker {
+  font-size: $ni-font-8;
+  font-weight: $ni-weight-semibold;
+  color: #a17a64;
+  letter-spacing: 0.6px;
+}
+
+.ni-type-caption {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+
+.ni-type-body {
+  font-size: $ni-font-12;
+  color: $ni-color-text-secondary;
+}
+
+.ni-type-title-18 {
+  font-size: $ni-font-18;
+  font-weight: $ni-weight-bold;
+  color: $ni-color-text-primary;
+}
+
+.ni-type-title-22 {
+  font-size: $ni-font-22;
+  font-weight: $ni-weight-bold;
+  color: $ni-color-text-primary;
+}
+
+.ni-type-title-27 {
+  font-size: $ni-font-27;
+  font-weight: $ni-weight-bold;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.6px;
+}
+
+.ni-type-primary {
+  color: $ni-color-primary;
+}
+
+.ni-type-secondary {
+  color: $ni-color-text-secondary;
+}
+
+.ni-type-tertiary {
+  color: $ni-color-text-tertiary;
+}

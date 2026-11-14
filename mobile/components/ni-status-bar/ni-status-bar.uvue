@@ -1,0 +1,17 @@
+<template>
+  <view class="ni-status-bar" :style="{ height: statusBarHeight + 'px' }" />
+</template>
+
+<script setup lang="ts">
+import { useSystemMetrics } from '../../composables/useSystemMetrics'
+
+const { statusBarHeight } = useSystemMetrics()
+</script>
+
+<style scoped lang="scss">
+.ni-status-bar {
+  width: 100%;
+  flex-shrink: 0;
+  background-color: transparent;
+}
+</style>

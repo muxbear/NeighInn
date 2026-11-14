@@ -1,0 +1,374 @@
+<template>
+  <scroll-view class="help" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="help__header">
+      <ni-status-bar />
+      <view class="help__nav">
+        <view class="help__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="help__nav-title">帮助与客服</text>
+        <view class="help__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="help__content">
+      <view class="help__hero">
+        <view class="help__hero-icon">
+          <ni-icon name="message" :size="24" state="white" />
+        </view>
+        <view class="help__hero-copy">
+          <text class="help__hero-title">需要帮助？</text>
+          <text class="help__hero-desc">常见问题、在线客服与意见反馈，我们都在。</text>
+        </view>
+      </view>
+
+      <view class="help__contacts">
+        <view class="help__contact" @click="openCustomerService">
+          <view class="help__contact-icon help__contact-icon--orange">
+            <ni-icon name="message" :size="19" state="active" />
+          </view>
+          <text class="help__contact-title">在线客服</text>
+          <text class="help__contact-desc">9:00–21:00</text>
+        </view>
+        <view class="help__contact" @click="callSupport">
+          <view class="help__contact-icon help__contact-icon--green">
+            <ni-icon name="phone" :size="19" state="green" />
+          </view>
+          <text class="help__contact-title">客服电话</text>
+          <text class="help__contact-desc">{{ APP_INFO.supportPhone }}</text>
+        </view>
+        <view class="help__contact" @click="openFeedback">
+          <view class="help__contact-icon help__contact-icon--blue">
+            <ni-icon name="spark" :size="19" state="blue" />
+          </view>
+          <text class="help__contact-title">意见反馈</text>
+          <text class="help__contact-desc">帮助我们改进</text>
+        </view>
+      </view>
+
+      <text class="help__section-title">常见问题</text>
+      <view class="help__faq">
+        <view v-for="(faq, index) in faqs" :key="faq.q" class="help__faq-item" :class="{ 'help__faq-item--last': index === faqs.length - 1 }">
+          <view class="help__faq-head" @click="toggleFaq(index)">
+            <text class="help__faq-question">{{ faq.q }}</text>
+            <ni-icon name="chevron" :size="15" state="tertiary" :rotate="openFaq === index ? 90 : 0" />
+          </view>
+          <text v-if="openFaq === index" class="help__faq-answer">{{ faq.a }}</text>
+        </view>
+      </view>
+
+      <view class="help__tip">
+        <ni-icon name="shield" :size="15" state="gold" />
+        <text class="help__tip-text">涉及资金、账号与隐私的问题，请优先通过官方渠道联系客服，切勿相信私信中的转账要求。</text>
+      </view>
+    </view>
+
+    <ni-sheet v-model:visible="feedbackVisible" title="意见反馈" height="54vh">
+      <view class="feedback">
+        <text class="feedback__label">反馈类型</text>
+        <view class="feedback__types">
+          <view
+            v-for="type in feedbackTypes"
+            :key="type"
+            class="feedback__type"
+            :class="{ 'feedback__type--active': feedbackType === type }"
+            @click="feedbackType = type"
+          >
+            <text class="feedback__type-text" :class="{ 'feedback__type-text--active': feedbackType === type }">{{ type }}</text>
+          </view>
+        </view>
+        <text class="feedback__label feedback__label--gap">问题描述</text>
+        <ni-textarea
+          v-model="feedbackContent"
+          placeholder="请描述你遇到的问题或建议，我们会认真处理"
+          :maxlength="500"
+          :height="120"
+        />
+        <ni-button type="primary" size="lg" block :loading="submitting" @tap="submitFeedback">
+          提交反馈
+        </ni-button>
+      </view>
+    </ni-sheet>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useToast } from '../../composables/useToast'
+import { APP_INFO } from '../../config/env'
+
+const { toast, showToast } = useToast()
+
+const openFaq = ref(0)
+const feedbackVisible = ref(false)
+const feedbackType = ref('功能建议')
+const feedbackContent = ref('')
+const submitting = ref(false)
+const feedbackTypes = ['功能建议', '交易问题', '内容举报', '账号问题', '其他']
+
+const faqs = [
+  {
+    q: '担保交易是怎么保障资金安全的？',
+    a: '买家付款后，货款由平台托管，不会直接进入卖家账户。双方线下验货满意并确认后，平台才向卖家放款；如验货不满意，可申请退款并提交纠纷，平台客服介入调解。',
+  },
+  {
+    q: '免费赠与和物品互换需要注意什么？',
+    a: '免费赠与与互换不涉及资金，但物品同样需要通过 AI 质检。请在小区公共区域当面交接，确认物品状态后再完成交割；互换双方应提前确认各自物品与期望是否一致。',
+  },
+  {
+    q: '为什么物品发布后没有立即上架？',
+    a: '物品需经过 AI 质检与人工复核，通过后才会在小区商店上架。AI 质检通常不超过 60 秒；如未通过，页面会给出原因与改进建议，修改后可重新提交。',
+  },
+  {
+    q: '如何认证业主身份？',
+    a: '在「我的 - 认证中心 - 业主证明」选择小区与身份，上传房产证、购房合同或租赁合同等材料。审核时效不超过 24 小时，结果会通过通知中心告知。',
+  },
+  {
+    q: '遇到骚扰或可疑信息怎么办？',
+    a: '可在会话页右上角选择举报或加入黑名单；涉及诈骗、隐私泄露的，请同时联系在线客服。平台会对违规账号进行冻结处理。',
+  },
+]
+
+function toggleFaq(index: number): void {
+  openFaq.value = openFaq.value === index ? -1 : index
+}
+
+function openCustomerService(): void {
+  uni.navigateTo({ url: '/pages/social/chat?id=c5' })
+}
+
+function callSupport(): void {
+  uni.makePhoneCall({
+    phoneNumber: APP_INFO.supportPhone,
+    fail: () => showToast(`客服电话：${APP_INFO.supportPhone}`),
+  })
+}
+
+function openFeedback(): void {
+  feedbackVisible.value = true
+}
+
+async function submitFeedback(): Promise<void> {
+  if (!feedbackContent.value.trim()) {
+    showToast('请填写问题描述', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    feedbackVisible.value = false
+    feedbackContent.value = ''
+    showToast('反馈已提交，感谢你的建议')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.help {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.help__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.help__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.help__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.help__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.help__nav-placeholder {
+  width: 42px;
+}
+.help__content {
+  padding: 14px;
+}
+.help__hero {
+  padding: 16px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-18;
+  background-image: linear-gradient(135deg, #ff8d50 0%, #ffb066 100%);
+  box-shadow: 0 8px 22px rgba(255, 122, 61, 0.2);
+}
+.help__hero-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  background-color: rgba(255, 255, 255, 0.2);
+  align-items: center;
+  justify-content: center;
+}
+.help__hero-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.help__hero-title {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: #ffffff;
+}
+.help__hero-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: rgba(255, 255, 255, 0.86);
+}
+.help__contacts {
+  flex-direction: row;
+  margin-top: 10px;
+  padding: 14px 6px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.help__contact {
+  flex: 1;
+  align-items: center;
+}
+.help__contact-icon {
+  width: 43px;
+  height: 43px;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+}
+.help__contact-icon--orange {
+  background-color: #fff0e7;
+}
+.help__contact-icon--green {
+  background-color: $ni-color-success-bg;
+}
+.help__contact-icon--blue {
+  background-color: $ni-color-swap-bg;
+}
+.help__contact-title {
+  margin-top: 6px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.help__contact-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.help__section-title {
+  margin: 20px 4px 8px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: #968b84;
+}
+.help__faq {
+  padding: 0 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.help__faq-item {
+  padding-top: 13px;
+  padding-bottom: 13px;
+  border-bottom: $ni-border-divider;
+}
+.help__faq-item--last {
+  border-bottom: 0;
+}
+.help__faq-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.help__faq-question {
+  flex: 1;
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 8px;
+}
+.help__faq-answer {
+  margin-top: 7px;
+  font-size: $ni-font-10;
+  line-height: 17px;
+  color: $ni-color-text-secondary;
+}
+.help__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+}
+.help__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+.feedback {
+  padding-bottom: 16px;
+}
+.feedback__label {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.feedback__label--gap {
+  margin-top: 14px;
+  margin-bottom: 7px;
+}
+.feedback__types {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.feedback__type {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.feedback__type--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.feedback__type-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.feedback__type-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+</style>

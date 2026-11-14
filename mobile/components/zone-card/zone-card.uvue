@@ -1,0 +1,116 @@
+<template>
+  <view
+    class="zone-card"
+    :class="[`zone-card--${tone}`, { 'zone-card--last': isLast }]"
+    hover-class="zone-card--pressed"
+    :hover-stay-time="100"
+    @click="onTap"
+  >
+    <view class="zone-card__icon" :class="`zone-card__icon--${tone}`">
+      <ni-icon :name="icon" :size="27" :state="iconState" />
+    </view>
+    <text class="zone-card__title">{{ name }}</text>
+    <text class="zone-card__subtitle">{{ label }}</text>
+    <text v-if="count > 0" class="zone-card__count">{{ count }} 件</text>
+    <view v-if="active" class="zone-card__active-bar" />
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    name: string
+    label: string
+    icon: string
+    tone: 'gift' | 'swap' | 'sale' | 'service'
+    count?: number
+    active?: boolean
+    isLast?: boolean
+  }>(),
+  {
+    count: 0,
+    active: false,
+    isLast: false,
+  },
+)
+
+const emit = defineEmits<{ (event: 'tap'): void }>()
+
+const iconState = computed(() => {
+  if (props.tone === 'gift') return 'green'
+  if (props.tone === 'swap') return 'blue'
+  if (props.tone === 'service') return 'gold'
+  return 'active'
+})
+
+function onTap(): void {
+  emit('tap')
+}
+</script>
+
+<style scoped lang="scss">
+.zone-card {
+  flex: 1;
+  min-height: 94px;
+  margin-right: 9px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  border: 1px solid rgba(65, 45, 32, 0.045);
+  position: relative;
+  transition: transform 100ms ease-out;
+}
+.zone-card--last {
+  margin-right: 0;
+}
+.zone-card--pressed {
+  transform: scale(0.96);
+}
+.zone-card__icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
+  align-items: center;
+  justify-content: center;
+}
+.zone-card__icon--gift {
+  background-color: $ni-color-gift-bg;
+}
+.zone-card__icon--swap {
+  background-color: $ni-color-swap-bg;
+}
+.zone-card__icon--sale {
+  background-color: $ni-color-primary-bg;
+}
+.zone-card__icon--service {
+  background-color: $ni-color-service-bg-2;
+}
+.zone-card__title {
+  margin-top: 5px;
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.zone-card__subtitle {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.zone-card__count {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.zone-card__active-bar {
+  position: absolute;
+  bottom: 0;
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background-color: $ni-color-primary;
+}
+</style>

@@ -1,0 +1,275 @@
+<template>
+  <view
+    class="service-card"
+    :class="{ 'service-card--offer': isOffer, 'service-card--fluid': fluid }"
+    hover-class="service-card--pressed"
+    :hover-stay-time="100"
+    @click="onTap"
+  >
+    <view class="service-card__top">
+      <view class="service-card__icon" :class="{ 'service-card__icon--offer': isOffer }">
+        <ni-icon :name="post.icon" :size="22" :state="isOffer ? 'green' : 'active'" />
+      </view>
+      <view class="service-card__title-wrap">
+        <view class="service-card__badges">
+          <view class="service-card__kind" :class="{ 'service-card__kind--offer': isOffer }">
+            <text class="service-card__kind-text" :class="{ 'service-card__kind-text--offer': isOffer }">
+              {{ isOffer ? '邻里服务' : '邻里求助' }}
+            </text>
+          </view>
+          <view class="service-card__category">
+            <text class="service-card__category-text">{{ post.category }}</text>
+          </view>
+        </view>
+        <text class="service-card__title" :lines="2">{{ post.title }}</text>
+      </view>
+    </view>
+
+    <text class="service-card__desc" :lines="2">{{ post.description }}</text>
+
+    <view class="service-card__meta-panel">
+      <view class="service-card__meta-row">
+        <ni-icon name="clock" :size="14" state="tertiary" />
+        <text class="service-card__meta-text" :lines="1">{{ post.time }}</text>
+      </view>
+      <view class="service-card__meta-row">
+        <ni-icon name="pin" :size="14" state="tertiary" />
+        <text class="service-card__meta-text" :lines="1">{{ post.place }}</text>
+      </view>
+    </view>
+
+    <view class="service-card__bottom">
+      <ni-avatar :src="post.avatar" :name="post.author" :size="35" :variant="isOffer ? 'green' : 'orange'" />
+      <view class="service-card__author">
+        <view class="service-card__author-name-row">
+          <text class="service-card__author-name">{{ post.author }}</text>
+          <view class="service-card__author-verified">
+            <ni-icon name="shield" :size="8" state="gold" />
+            <text class="service-card__author-verified-text">已认证</text>
+          </view>
+        </view>
+        <text class="service-card__author-meta" :lines="1">{{ authorMeta }}</text>
+      </view>
+      <view class="service-card__response">
+        <text class="service-card__price">{{ priceText }}</text>
+        <view class="service-card__button" :class="{ 'service-card__button--offer': isOffer }" @click.stop="onRespond">
+          <text class="service-card__button-text">{{ isOffer ? '咨询服务' : '我来帮忙' }}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { ServicePost } from '../../models'
+
+const props = withDefaults(
+  defineProps<{
+    post: ServicePost
+    fluid?: boolean
+  }>(),
+  { fluid: false },
+)
+
+const emit = defineEmits<{
+  (event: 'tap'): void
+  (event: 'respond'): void
+}>()
+
+const isOffer = computed(() => props.post.kind === '提供')
+const priceText = computed(() => props.post.price || props.post.reward)
+const authorMeta = computed(() => {
+  if (isOffer.value) {
+    return `${props.post.credit || '信用良好'} · 服务 ${props.post.serviceCount || 0} 次 · 评价 ${props.post.rating || '4.9'}`
+  }
+  return `${props.post.distance} · ${props.post.responses} 位邻居已响应`
+})
+
+function onTap(): void {
+  emit('tap')
+}
+function onRespond(): void {
+  emit('respond')
+}
+</script>
+
+<style scoped lang="scss">
+.service-card {
+  width: 260px;
+  padding: 14px;
+  border-radius: $ni-radius-17;
+  background-color: $ni-color-white;
+  border: 1px solid #eeeae6;
+  box-shadow: $ni-shadow-md;
+  margin-right: 11px;
+  transition: transform 100ms ease-out;
+}
+.service-card--pressed {
+  transform: scale(0.985);
+}
+.service-card--offer {
+  background-image: linear-gradient(135deg, #fbfefc 0%, #ffffff 100%);
+}
+.service-card--fluid {
+  width: 100%;
+  margin-right: 0;
+  margin-bottom: 10px;
+}
+.service-card__top {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.service-card__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background-color: #fff0e6;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.service-card__icon--offer {
+  background-color: #eaf7ef;
+}
+.service-card__title-wrap {
+  flex: 1;
+}
+.service-card__badges {
+  flex-direction: row;
+  align-items: center;
+}
+.service-card__kind {
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-radius: 5px;
+  background-color: #fff0e6;
+  align-items: center;
+  justify-content: center;
+}
+.service-card__kind--offer {
+  background-color: #eaf7ef;
+}
+.service-card__kind-text {
+  font-size: $ni-font-8;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.service-card__kind-text--offer {
+  color: #4d8966;
+}
+.service-card__category {
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 6px;
+  margin-left: 5px;
+  border-radius: 5px;
+  background-color: #f4f1ef;
+  align-items: center;
+  justify-content: center;
+}
+.service-card__category-text {
+  font-size: $ni-font-8;
+  color: #8d827b;
+}
+.service-card__title {
+  margin-top: 6px;
+  font-size: $ni-font-15;
+  line-height: 20px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.service-card__desc {
+  margin-top: 11px;
+  margin-bottom: 11px;
+  font-size: $ni-font-11;
+  line-height: 18px;
+  color: #66605c;
+}
+.service-card__meta-panel {
+  padding: 9px 10px;
+  border-radius: $ni-radius-10;
+  background-color: #f8f6f4;
+}
+.service-card__meta-row {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+.service-card__meta-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  color: #7f746d;
+}
+.service-card__bottom {
+  margin-top: 12px;
+  padding-top: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-top: 1px solid #f0edea;
+}
+.service-card__author {
+  flex: 1;
+  margin-left: 8px;
+}
+.service-card__author-name-row {
+  flex-direction: row;
+  align-items: center;
+}
+.service-card__author-name {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 4px;
+}
+.service-card__author-verified {
+  flex-direction: row;
+  align-items: center;
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  border-radius: 4px;
+  background-color: $ni-color-credit-bg-2;
+}
+.service-card__author-verified-text {
+  margin-left: 2px;
+  font-size: 7px;
+  color: #9a702e;
+}
+.service-card__author-meta {
+  margin-top: 4px;
+  font-size: $ni-font-8;
+  color: #a19a95;
+}
+.service-card__response {
+  align-items: flex-end;
+  margin-left: 6px;
+}
+.service-card__price {
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: #b26b38;
+}
+.service-card__button {
+  min-width: 69px;
+  height: 28px;
+  margin-top: 5px;
+  padding-left: 9px;
+  padding-right: 9px;
+  border-radius: 9px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.service-card__button--offer {
+  background-image: $ni-gradient-gift;
+}
+.service-card__button-text {
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: #ffffff;
+}
+</style>

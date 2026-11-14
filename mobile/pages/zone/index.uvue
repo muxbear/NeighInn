@@ -1,0 +1,642 @@
+<template>
+  <scroll-view class="zone" :class="`zone--${zoneKey}`" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="zone__header" :class="`zone__header--${tone}`">
+      <ni-status-bar />
+      <view class="zone__nav">
+        <view class="zone__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="zone__nav-title">{{ zoneConfig.name }}</text>
+        <view class="zone__nav-actions">
+          <view class="zone__nav-button zone__nav-button--action" @click="goSearch">
+            <ni-icon name="search" :size="18" state="secondary" />
+          </view>
+          <view class="zone__nav-button zone__nav-button--action" @click="openSettings">
+            <ni-icon name="settings" :size="18" state="secondary" />
+          </view>
+        </view>
+      </view>
+
+      <view class="zone__hero">
+        <view class="zone__hero-icon" :class="`zone__hero-icon--${tone}`">
+          <ni-icon :name="zoneConfig.icon" :size="30" :state="heroIconState" />
+        </view>
+        <view class="zone__hero-copy">
+          <text class="zone__hero-title">{{ zoneConfig.name }}</text>
+          <text class="zone__hero-sub">{{ zoneConfig.description }}</text>
+          <text class="zone__hero-meta">阳光花园小区 · 认证业主专属 · 2,138 位认证邻里</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="zone__sticky" :style="{ top: statusBarHeight + 'px' }">
+      <scroll-view class="zone__tabs-scroll" scroll-x :show-scrollbar="false">
+        <view class="zone__tabs">
+          <view
+            v-for="category in categories"
+            :key="category"
+            class="zone__tab"
+            @click="selectCategory(category)"
+          >
+            <text class="zone__tab-text" :class="{ 'zone__tab-text--active': activeCategory === category }">{{ category }}</text>
+            <view v-if="activeCategory === category" class="zone__tab-line" />
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <template v-if="zoneKey !== 'service'">
+      <view class="zone__body">
+        <view class="zone__body-head">
+          <view class="zone__body-title-row">
+            <text class="zone__body-title">{{ listTitle }}</text>
+            <view class="zone__verified">
+              <ni-icon name="shield" :size="11" state="green" />
+              <text class="zone__verified-text">业主已认证</text>
+            </view>
+          </view>
+          <text class="zone__sort" @click="chooseSort">{{ activeSort }}</text>
+        </view>
+
+        <view v-if="loading && zoneItems.length === 0" class="zone__loading">
+          <ni-skeleton :rows="4" :avatar="false" />
+        </view>
+
+        <view v-else-if="zoneItems.length === 0" class="zone__empty">
+          <ni-empty
+            :icon="zoneConfig.icon"
+            :title="`还没有${zoneConfig.name}物品`"
+            desc="成为第一个分享的邻居吧"
+            action-text="去发布"
+            @action="goPublish"
+          />
+        </view>
+
+        <view v-else class="zone__grid">
+          <view
+            v-for="(item, index) in zoneItems"
+            :key="item.id"
+            class="zone__cell"
+            :class="{ 'zone__cell--gap': index % 2 === 0 }"
+          >
+            <product-card :item="item" @tap="goItem(item.id)" @favorite="onFavorite(item)" />
+          </view>
+        </view>
+
+        <view v-if="zoneItems.length > 0" class="zone__load-more" @click="loadMore">
+          <ni-loading v-if="loading" :size="16" text="正在加载" />
+          <template v-else>
+            <view class="zone__load-line" />
+            <text class="zone__load-text">{{ hasMore ? '继续向下滑动，加载更多' : '专属区的好物都在这里了' }}</text>
+            <view class="zone__load-line" />
+          </template>
+        </view>
+      </view>
+    </template>
+
+    <template v-else>
+      <view class="zone__service-body">
+        <view class="zone__service-tabs">
+          <view
+            class="zone__service-tab"
+            :class="{ 'zone__service-tab--active': serviceKind === '求助' }"
+            @click="switchServiceKind('求助')"
+          >
+            <text class="zone__service-tab-title" :class="{ 'zone__service-tab-title--active': serviceKind === '求助' }">邻里求助</text>
+            <text class="zone__service-tab-sub">需要邻居帮忙</text>
+          </view>
+          <view
+            class="zone__service-tab"
+            :class="{ 'zone__service-tab--active offer': serviceKind === '提供' }"
+            @click="switchServiceKind('提供')"
+          >
+            <text class="zone__service-tab-title" :class="{ 'zone__service-tab-title--active': serviceKind === '提供' }">邻里服务</text>
+            <text class="zone__service-tab-sub">可以提供的帮助</text>
+          </view>
+        </view>
+
+        <view class="zone__service-head">
+          <view class="zone__service-head-copy">
+            <text class="zone__service-title">{{ serviceKind === '求助' ? '等你搭把手' : '邻居可以提供' }}</text>
+            <text class="zone__service-sub">{{ serviceKind === '求助' ? '力所能及，温暖就在身边' : '发现身边可靠的服务与陪伴' }}</text>
+          </view>
+          <view class="zone__service-publish" @click="openServicePublish">
+            <ni-icon name="plus" :size="12" state="white" />
+            <text class="zone__service-publish-text">发布</text>
+          </view>
+        </view>
+
+        <view v-if="services.length === 0" class="zone__empty">
+          <ni-empty icon="friend" title="暂时没有互助信息" desc="邻里之间，互相搭把手" />
+        </view>
+
+        <view v-else class="zone__service-list">
+          <service-card
+            v-for="post in services"
+            :key="post.id"
+            :post="post"
+            fluid
+            @tap="onServiceOpen(post)"
+            @respond="onServiceRespond(post)"
+          />
+        </view>
+
+        <view v-if="services.length > 0" class="zone__load-more" @click="loadMore">
+          <view class="zone__load-line" />
+          <text class="zone__load-text">{{ serviceHasMore ? '继续向下滑动，加载更多' : '服务互助信息都在这里了' }}</text>
+          <view class="zone__load-line" />
+        </view>
+
+        <view class="zone__safety">
+          <ni-icon name="shield" :size="15" state="gold" />
+          <text class="zone__safety-text">服务互助请在小区公共区域进行，涉及上门服务请提前在物业登记。</text>
+        </view>
+      </view>
+    </template>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onReachBottom } from '@dcloudio/uni-app'
+import type { Item, ServiceKind, ServicePost, ZoneKey } from '../../models'
+import { useItemStore } from '../../stores/item.store'
+import { useToast } from '../../composables/useToast'
+import { useSystemMetrics } from '../../composables/useSystemMetrics'
+import {
+  ITEM_CATEGORIES,
+  SERVICE_CATEGORIES,
+  SORT_OPTIONS,
+  ZONE_MAP,
+} from '../../config/constants'
+import { serviceService } from '../../services/service.service'
+
+const itemStore = useItemStore()
+const { toast, showToast } = useToast()
+const { statusBarHeight } = useSystemMetrics()
+
+const zoneKey = ref<ZoneKey>('gift')
+const activeCategory = ref('全部')
+const activeSort = ref('最新发布')
+const serviceKind = ref<ServiceKind>('求助')
+const serviceCategory = ref('全部')
+const allServices = ref<ServicePost[]>([])
+const visibleServiceCount = ref(4)
+
+const zoneConfig = computed(() => ZONE_MAP[zoneKey.value])
+const tone = computed(() => zoneConfig.value.tone)
+const heroIconState = computed(() => {
+  if (tone.value === 'gift') return 'green'
+  if (tone.value === 'swap') return 'blue'
+  if (tone.value === 'service') return 'gold'
+  return 'active'
+})
+const categories = computed(() =>
+  zoneKey.value === 'service' ? ['全部', ...SERVICE_CATEGORIES.slice(1)] : ['全部', ...ITEM_CATEGORIES],
+)
+const listTitle = computed(() => {
+  if (zoneKey.value === 'gift') return '邻居正在赠送'
+  if (zoneKey.value === 'swap') return '邻居正在交换'
+  return '邻居正在出售'
+})
+const zoneItems = computed(() => itemStore.getZoneItems(zoneKey.value, activeCategory.value, activeSort.value))
+const totalCount = computed(() => itemStore.getZoneTotal(zoneKey.value, activeCategory.value, activeSort.value) || zoneItems.value.length)
+const loading = computed(() => itemStore.isLoadingZone(zoneKey.value, activeCategory.value, activeSort.value))
+const hasMore = computed(() => itemStore.hasMoreZone(zoneKey.value, activeCategory.value, activeSort.value))
+const services = computed(() => allServices.value.slice(0, visibleServiceCount.value))
+const serviceHasMore = computed(
+  () => visibleServiceCount.value < Math.min(12, allServices.value.length),
+)
+
+onLoad((options: any) => {
+  const requested = String(options?.zone ?? 'gift')
+  if (requested === 'swap' || requested === 'sale' || requested === 'service') {
+    zoneKey.value = requested
+  }
+  loadInitial()
+})
+
+onReachBottom(() => {
+  loadMore()
+})
+
+async function loadInitial(): Promise<void> {
+  if (zoneKey.value === 'service') {
+    await loadServices()
+    return
+  }
+  await itemStore.fetchZone(zoneKey.value, {
+    category: activeCategory.value,
+    sort: activeSort.value,
+    refresh: true,
+  })
+}
+
+async function loadServices(): Promise<void> {
+  const result = await serviceService.getList(serviceKind.value, serviceCategory.value, 1, 50)
+  allServices.value = result.list
+  visibleServiceCount.value = 4
+}
+
+async function loadMore(): Promise<void> {
+  if (zoneKey.value === 'service') {
+    if (!serviceHasMore.value) return
+    visibleServiceCount.value = Math.min(12, visibleServiceCount.value + 4)
+    return
+  }
+  if (loading.value || !hasMore.value) return
+  await itemStore.fetchZone(zoneKey.value, {
+    category: activeCategory.value,
+    sort: activeSort.value,
+    refresh: false,
+  })
+}
+
+async function selectCategory(category: string): Promise<void> {
+  activeCategory.value = category
+  if (zoneKey.value === 'service') {
+    serviceCategory.value = category
+    await loadServices()
+  } else {
+    await itemStore.fetchZone(zoneKey.value, {
+      category,
+      sort: activeSort.value,
+      refresh: true,
+    })
+  }
+}
+
+async function switchServiceKind(kind: ServiceKind): Promise<void> {
+  if (serviceKind.value === kind) return
+  serviceKind.value = kind
+  await loadServices()
+}
+
+function chooseSort(): void {
+  uni.showActionSheet({
+    itemList: [...SORT_OPTIONS],
+    success: async (res: any) => {
+      const index = Number(res.tapIndex) || 0
+      activeSort.value = SORT_OPTIONS[index] ?? SORT_OPTIONS[0]
+      await itemStore.fetchZone(zoneKey.value, {
+        category: activeCategory.value,
+        sort: activeSort.value,
+        refresh: true,
+      })
+    },
+  })
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+function goSearch(): void {
+  uni.navigateTo({ url: '/pages/home/search' })
+}
+function goPublish(): void {
+  uni.navigateTo({ url: '/pages/publish/index' })
+}
+function openServicePublish(): void {
+  showToast('服务互助发布将在后续版本开放')
+}
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+}
+function openSettings(): void {
+  showToast('专属区设置即将开放')
+}
+
+async function onFavorite(item: Item): Promise<void> {
+  try {
+    await itemStore.toggleFavorite(item)
+    showToast(item.favorite ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+function onServiceOpen(post: ServicePost): void {
+  showToast(`${post.author} · ${post.category}`)
+}
+
+async function onServiceRespond(post: ServicePost): Promise<void> {
+  try {
+    const result = await serviceService.respond(post.id)
+    post.responses = result.responses
+    showToast(post.kind === '求助' ? '已响应，等待邻居联系' : '已发送咨询，请留意消息')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.zone {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.zone__header {
+  padding-left: 15px;
+  padding-right: 15px;
+  padding-bottom: 18px;
+  background-image: $ni-gradient-zone-header;
+}
+.zone__header--gift {
+  background-image: $ni-gradient-zone-header;
+}
+.zone__header--swap {
+  background-image: linear-gradient(150deg, #f4faff 0%, #fdfeff 100%);
+}
+.zone__header--sale {
+  background-image: $ni-gradient-zone-header;
+}
+.zone__header--service {
+  background-image: linear-gradient(150deg, #fffaf0 0%, #fffdf8 100%);
+}
+.zone__nav {
+  height: 45px;
+  flex-direction: row;
+  align-items: center;
+}
+.zone__nav-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.8);
+  align-items: center;
+  justify-content: center;
+}
+.zone__nav-title {
+  flex: 1;
+  margin-left: 12px;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.zone__nav-actions {
+  flex-direction: row;
+}
+.zone__nav-button--action {
+  margin-left: 7px;
+}
+.zone__hero {
+  min-height: 91px;
+  margin-top: 5px;
+  padding: 14px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-18;
+  background-color: rgba(255, 255, 255, 0.78);
+  box-shadow: $ni-shadow-sm;
+}
+.zone__hero-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 19px;
+  align-items: center;
+  justify-content: center;
+}
+.zone__hero-icon--gift {
+  background-color: $ni-color-gift-bg-2;
+}
+.zone__hero-icon--swap {
+  background-color: $ni-color-swap-bg-2;
+}
+.zone__hero-icon--sale {
+  background-color: $ni-color-primary-bg;
+}
+.zone__hero-icon--service {
+  background-color: $ni-color-service-bg-2;
+}
+.zone__hero-copy {
+  flex: 1;
+  margin-left: 12px;
+}
+.zone__hero-title {
+  font-size: $ni-font-22;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.3px;
+}
+.zone__hero-sub {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: $ni-color-text-secondary;
+}
+.zone__hero-meta {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.zone__sticky {
+  position: sticky;
+  z-index: 20;
+  height: 52px;
+  background-color: rgba(255, 255, 255, 0.97);
+  border-bottom: 1px solid #f0ece8;
+}
+.zone__tabs-scroll {
+  height: 52px;
+}
+.zone__tabs {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 15px;
+  padding-right: 15px;
+  height: 52px;
+}
+.zone__tab {
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  margin-right: 22px;
+}
+.zone__tab-text {
+  font-size: $ni-font-14;
+  color: $ni-color-text-secondary;
+}
+.zone__tab-text--active {
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.zone__tab-line {
+  margin-top: 4px;
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+  background-color: $ni-color-primary;
+}
+.zone__body {
+  padding: 18px 14px 30px;
+}
+.zone__body-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.zone__body-title-row {
+  flex-direction: row;
+  align-items: center;
+}
+.zone__body-title {
+  font-size: $ni-font-18;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.zone__verified {
+  flex-direction: row;
+  align-items: center;
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 7px;
+  border-radius: 10px;
+  background-color: $ni-color-gift-bg;
+  margin-left: 7px;
+}
+.zone__verified-text {
+  margin-left: 2px;
+  font-size: $ni-font-10;
+  color: $ni-color-gift-deep;
+}
+.zone__sort {
+  font-size: $ni-font-11;
+  color: $ni-color-text-tertiary;
+}
+.zone__grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.zone__cell {
+  width: calc((100% - 12px) / 2);
+  margin-bottom: 12px;
+}
+.zone__cell--gap {
+  margin-right: 12px;
+}
+.zone__loading {
+  margin-top: 12px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.zone__empty {
+  margin-top: 12px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.zone__load-more {
+  min-height: 64px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding-top: 10px;
+}
+.zone__load-line {
+  width: 24px;
+  height: 1px;
+  background-color: #e8e1db;
+}
+.zone__load-text {
+  margin-left: 10px;
+  margin-right: 10px;
+  font-size: $ni-font-9;
+  color: #b2aaa4;
+}
+.zone__service-body {
+  padding: 14px 14px 30px;
+}
+.zone__service-tabs {
+  flex-direction: row;
+  margin-bottom: 14px;
+}
+.zone__service-tab {
+  flex: 1;
+  min-height: 52px;
+  padding: 9px 12px;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  border: 1px solid #eee9e4;
+  margin-right: 9px;
+}
+.zone__service-tab--active {
+  background-color: $ni-color-service-bg-2;
+  border-color: #ddbd7a;
+}
+.zone__service-tab--active.offer {
+  background-color: $ni-color-gift-bg-2;
+  border-color: #9ed1b2;
+}
+.zone__service-tab-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-secondary;
+}
+.zone__service-tab-title--active {
+  color: $ni-color-service-deep;
+}
+.zone__service-tab-title--active.offer {
+  color: $ni-color-gift-deep;
+}
+.zone__service-tab-sub {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.zone__service-head {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.zone__service-head-copy {
+  flex: 1;
+}
+.zone__service-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.zone__service-sub {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.zone__service-publish {
+  flex-direction: row;
+  align-items: center;
+  height: 30px;
+  padding-left: 10px;
+  padding-right: 11px;
+  border-radius: 10px;
+  background-image: $ni-gradient-service;
+}
+.zone__service-publish-text {
+  margin-left: 3px;
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: #ffffff;
+}
+.zone__service-list {
+  margin-top: 2px;
+}
+.zone__safety {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 11px 12px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-service-bg-2;
+  margin-top: 4px;
+}
+.zone__safety-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-service-deep;
+}
+</style>

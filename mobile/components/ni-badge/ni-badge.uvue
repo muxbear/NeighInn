@@ -1,0 +1,53 @@
+<template>
+  <view v-if="visible" class="ni-badge" :class="{ 'ni-badge--dot': dot }">
+    <text v-if="!dot" class="ni-badge__text">{{ display }}</text>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    count?: number
+    dot?: boolean
+    max?: number
+  }>(),
+  {
+    count: 0,
+    dot: false,
+    max: 99,
+  },
+)
+
+const display = computed(() => (props.count > props.max ? `${props.max}+` : `${props.count}`))
+const visible = computed(() => props.dot || props.count > 0)
+</script>
+
+<style scoped lang="scss">
+.ni-badge {
+  min-width: 16px;
+  height: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+  border-radius: 8px;
+  background-color: $ni-color-primary;
+  border: 2px solid #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.ni-badge--dot {
+  min-width: 9px;
+  width: 9px;
+  height: 9px;
+  padding-left: 0;
+  padding-right: 0;
+  border-radius: 5px;
+}
+.ni-badge__text {
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+}
+</style>

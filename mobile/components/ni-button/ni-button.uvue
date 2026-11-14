@@ -1,0 +1,195 @@
+<template>
+  <view
+    class="ni-button"
+    :class="[
+      `ni-button--${type}`,
+      `ni-button--${size}`,
+      {
+        'ni-button--block': block,
+        'ni-button--disabled': disabled || loading,
+        'ni-button--icon-only': type === 'icon',
+      },
+    ]"
+    :hover-class="disabled || loading ? '' : 'ni-button--pressed'"
+    :hover-stay-time="100"
+    @click="onTap"
+  >
+    <view v-if="loading" class="ni-button__spinner" :style="{ width: spinnerSize + 'px', height: spinnerSize + 'px' }" />
+    <ni-icon
+      v-else-if="icon"
+      :name="icon"
+      :size="iconSize"
+      :state="iconState || (type === 'primary' || type === 'gift' || type === 'swap' || type === 'gold' ? 'white' : 'active')"
+    />
+    <text class="ni-button__text" :class="[`ni-button__text--${type}`, `ni-button__text--${size}`]">
+      <slot />
+    </text>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+type ButtonType = 'primary' | 'secondary' | 'text' | 'ghost' | 'icon' | 'gift' | 'swap' | 'gold'
+type ButtonSize = 'sm' | 'md' | 'lg' | 'xl'
+
+const props = withDefaults(
+  defineProps<{
+    type?: ButtonType
+    size?: ButtonSize
+    block?: boolean
+    loading?: boolean
+    disabled?: boolean
+    icon?: string
+    iconState?: string
+  }>(),
+  {
+    type: 'primary',
+    size: 'md',
+    block: false,
+    loading: false,
+    disabled: false,
+    icon: '',
+    iconState: '',
+  },
+)
+
+const emit = defineEmits<{ (event: 'tap'): void }>()
+
+const iconSize = computed(() => {
+  if (props.size === 'sm') return 14
+  if (props.size === 'xl') return 18
+  return 16
+})
+
+const spinnerSize = computed(() => (props.size === 'sm' ? 12 : 16))
+
+function onTap(): void {
+  if (props.disabled || props.loading) return
+  emit('tap')
+}
+</script>
+
+<style scoped lang="scss">
+.ni-button {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: $ni-radius-10;
+  transition: transform 100ms ease-out, opacity 100ms ease-out;
+}
+.ni-button--block {
+  width: 100%;
+}
+.ni-button--pressed {
+  transform: scale(0.98);
+  opacity: 0.9;
+}
+.ni-button--disabled {
+  opacity: 0.5;
+}
+.ni-button--sm {
+  height: 28px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: 9px;
+}
+.ni-button--md {
+  height: 38px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: 10px;
+}
+.ni-button--lg {
+  height: 46px;
+  padding-left: 16px;
+  padding-right: 16px;
+  border-radius: 13px;
+}
+.ni-button--xl {
+  height: 52px;
+  padding-left: 18px;
+  padding-right: 18px;
+  border-radius: 14px;
+}
+.ni-button--icon-only {
+  padding-left: 0;
+  padding-right: 0;
+}
+.ni-button--primary {
+  background-image: $ni-gradient-brand;
+  box-shadow: $ni-shadow-brand;
+}
+.ni-button--secondary {
+  background-color: $ni-color-white;
+  border: 1px solid #ffb68e;
+}
+.ni-button--text {
+  background-color: transparent;
+}
+.ni-button--ghost {
+  background-color: $ni-color-white;
+  border: 2px solid $ni-color-primary;
+}
+.ni-button--icon {
+  background-color: #fff0e5;
+}
+.ni-button--gift {
+  background-image: $ni-gradient-gift;
+}
+.ni-button--swap {
+  background-image: $ni-gradient-swap;
+}
+.ni-button--gold {
+  background-image: $ni-gradient-service;
+}
+.ni-button__text {
+  margin-left: 4px;
+}
+.ni-button__text--sm {
+  font-size: $ni-font-10;
+  font-weight: 600;
+}
+.ni-button__text--md {
+  font-size: $ni-font-11;
+  font-weight: 600;
+}
+.ni-button__text--lg {
+  font-size: $ni-font-13;
+  font-weight: 700;
+}
+.ni-button__text--xl {
+  font-size: $ni-font-13;
+  font-weight: 700;
+}
+.ni-button__text--primary,
+.ni-button__text--gift,
+.ni-button__text--swap,
+.ni-button__text--gold {
+  color: $ni-color-white;
+}
+.ni-button__text--secondary,
+.ni-button__text--text {
+  color: $ni-color-primary-dark;
+}
+.ni-button__text--ghost {
+  color: $ni-color-primary;
+}
+.ni-button__text--icon {
+  color: $ni-color-primary-dark;
+}
+.ni-button__spinner {
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: niButtonSpin 0.8s linear infinite;
+}
+@keyframes niButtonSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

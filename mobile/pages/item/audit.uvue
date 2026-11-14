@@ -1,0 +1,588 @@
+<template>
+  <scroll-view class="audit" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="audit__header">
+      <ni-status-bar />
+      <view class="audit__nav">
+        <view class="audit__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="audit__nav-title">AI 质检</text>
+        <view class="audit__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="audit__hero">
+      <view v-if="status === 'PROCESSING'" class="audit__hero-icon audit__hero-icon--processing">
+        <ni-loading :size="40" :text="''" />
+      </view>
+      <view v-else-if="status === 'PASSED'" class="audit__hero-icon audit__hero-icon--passed">
+        <ni-icon name="check" :size="40" state="white" />
+      </view>
+      <view v-else class="audit__hero-icon audit__hero-icon--rejected">
+        <ni-icon name="alert" :size="38" state="danger" />
+      </view>
+
+      <text class="audit__title">{{ statusTitle }}</text>
+      <text class="audit__desc">{{ statusDesc }}</text>
+
+      <view class="audit__progress-wrap">
+        <ni-progress :percent="progress?.progress ?? 0" :height="6" color="#FF7A3D" show-text />
+      </view>
+      <text class="audit__current">{{ progress?.currentText || '正在准备质检…' }}</text>
+    </view>
+
+    <view class="audit__steps-card">
+      <view class="audit__steps-head">
+        <text class="audit__steps-title">质检流程</text>
+        <text class="audit__steps-sub">端到端约 60 秒</text>
+      </view>
+      <view v-for="(step, index) in steps" :key="step.key" class="audit__step">
+        <view class="audit__step-left">
+          <view
+            class="audit__step-dot"
+            :class="{
+              'audit__step-dot--done': step.status === 'DONE',
+              'audit__step-dot--processing': step.status === 'PROCESSING',
+              'audit__step-dot--failed': step.status === 'FAILED',
+            }"
+          >
+            <ni-icon v-if="step.status === 'DONE'" name="check" :size="11" state="white" />
+            <view v-else-if="step.status === 'PROCESSING'" class="audit__step-spinner" />
+            <text v-else class="audit__step-index">{{ index + 1 }}</text>
+          </view>
+          <view v-if="index < steps.length - 1" class="audit__step-line" :class="{ 'audit__step-line--done': step.status === 'DONE' }" />
+        </view>
+        <view class="audit__step-copy">
+          <text class="audit__step-title" :class="{ 'audit__step-title--active': step.status === 'PROCESSING' }">{{ step.title }}</text>
+          <text class="audit__step-message">{{ step.message || stepText(step.status) }}</text>
+        </view>
+        <ni-icon v-if="step.status === 'DONE'" name="check" :size="16" state="green" />
+        <text v-else-if="step.status === 'PROCESSING'" class="audit__step-status">检测中</text>
+        <text v-else class="audit__step-pending">等待中</text>
+      </view>
+    </view>
+
+    <view v-if="item" class="audit__item-card">
+      <image class="audit__item-image" :src="item.image" mode="aspectFill" />
+      <view class="audit__item-copy">
+        <text class="audit__item-title" :lines="2">{{ item.title }}</text>
+        <view class="audit__item-meta">
+          <text class="audit__item-type">{{ item.type }}</text>
+          <text class="audit__item-condition">{{ item.condition }}</text>
+        </view>
+      </view>
+    </view>
+
+    <view v-if="status === 'REJECTED'" class="audit__reject">
+      <view class="audit__reject-head">
+        <ni-icon name="alert" :size="17" state="danger" />
+        <text class="audit__reject-title">未通过原因</text>
+      </view>
+      <text v-for="(reason, index) in rejectReasons" :key="reason + index" class="audit__reject-item">· {{ reason }}</text>
+      <text class="audit__reject-suggestion">建议：补充清晰照片、修改标题与描述后重新提交。</text>
+    </view>
+
+    <view class="audit__actions">
+      <template v-if="status === 'PASSED'">
+        <view class="audit__action-secondary" @click="showReport">
+          <text class="audit__action-secondary-text">查看质检报告</text>
+        </view>
+        <ni-button type="primary" size="lg" block @tap="goManage">
+          查看我的发布
+        </ni-button>
+      </template>
+      <template v-else-if="status === 'REJECTED'">
+        <view class="audit__action-secondary" @click="goManage">
+          <text class="audit__action-secondary-text">查看我的发布</text>
+        </view>
+        <ni-button type="primary" size="lg" block @tap="goBack">
+          返回修改
+        </ni-button>
+      </template>
+      <template v-else>
+        <text class="audit__waiting">质检完成后会自动更新，你可以先返回首页</text>
+        <view class="audit__action-secondary" @click="goHome">
+          <text class="audit__action-secondary-text">先回首页</text>
+        </view>
+      </template>
+    </view>
+
+    <ni-sheet v-model:visible="reportVisible" title="AI 质检报告" height="70vh">
+      <view v-if="report" class="report">
+        <view class="report__score">
+          <text class="report__score-value">{{ report.score }}</text>
+          <text class="report__score-label">综合得分</text>
+          <view class="report__passed">
+            <ni-icon name="check" :size="12" state="green" />
+            <text class="report__passed-text">质检通过</text>
+          </view>
+        </view>
+
+        <view v-for="dimension in report.dimensions" :key="dimension.name" class="report__dimension">
+          <view class="report__dimension-head">
+            <text class="report__dimension-name">{{ dimension.name }}</text>
+            <text class="report__dimension-score">{{ dimension.score }}</text>
+          </view>
+          <ni-progress :percent="dimension.score" :height="5" color="#6BB88A" />
+          <text class="report__dimension-desc">{{ dimension.desc }}</text>
+        </view>
+
+        <view v-if="report.risks.length" class="report__risks">
+          <text class="report__label">风险提示</text>
+          <text v-for="risk in report.risks" :key="risk" class="report__risk">· {{ risk }}</text>
+        </view>
+
+        <view class="report__suggestions">
+          <text class="report__label">改进建议</text>
+          <text v-for="suggestion in report.suggestions" :key="suggestion" class="report__suggestion">· {{ suggestion }}</text>
+        </view>
+
+        <text class="report__trace">报告编号：{{ report.traceId }}</text>
+      </view>
+    </ni-sheet>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { AuditProgress, AuditStep, Item } from '../../models'
+import { useAudit } from '../../composables/useAudit'
+import { useToast } from '../../composables/useToast'
+import { itemService } from '../../services/item.service'
+
+const { toast, showToast } = useToast()
+const { progress, start } = useAudit()
+
+const itemId = ref('')
+const item = ref<Item | null>(null)
+const reportVisible = ref(false)
+const finished = ref(false)
+
+const status = computed(() => progress.value?.status ?? 'PROCESSING')
+const report = computed(() => progress.value?.report ?? null)
+const steps = computed<AuditStep[]>(() => {
+  if (progress.value?.steps?.length) return progress.value.steps
+  return [
+    { key: 'step-1', title: '图像质量检测', status: 'PENDING' },
+    { key: 'step-2', title: '图文一致性检测', status: 'PENDING' },
+    { key: 'step-3', title: '内容合规检查', status: 'PENDING' },
+    { key: 'step-4', title: '生成质检报告', status: 'PENDING' },
+  ]
+})
+const rejectReasons = computed(() => progress.value?.rejectReasons ?? ['照片不够清晰，无法确认物品细节', '标题与照片内容不一致'])
+const statusTitle = computed(() => {
+  if (status.value === 'PASSED') return 'AI 质检通过'
+  if (status.value === 'REJECTED') return 'AI 质检未通过'
+  return '正在为你检测'
+})
+const statusDesc = computed(() => {
+  if (status.value === 'PASSED') return '已进入人工复核，通过后将在本小区商店上架'
+  if (status.value === 'REJECTED') return '根据质检结果修改后可重新提交'
+  return 'AI 将检查图像质量、图文一致性与内容合规，请稍候'
+})
+
+onLoad(async (options: any) => {
+  itemId.value = String(options?.id ?? '')
+  if (!itemId.value) {
+    showToast('缺少物品信息', 'alert')
+    return
+  }
+  try {
+    item.value = await itemService.getDetail(itemId.value)
+  } catch {
+    item.value = null
+  }
+  start(itemId.value, (result: AuditProgress) => {
+    finished.value = true
+    if (result.status === 'PASSED') showToast('AI 质检通过')
+    if (result.status === 'REJECTED') showToast('AI 质检未通过，请修改后重试', 'alert')
+  })
+})
+
+function stepText(value: string): string {
+  if (value === 'DONE') return '已完成'
+  if (value === 'PROCESSING') return '检测中…'
+  if (value === 'FAILED') return '未通过'
+  return '等待中'
+}
+
+function showReport(): void {
+  if (!report.value) {
+    showToast('质检报告生成中，请稍后再试', 'alert')
+    return
+  }
+  reportVisible.value = true
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.redirectTo({ url: '/pages/publish/index' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+function goManage(): void {
+  uni.redirectTo({ url: '/pages/item/manage' })
+}
+</script>
+
+<style scoped lang="scss">
+.audit {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.audit__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.audit__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.audit__nav-button {
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+}
+.audit__nav-title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.audit__nav-placeholder {
+  width: 36px;
+}
+.audit__hero {
+  align-items: center;
+  padding-top: 24px;
+  padding-bottom: 16px;
+}
+.audit__hero-icon {
+  width: 86px;
+  height: 86px;
+  border-radius: 31px;
+  align-items: center;
+  justify-content: center;
+}
+.audit__hero-icon--processing {
+  background-image: linear-gradient(135deg, #fff5ed 0%, #fffaf5 100%);
+  border: 1px solid #ffe3d1;
+}
+.audit__hero-icon--passed {
+  background-image: $ni-gradient-success;
+  box-shadow: 0 8px 22px rgba(85, 161, 115, 0.24);
+}
+.audit__hero-icon--rejected {
+  background-color: $ni-color-danger-bg;
+  border: 1px solid #ffd8c4;
+}
+.audit__title {
+  margin-top: 14px;
+  font-size: $ni-font-25;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.audit__desc {
+  margin-top: 6px;
+  font-size: $ni-font-13;
+  line-height: 21px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+.audit__progress-wrap {
+  width: 72%;
+  margin-top: 16px;
+}
+.audit__current {
+  margin-top: 7px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.audit__steps-card {
+  margin: 4px 14px 0;
+  padding: 15px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.audit__steps-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.audit__steps-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.audit__steps-sub {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.audit__step {
+  flex-direction: row;
+  align-items: flex-start;
+  min-height: 52px;
+}
+.audit__step-left {
+  width: 24px;
+  align-items: center;
+}
+.audit__step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: #eee9e4;
+  align-items: center;
+  justify-content: center;
+}
+.audit__step-dot--done {
+  background-color: $ni-color-gift;
+}
+.audit__step-dot--processing {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.audit__step-dot--failed {
+  background-color: $ni-color-danger-bg;
+}
+.audit__step-index {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+  font-weight: 700;
+}
+.audit__step-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffd7c0;
+  border-top-color: $ni-color-primary;
+  border-radius: 50%;
+  animation: auditSpin 0.9s linear infinite;
+}
+.audit__step-line {
+  flex: 1;
+  width: 2px;
+  background-color: #eee9e4;
+  margin-top: 3px;
+  margin-bottom: 3px;
+}
+.audit__step-line--done {
+  background-color: $ni-color-gift;
+}
+.audit__step-copy {
+  flex: 1;
+  margin-left: 10px;
+  padding-top: 2px;
+}
+.audit__step-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.audit__step-title--active {
+  color: $ni-color-primary-dark;
+}
+.audit__step-message {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.audit__step-status {
+  font-size: $ni-font-9;
+  color: $ni-color-primary;
+  padding-top: 4px;
+}
+.audit__step-pending {
+  font-size: $ni-font-9;
+  color: $ni-color-text-placeholder;
+  padding-top: 4px;
+}
+.audit__item-card {
+  margin: 10px 14px 0;
+  padding: 12px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+}
+.audit__item-image {
+  width: 62px;
+  height: 62px;
+  border-radius: $ni-radius-12;
+  background-color: #f3ede7;
+}
+.audit__item-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.audit__item-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.audit__item-meta {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 5px;
+}
+.audit__item-type {
+  font-size: $ni-font-9;
+  color: $ni-color-primary-dark;
+  margin-right: 8px;
+}
+.audit__item-condition {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.audit__reject {
+  margin: 10px 14px 0;
+  padding: 13px;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-danger-bg;
+}
+.audit__reject-head {
+  flex-direction: row;
+  align-items: center;
+}
+.audit__reject-title {
+  margin-left: 5px;
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-danger-deep;
+}
+.audit__reject-item {
+  margin-top: 5px;
+  font-size: $ni-font-10;
+  line-height: 16px;
+  color: $ni-color-danger-deep;
+}
+.audit__reject-suggestion {
+  margin-top: 7px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #9a6a55;
+}
+.audit__actions {
+  padding: 18px 14px 0;
+}
+.audit__action-secondary {
+  height: 44px;
+  border-radius: $ni-radius-13;
+  border: 1px solid #ffb68e;
+  background-color: $ni-color-white;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.audit__action-secondary-text {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.audit__waiting {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+  margin-bottom: 10px;
+}
+.report {
+  padding-bottom: 16px;
+}
+.report__score {
+  align-items: center;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-image: $ni-gradient-credit;
+}
+.report__score-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: $ni-color-credit-deep;
+}
+.report__score-label {
+  font-size: $ni-font-9;
+  color: #9b7e45;
+}
+.report__passed {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 5px;
+}
+.report__passed-text {
+  margin-left: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-success-deep;
+  font-weight: 600;
+}
+.report__dimension {
+  margin-top: 14px;
+}
+.report__dimension-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+.report__dimension-name {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.report__dimension-score {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-gift;
+}
+.report__dimension-desc {
+  margin-top: 4px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.report__risks {
+  margin-top: 14px;
+}
+.report__label {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.report__risk {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  color: $ni-color-danger-deep;
+}
+.report__suggestions {
+  margin-top: 14px;
+}
+.report__suggestion {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.report__trace {
+  margin-top: 16px;
+  font-size: 7px;
+  color: $ni-color-text-placeholder;
+}
+@keyframes auditSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

@@ -1,0 +1,250 @@
+<template>
+  <ni-sheet :visible="visible" height="84vh" @update:visible="onVisible">
+    <view class="swap-picker">
+      <view class="swap-picker__header">
+        <view class="swap-picker__header-icon">
+          <ni-icon name="swap" :size="20" state="blue" />
+        </view>
+        <view class="swap-picker__header-copy">
+          <text class="swap-picker__title">发起物品互换</text>
+          <text class="swap-picker__subtitle">选择你想用于交换的物品（可多选）</text>
+        </view>
+      </view>
+
+      <view class="swap-picker__target">
+        <text class="swap-picker__target-label">对方物品</text>
+        <image class="swap-picker__target-image" :src="targetItem.image" mode="aspectFill" />
+        <view class="swap-picker__target-copy">
+          <text class="swap-picker__target-title" :lines="1">{{ targetItem.title }}</text>
+          <text class="swap-picker__target-meta">{{ targetItem.condition }} · {{ targetItem.distance }}</text>
+        </view>
+      </view>
+
+      <view class="swap-picker__list-head">
+        <text class="swap-picker__list-title">我的在架物品</text>
+        <text class="swap-picker__list-count">{{ offeredItems.length }} 件可选</text>
+      </view>
+
+      <view v-if="offeredItems.length === 0" class="swap-picker__empty">
+        <ni-empty icon="box" title="你还没有在架物品" desc="先发布一件闲置，再来发起互换吧" />
+      </view>
+
+      <view
+        v-for="item in offeredItems"
+        :key="item.id"
+        class="swap-picker__row"
+        :class="{ 'swap-picker__row--selected': isSelected(item.id) }"
+        @click="toggle(item.id)"
+      >
+        <image class="swap-picker__row-image" :src="item.image" mode="aspectFill" />
+        <view class="swap-picker__row-copy">
+          <text class="swap-picker__row-title" :lines="1">{{ item.title }}</text>
+          <text class="swap-picker__row-meta">{{ item.condition }} · {{ item.type }}</text>
+        </view>
+        <view class="swap-picker__check" :class="{ 'swap-picker__check--selected': isSelected(item.id) }">
+          <ni-icon v-if="isSelected(item.id)" name="check" :size="11" state="white" />
+        </view>
+      </view>
+
+      <view class="swap-picker__footer">
+        <ni-button type="swap" size="lg" block :disabled="selectedIds.length === 0" @tap="confirm">
+          确认交换{{ selectedIds.length > 0 ? `（已选 ${selectedIds.length} 件）` : '' }}
+        </ni-button>
+        <text class="swap-picker__tip">互换双方物品均需通过 AI 质检，见面交割后完成</text>
+      </view>
+    </view>
+  </ni-sheet>
+</template>
+
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import type { Item } from '../../models'
+
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    targetItem: Item
+    offeredItems: Item[]
+  }>(),
+  { offeredItems: () => [] },
+)
+
+const emit = defineEmits<{
+  (event: 'update:visible', value: boolean): void
+  (event: 'confirm', ids: string[]): void
+}>()
+
+const selectedIds = ref<string[]>([])
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) selectedIds.value = []
+  },
+)
+
+function isSelected(id: string): boolean {
+  return selectedIds.value.indexOf(id) >= 0
+}
+
+function toggle(id: string): void {
+  if (isSelected(id)) {
+    selectedIds.value = selectedIds.value.filter((entry) => entry !== id)
+  } else {
+    selectedIds.value = [...selectedIds.value, id]
+  }
+}
+
+function confirm(): void {
+  if (!selectedIds.value.length) return
+  emit('confirm', [...selectedIds.value])
+  emit('update:visible', false)
+}
+
+function onVisible(value: boolean): void {
+  emit('update:visible', value)
+}
+</script>
+
+<style scoped lang="scss">
+.swap-picker {
+  padding-bottom: 8px;
+}
+.swap-picker__header {
+  flex-direction: row;
+  align-items: center;
+  padding-top: 4px;
+  padding-bottom: 12px;
+}
+.swap-picker__header-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background-color: #e8f4fb;
+  align-items: center;
+  justify-content: center;
+}
+.swap-picker__header-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.swap-picker__title {
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.swap-picker__subtitle {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.swap-picker__target {
+  flex-direction: row;
+  align-items: center;
+  height: 70px;
+  padding: 8px 10px;
+  border-radius: $ni-radius-14;
+  background-color: #f3f9fc;
+  border: 1px solid #dcecf5;
+}
+.swap-picker__target-label {
+  width: 46px;
+  font-size: $ni-font-8;
+  color: $ni-color-swap-deep;
+  font-weight: 600;
+}
+.swap-picker__target-image {
+  width: 53px;
+  height: 53px;
+  border-radius: 10px;
+  background-color: #e9eff3;
+}
+.swap-picker__target-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.swap-picker__target-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.swap-picker__target-meta {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.swap-picker__list-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+.swap-picker__list-title {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.swap-picker__list-count {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.swap-picker__row {
+  flex-direction: row;
+  align-items: center;
+  min-height: 72px;
+  padding: 8px 9px;
+  border-radius: $ni-radius-14;
+  border: 1px solid #eee9e4;
+  background-color: $ni-color-white;
+  margin-bottom: 8px;
+}
+.swap-picker__row--selected {
+  border-color: #74b6da;
+  background-color: #f3f9fd;
+}
+.swap-picker__row-image {
+  width: 50px;
+  height: 50px;
+  border-radius: 10px;
+  background-color: #f3ede7;
+}
+.swap-picker__row-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.swap-picker__row-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.swap-picker__row-meta {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.swap-picker__check {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1.5px solid #d9cec6;
+  align-items: center;
+  justify-content: center;
+}
+.swap-picker__check--selected {
+  background-color: $ni-color-swap;
+  border-color: $ni-color-swap;
+}
+.swap-picker__empty {
+  padding-bottom: 6px;
+}
+.swap-picker__footer {
+  margin-top: 10px;
+}
+.swap-picker__tip {
+  margin-top: 7px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+  text-align: center;
+}
+</style>

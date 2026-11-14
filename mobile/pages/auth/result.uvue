@@ -1,0 +1,287 @@
+<template>
+  <scroll-view class="auth-result" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="auth-result__header">
+      <ni-status-bar />
+      <view class="auth-result__nav">
+        <view class="auth-result__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="auth-result__nav-title">认证结果</text>
+        <view class="auth-result__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="auth-result__content">
+      <view class="auth-result__icon" :class="isOwner ? 'auth-result__icon--pending' : 'auth-result__icon--success'">
+        <ni-icon :name="isOwner ? 'clock' : 'check'" :size="40" :state="isOwner ? 'gold' : 'white'" />
+      </view>
+      <text class="auth-result__title">{{ title }}</text>
+      <text class="auth-result__desc">{{ desc }}</text>
+
+      <view class="auth-result__card">
+        <view class="auth-result__row">
+          <text class="auth-result__row-label">认证类型</text>
+          <text class="auth-result__row-value">{{ isOwner ? '业主证明' : '实名认证' }}</text>
+        </view>
+        <view class="auth-result__row">
+          <text class="auth-result__row-label">提交时间</text>
+          <text class="auth-result__row-value">{{ submitTime }}</text>
+        </view>
+        <view class="auth-result__row">
+          <text class="auth-result__row-label">当前状态</text>
+          <text class="auth-result__row-value auth-result__row-value--primary">{{ isOwner ? '审核中（≤24小时）' : '已通过' }}</text>
+        </view>
+        <view class="auth-result__row auth-result__row--last">
+          <text class="auth-result__row-label">说明</text>
+          <text class="auth-result__row-value">仅用于小区身份核验</text>
+        </view>
+      </view>
+
+      <view class="auth-result__timeline">
+        <view class="auth-result__timeline-item">
+          <view class="auth-result__timeline-dot auth-result__timeline-dot--done" />
+          <view class="auth-result__timeline-copy">
+            <text class="auth-result__timeline-title">资料已提交</text>
+            <text class="auth-result__timeline-desc">材料已加密上传</text>
+          </view>
+        </view>
+        <view class="auth-result__timeline-line" />
+        <view class="auth-result__timeline-item">
+          <view class="auth-result__timeline-dot" :class="{ 'auth-result__timeline-dot--done': !isOwner, 'auth-result__timeline-dot--active': isOwner }" />
+          <view class="auth-result__timeline-copy">
+            <text class="auth-result__timeline-title">{{ isOwner ? '人工审核中' : '实名核验通过' }}</text>
+            <text class="auth-result__timeline-desc">{{ isOwner ? '预计 24 小时内完成' : '身份信息已核验' }}</text>
+          </view>
+        </view>
+        <view class="auth-result__timeline-line" />
+        <view class="auth-result__timeline-item">
+          <view class="auth-result__timeline-dot" />
+          <view class="auth-result__timeline-copy">
+            <text class="auth-result__timeline-title">认证完成</text>
+            <text class="auth-result__timeline-desc">结果会通过通知中心告知</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="auth-result__actions">
+        <ni-button type="primary" size="lg" block @tap="goProfile">返回个人中心</ni-button>
+        <view class="auth-result__secondary" @click="goNotifications">
+          <text class="auth-result__secondary-text">查看通知</text>
+        </view>
+      </view>
+
+      <view class="auth-result__tip">
+        <ni-icon name="shield" :size="14" state="gold" />
+        <text class="auth-result__tip-text">如有疑问，可在设置 - 帮助与反馈中联系在线客服。</text>
+      </view>
+    </view>
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { formatDateTime } from '../../utils/formatter'
+
+const type = ref<'realname' | 'owner'>('owner')
+const submitTime = ref(formatDateTime(Date.now()))
+
+const isOwner = computed(() => type.value === 'owner')
+const title = computed(() => (isOwner.value ? '业主认证已提交' : '实名认证已通过'))
+const desc = computed(() =>
+  isOwner.value
+    ? '我们已收到你的证明材料，审核通过后即可在该小区发布闲置与参与交易。'
+    : '你的身份信息已完成核验，可以继续申请业主认证，解锁本小区交易。',
+)
+
+onLoad((options: any) => {
+  if (options?.type === 'realname') type.value = 'realname'
+})
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+function goProfile(): void {
+  uni.switchTab({ url: '/pages/profile/index' })
+}
+function goNotifications(): void {
+  uni.navigateTo({ url: '/pages/notifications/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.auth-result {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.auth-result__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.auth-result__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.auth-result__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.auth-result__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.auth-result__nav-placeholder {
+  width: 42px;
+}
+.auth-result__content {
+  padding: 30px 14px;
+  align-items: center;
+}
+.auth-result__icon {
+  width: 86px;
+  height: 86px;
+  border-radius: 31px;
+  align-items: center;
+  justify-content: center;
+}
+.auth-result__icon--success {
+  background-image: $ni-gradient-success;
+  box-shadow: 0 8px 22px rgba(85, 161, 115, 0.24);
+}
+.auth-result__icon--pending {
+  background-color: $ni-color-credit-bg;
+  border: 1px solid #f0dba4;
+}
+.auth-result__title {
+  margin-top: 14px;
+  font-size: $ni-font-25;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.auth-result__desc {
+  margin-top: 6px;
+  font-size: $ni-font-13;
+  line-height: 21px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+.auth-result__card {
+  width: 100%;
+  margin-top: 20px;
+  padding: 4px 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.auth-result__row {
+  min-height: 52px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: $ni-border-divider;
+}
+.auth-result__row--last {
+  border-bottom: 0;
+}
+.auth-result__row-label {
+  font-size: $ni-font-11;
+  color: $ni-color-text-secondary;
+}
+.auth-result__row-value {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.auth-result__row-value--primary {
+  color: $ni-color-primary-dark;
+}
+.auth-result__timeline {
+  width: 100%;
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.auth-result__timeline-item {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.auth-result__timeline-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background-color: #eee9e4;
+  margin-right: 10px;
+}
+.auth-result__timeline-dot--done {
+  background-color: $ni-color-gift;
+}
+.auth-result__timeline-dot--active {
+  background-color: $ni-color-primary;
+}
+.auth-result__timeline-copy {
+  flex: 1;
+}
+.auth-result__timeline-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.auth-result__timeline-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.auth-result__timeline-line {
+  width: 2px;
+  height: 22px;
+  background-color: #eee9e4;
+  margin-left: 8px;
+}
+.auth-result__actions {
+  width: 100%;
+  margin-top: 22px;
+}
+.auth-result__secondary {
+  height: 44px;
+  border-radius: $ni-radius-13;
+  border: 1px solid #ffb68e;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+  background-color: $ni-color-white;
+}
+.auth-result__secondary-text {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.auth-result__tip {
+  margin-top: 20px;
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 11px;
+  border-radius: $ni-radius-12;
+  background-color: #fff8e8;
+}
+.auth-result__tip-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

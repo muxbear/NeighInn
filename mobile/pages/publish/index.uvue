@@ -1,0 +1,1208 @@
+<template>
+  <scroll-view class="publish" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="publish__header">
+      <ni-status-bar />
+      <view class="publish__head-row">
+        <view class="publish__head-copy">
+          <text class="publish__kicker">{{ editingId ? '修改后需要重新质检' : '让闲置继续发光' }}</text>
+          <text class="publish__title">{{ editingId ? '编辑闲置' : '发布闲置' }}</text>
+        </view>
+        <text class="publish__cancel" @click="onCancel">取消</text>
+      </view>
+    </view>
+
+    <view v-if="!editingId" class="publish__mode">
+      <view class="publish__mode-tabs">
+        <view
+          class="publish__mode-tab"
+          :class="{ 'publish__mode-tab--active': mode === 'item' }"
+          @click="mode = 'item'"
+        >
+          <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'item' }">发布物品</text>
+        </view>
+        <view
+          class="publish__mode-tab"
+          :class="{ 'publish__mode-tab--active': mode === 'life' }"
+          @click="mode = 'life'"
+        >
+          <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'life' }">发布生活</text>
+        </view>
+      </view>
+    </view>
+
+    <template v-if="mode === 'item'">
+      <view class="publish__steps">
+        <view v-for="(label, index) in stepLabels" :key="label" class="publish__step">
+          <view class="publish__step-top">
+            <view
+              class="publish__step-circle"
+              :class="{ 'publish__step-circle--active': step >= index + 1, 'publish__step-circle--done': step > index + 1 }"
+            >
+              <ni-icon v-if="step > index + 1" name="check" :size="12" state="white" />
+              <text v-else class="publish__step-number" :class="{ 'publish__step-number--active': step >= index + 1 }">{{ index + 1 }}</text>
+            </view>
+            <view v-if="index < stepLabels.length - 1" class="publish__step-line" :class="{ 'publish__step-line--active': step > index + 1 }" />
+          </view>
+          <text class="publish__step-label" :class="{ 'publish__step-label--active': step >= index + 1 }">{{ label }}</text>
+        </view>
+      </view>
+
+      <view v-if="step === 1" class="publish__content">
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">添加实拍照片</text>
+            <text class="publish__card-hint">至少 {{ appStore.config.minItemImages }} 张</text>
+            <text class="publish__card-count">{{ draft.images.length }}/{{ appStore.config.maxItemImages }}</text>
+          </view>
+          <ni-photo-uploader
+            v-model="draft.images"
+            :max="appStore.config.maxItemImages"
+            :min="appStore.config.minItemImages"
+            :columns="2"
+            :tile-height="105"
+            tip-tile
+          />
+          <view class="publish__ai-tip">
+            <ni-icon name="spark" :size="16" state="green" />
+            <text class="publish__ai-tip-text">建议自然光下拍摄，正面、侧面、瑕疵处都要拍到，AI 质检更容易通过。</text>
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">物品标题</text>
+            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-count">{{ draft.title.length }}/30</text>
+          </view>
+          <ni-input v-model="draft.title" placeholder="例如：原木儿童成长椅，九成新" :maxlength="30" :height="43" />
+          <view class="publish__ai-write" @click="generateDescription">
+            <ni-icon name="spark" :size="15" state="active" />
+            <text class="publish__ai-write-text">上传照片后，AI 帮你写标题和描述</text>
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">交易方式</text>
+            <text class="publish__card-hint">请选择一种</text>
+          </view>
+          <view class="publish__trade-list">
+            <view
+              v-for="trade in tradeOptions"
+              :key="trade.value"
+              class="publish__trade"
+              :class="{ 'publish__trade--active': draft.tradeType === trade.value }"
+              @click="selectTrade(trade.value)"
+            >
+              <view class="publish__trade-icon" :class="`publish__trade-icon--${trade.tone}`">
+                <ni-icon :name="trade.icon" :size="17" :state="trade.iconState" />
+              </view>
+              <view class="publish__trade-copy">
+                <text class="publish__trade-title">{{ trade.label }}</text>
+                <text class="publish__trade-desc">{{ trade.desc }}</text>
+              </view>
+              <view class="publish__radio" :class="{ 'publish__radio--active': draft.tradeType === trade.value }">
+                <view v-if="draft.tradeType === trade.value" class="publish__radio-dot" />
+              </view>
+            </view>
+          </view>
+
+          <view v-if="draft.tradeType === '出售'" class="publish__price">
+            <text class="publish__price-symbol">¥</text>
+            <input
+              class="publish__price-input"
+              type="digit"
+              :value="draft.price"
+              placeholder="0.00"
+              placeholder-class="publish__price-placeholder"
+              @input="onPriceInput"
+            />
+            <text class="publish__price-ref">邻居参考价 ¥120–¥320</text>
+          </view>
+
+          <ni-textarea
+            v-if="draft.tradeType === '互换'"
+            v-model="draft.barterExpect"
+            placeholder="写下你希望交换的物品，例如：想换一张儿童学习椅或绘本套装"
+            :maxlength="120"
+            :height="70"
+          />
+
+          <view class="publish__quality">
+            <view class="publish__card-head">
+              <text class="publish__card-title">质量说明</text>
+              <text class="publish__card-hint">必填，至少 20 字</text>
+              <text class="publish__card-count">{{ draft.qualityDesc.length }}/300</text>
+            </view>
+            <ni-textarea
+              v-model="draft.qualityDesc"
+              placeholder="描述使用时长、磨损情况、配件是否齐全，让邻居更放心"
+              :maxlength="300"
+              :height="78"
+            />
+          </view>
+        </view>
+
+        <view class="publish__card publish__card--rows">
+          <view class="publish__row" @click="chooseCategory">
+            <text class="publish__row-label">物品分类</text>
+            <text class="publish__row-value">{{ draft.category || '请选择' }}</text>
+            <ni-icon name="chevron" :size="16" state="tertiary" />
+          </view>
+          <view class="publish__row publish__row--last" @click="chooseCondition">
+            <text class="publish__row-label">物品成色</text>
+            <text class="publish__row-value">{{ draft.condition || '请选择' }}</text>
+            <ni-icon name="chevron" :size="16" state="tertiary" />
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <text class="publish__card-title">更多凭证（可选）</text>
+          <view class="publish__optional-row">
+            <view class="publish__optional" @click="pickVideo">
+              <ni-icon name="play" :size="17" state="active" />
+              <text class="publish__optional-text">{{ draft.videoUrl ? '已添加视频' : '添加视频凭证' }}</text>
+            </view>
+            <view class="publish__optional" @click="pickInvoices">
+              <ni-icon name="image" :size="17" state="active" />
+              <text class="publish__optional-text">{{ draft.invoices?.length ? `已添加 ${draft.invoices.length} 张凭证` : '添加购买凭证' }}</text>
+            </view>
+          </view>
+          <view class="publish__optional-row">
+            <view class="publish__optional" @click="chooseExpectTime">
+              <ni-icon name="clock" :size="17" state="active" />
+              <text class="publish__optional-text">{{ draft.expectTime || '期望交易时段' }}</text>
+            </view>
+          </view>
+          <text class="publish__optional-hint">视频 ≤ 60 秒 / 100MB；凭证仅用于品质核验，不会公开展示。</text>
+        </view>
+      </view>
+
+      <view v-else class="publish__confirm">
+        <view class="publish__confirm-icon">
+          <ni-icon name="check" :size="34" state="white" />
+        </view>
+        <text class="publish__confirm-title">确认发布前，再检查一下</text>
+        <text class="publish__confirm-desc">信息将提交 AI 质检与人工复核，通过后才会在小区上架。</text>
+
+        <view class="publish__confirm-card">
+          <view class="publish__confirm-item">
+            <view class="publish__confirm-check"><ni-icon name="check" :size="12" state="green" /></view>
+            <text class="publish__confirm-item-title">实拍照片</text>
+            <text class="publish__confirm-item-value">{{ draft.images.length }} 张</text>
+          </view>
+          <view class="publish__confirm-item">
+            <view class="publish__confirm-check"><ni-icon name="check" :size="12" state="green" /></view>
+            <text class="publish__confirm-item-title">物品标题</text>
+            <text class="publish__confirm-item-value">{{ draft.title }}</text>
+          </view>
+          <view class="publish__confirm-item">
+            <view class="publish__confirm-check"><ni-icon name="check" :size="12" state="green" /></view>
+            <text class="publish__confirm-item-title">交易方式</text>
+            <text class="publish__confirm-item-value">{{ draft.tradeType }}{{ draft.tradeType === '出售' ? ` · ¥${draft.price}` : '' }}</text>
+          </view>
+          <view class="publish__confirm-item">
+            <view class="publish__confirm-check"><ni-icon name="check" :size="12" state="green" /></view>
+            <text class="publish__confirm-item-title">分类与成色</text>
+            <text class="publish__confirm-item-value">{{ draft.category }} · {{ draft.condition }}</text>
+          </view>
+          <view class="publish__confirm-item publish__confirm-item--last">
+            <view class="publish__confirm-check"><ni-icon name="check" :size="12" state="green" /></view>
+            <text class="publish__confirm-item-title">质量说明</text>
+            <text class="publish__confirm-item-value">{{ draft.qualityDesc.length }} 字</text>
+          </view>
+        </view>
+
+        <view class="publish__confirm-actions">
+          <view class="publish__back" @click="step = 1">
+            <text class="publish__back-text">返回修改</text>
+          </view>
+          <ni-button type="primary" size="lg" block :loading="submitting" @tap="submitItem">
+            确认提交
+          </ni-button>
+        </view>
+      </view>
+
+      <view class="publish__bottom-space" />
+      <view class="publish__footer">
+        <ni-button
+          v-if="step === 1"
+          type="primary"
+          size="lg"
+          block
+          @tap="goNext"
+        >
+          下一步，确认发布
+        </ni-button>
+        <ni-button
+          v-else
+          type="primary"
+          size="lg"
+          block
+          :loading="submitting"
+          @tap="submitItem"
+        >
+          确认提交，进入 AI 质检
+        </ni-button>
+        <view class="publish__agreement">
+          <text class="publish__agreement-text">发布即表示同意</text>
+          <text class="publish__agreement-link" @click="openPublishRule">《发布规范》</text>
+          <text class="publish__agreement-text">与《隐私政策》</text>
+        </view>
+      </view>
+    </template>
+
+    <template v-else>
+      <view class="publish__content">
+        <view class="publish__card">
+          <text class="publish__card-title">内容形式</text>
+          <view class="publish__life-types">
+            <view
+              class="publish__life-type"
+              :class="{ 'publish__life-type--active': lifeMediaType === 'video' }"
+              @click="lifeMediaType = 'video'"
+            >
+              <ni-icon name="play" :size="22" :state="lifeMediaType === 'video' ? 'active' : 'tertiary'" />
+              <text class="publish__life-type-title">短视频</text>
+              <text class="publish__life-type-desc">不超过 3 分钟</text>
+              <view v-if="lifeMediaType === 'video'" class="publish__life-check"><ni-icon name="check" :size="10" state="white" /></view>
+            </view>
+            <view
+              class="publish__life-type"
+              :class="{ 'publish__life-type--active': lifeMediaType === 'gallery' }"
+              @click="lifeMediaType = 'gallery'"
+            >
+              <ni-icon name="image" :size="22" :state="lifeMediaType === 'gallery' ? 'active' : 'tertiary'" />
+              <text class="publish__life-type-title">照片集</text>
+              <text class="publish__life-type-desc">最多 12 张</text>
+              <view v-if="lifeMediaType === 'gallery'" class="publish__life-check"><ni-icon name="check" :size="10" state="white" /></view>
+            </view>
+          </view>
+
+          <view v-if="lifeMediaType === 'video'" class="publish__life-upload" @click="pickLifeVideo">
+            <ni-icon name="camera" :size="30" state="active" />
+            <text class="publish__life-upload-title">{{ lifeVideo ? '已选择视频' : '拍摄或选择视频' }}</text>
+            <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
+          </view>
+          <ni-photo-uploader
+            v-else
+            v-model="lifeImages"
+            :max="appStore.config.maxLifeImages"
+            :min="1"
+            :columns="3"
+            :tile-height="100"
+            add-text="添加照片"
+          />
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">标题</text>
+            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-count">{{ lifeTitle.length }}/40</text>
+          </view>
+          <ni-input v-model="lifeTitle" placeholder="给这条生活动态起个标题" :maxlength="40" :height="43" />
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">描述</text>
+            <text class="publish__card-count">{{ lifeDescription.length }}/300</text>
+          </view>
+          <ni-textarea
+            v-model="lifeDescription"
+            placeholder="记录此刻的心情、地点或小故事…"
+            :maxlength="300"
+            :height="88"
+          />
+        </view>
+
+        <view class="publish__card">
+          <text class="publish__card-title">分类</text>
+          <view class="publish__life-categories">
+            <view
+              v-for="category in lifeCategories"
+              :key="category"
+              class="publish__life-category"
+              :class="{ 'publish__life-category--active': lifeCategory === category }"
+              @click="lifeCategory = category"
+            >
+              <text class="publish__life-category-text" :class="{ 'publish__life-category-text--active': lifeCategory === category }">{{ category }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="publish__life-notice">
+          <ni-icon name="shield" :size="16" state="green" />
+          <view class="publish__life-notice-copy">
+            <text class="publish__life-notice-title">仅本小区认证业主可见</text>
+            <text class="publish__life-notice-desc">发布内容将经过内容安全审核，请勿上传他人隐私或敏感信息。</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="publish__bottom-space" />
+      <view class="publish__footer">
+        <ni-button type="primary" size="lg" block :loading="lifeSubmitting" @tap="submitLife">
+          发布到生活频道
+        </ni-button>
+        <view class="publish__agreement">
+          <text class="publish__agreement-text">发布即表示同意</text>
+          <text class="publish__agreement-link" @click="openPublishRule">《发布规范》</text>
+          <text class="publish__agreement-text">与《隐私政策》</text>
+        </view>
+      </view>
+    </template>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="110" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { ItemDraft, LifeMediaType, TradeType } from '../../models'
+import { useAppStore } from '../../stores/app.store'
+import { useToast } from '../../composables/useToast'
+import { useUpload } from '../../composables/useUpload'
+import { itemService } from '../../services/item.service'
+import { lifeService } from '../../services/life.service'
+import { ITEM_CATEGORIES, ITEM_CONDITIONS, LIFE_CATEGORIES, STORAGE_KEYS } from '../../config/constants'
+import { getStorage, removeStorage, setStorage } from '../../utils/storage'
+import { validateItemDraft } from '../../utils/validator'
+import { APP_INFO } from '../../config/env'
+
+const appStore = useAppStore()
+const { toast, showToast } = useToast()
+const { prepareVideo } = useUpload()
+
+const mode = ref<'item' | 'life'>('item')
+const step = ref(1)
+const stepLabels = ['物品信息', '确认发布', '审核上架']
+const submitting = ref(false)
+const editingId = ref('')
+
+const EMPTY_DRAFT: ItemDraft = {
+  images: [],
+  title: '',
+  tradeType: '出售',
+  price: '',
+  barterExpect: '',
+  condition: '',
+  category: '',
+  qualityDesc: '',
+  videoUrl: '',
+  invoices: [],
+  expectTime: '',
+}
+
+const draft = reactive<ItemDraft>({ ...EMPTY_DRAFT })
+
+const tradeOptions = [
+  { value: '出售' as TradeType, label: '出售', desc: '担保支付，验货满意再放款', icon: 'wallet', iconState: 'active', tone: 'sale' },
+  { value: '免费' as TradeType, label: '免费', desc: '赠予邻居，让闲置继续发光', icon: 'gift', iconState: 'green', tone: 'gift' },
+  { value: '互换' as TradeType, label: '互换', desc: '以物换物，各取所需', icon: 'swap', iconState: 'blue', tone: 'swap' },
+]
+
+const lifeMediaType = ref<LifeMediaType>('gallery')
+const lifeImages = ref<string[]>([])
+const lifeVideo = ref('')
+const lifeTitle = ref('')
+const lifeDescription = ref('')
+const lifeCategory = ref('邻里日常')
+const lifeSubmitting = ref(false)
+const lifeCategories = LIFE_CATEGORIES.filter((item) => item !== '全部')
+
+let saveTimer: any = null
+
+onLoad(async (options: any) => {
+  if (options?.mode === 'life') mode.value = 'life'
+  const editId = String(options?.editId ?? '')
+  if (editId) {
+    editingId.value = editId
+    mode.value = 'item'
+    await loadItemForEdit(editId)
+  }
+})
+
+async function loadItemForEdit(id: string): Promise<void> {
+  try {
+    const item = await itemService.getDetail(id)
+    draft.images = item.images && item.images.length ? item.images : item.image ? [item.image] : []
+    draft.title = item.title
+    draft.tradeType = item.type
+    draft.price = Number(item.price) > 0 ? String(item.price) : ''
+    draft.barterExpect = item.barterExpect ?? ''
+    draft.condition = item.condition
+    draft.category = item.category ?? ''
+    draft.qualityDesc = item.description ?? ''
+    showToast('已载入物品，修改后需要重新提交 AI 质检')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '物品加载失败', 'alert')
+    editingId.value = ''
+  }
+}
+
+onMounted(() => {
+  restoreDraft()
+})
+
+onUnmounted(() => {
+  if (saveTimer) clearTimeout(saveTimer)
+})
+
+watch(
+  draft,
+  () => {
+    if (editingId.value) return
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      setStorage(STORAGE_KEYS.draftItem, { ...draft })
+    }, 1000)
+  },
+  { deep: true },
+)
+
+function restoreDraft(): void {
+  if (editingId.value) return
+  const saved = getStorage<ItemDraft | null>(STORAGE_KEYS.draftItem, null)
+  if (!saved) return
+  const hasContent = saved.title || (saved.images && saved.images.length)
+  if (!hasContent) return
+  Object.assign(draft, saved)
+  showToast('已恢复上次未完成的草稿')
+}
+
+function onPriceInput(event: any): void {
+  draft.price = String(event?.detail?.value ?? '').replace(/[^\d.]/g, '')
+}
+
+function selectTrade(value: TradeType): void {
+  draft.tradeType = value
+}
+
+function chooseCategory(): void {
+  uni.showActionSheet({
+    itemList: ITEM_CATEGORIES,
+    success: (res: any) => {
+      draft.category = ITEM_CATEGORIES[Number(res.tapIndex)] ?? ''
+    },
+  })
+}
+
+function chooseCondition(): void {
+  uni.showActionSheet({
+    itemList: ITEM_CONDITIONS,
+    success: (res: any) => {
+      draft.condition = ITEM_CONDITIONS[Number(res.tapIndex)] ?? ''
+    },
+  })
+}
+
+function chooseExpectTime(): void {
+  const options = ['今天下午', '明天上午', '周末白天', '时间可协商']
+  uni.showActionSheet({
+    itemList: options,
+    success: (res: any) => {
+      draft.expectTime = options[Number(res.tapIndex)] ?? ''
+    },
+  })
+}
+
+async function pickVideo(): Promise<void> {
+  try {
+    const path = await prepareVideo()
+    draft.videoUrl = path
+    showToast('视频凭证已添加')
+  } catch {
+    showToast('未选择视频', 'alert')
+  }
+}
+
+async function pickInvoices(): Promise<void> {
+  try {
+    const paths = await new Promise<string[]>((resolve, reject) => {
+      uni.chooseImage({
+        count: 5,
+        sizeType: ['compressed'],
+        sourceType: ['album', 'camera'],
+        success: (res: any) => resolve(res.tempFilePaths ?? []),
+        fail: reject,
+      })
+    })
+    draft.invoices = [...(draft.invoices ?? []), ...paths].slice(0, 5)
+    showToast('购买凭证已添加')
+  } catch {
+    // 用户取消
+  }
+}
+
+async function generateDescription(): Promise<void> {
+  if (!draft.images.length) {
+    showToast('请先上传照片，AI 才能帮你写描述', 'alert')
+    return
+  }
+  if (!draft.title.trim()) {
+    draft.title = '九成新闲置好物，邻居自用'
+  }
+  if (draft.qualityDesc.length < 20) {
+    draft.qualityDesc = '家中自用，整体保养良好，功能正常。照片为近期实拍，细节可随时私信了解，欢迎同小区邻居当面验货。'
+  }
+  showToast('AI 已生成标题与描述草稿，请确认后发布')
+}
+
+function goNext(): void {
+  const validation = validateItemDraft({ ...draft })
+  if (!validation.valid) {
+    showToast(Object.values(validation.errors)[0], 'alert')
+    return
+  }
+  step.value = 2
+}
+
+async function submitItem(): Promise<void> {
+  if (submitting.value) return
+  const validation = validateItemDraft({ ...draft })
+  if (!validation.valid) {
+    showToast(Object.values(validation.errors)[0], 'alert')
+    if (Object.keys(validation.errors).length > 0) {
+      step.value = 1
+    }
+    return
+  }
+  submitting.value = true
+  try {
+    let targetId = editingId.value
+    if (editingId.value) {
+      await itemService.update(editingId.value, { ...draft })
+      await itemService.submit(editingId.value)
+    } else {
+      const created = await itemService.publish({ ...draft })
+      targetId = created.id
+      removeStorage(STORAGE_KEYS.draftItem)
+    }
+    showToast('已提交 AI 质检')
+    setTimeout(() => {
+      uni.redirectTo({ url: `/pages/item/audit?id=${targetId}` })
+    }, 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function pickLifeVideo(): Promise<void> {
+  try {
+    const path = await prepareVideo()
+    lifeVideo.value = path
+    showToast('视频已选择')
+  } catch {
+    showToast('未选择视频', 'alert')
+  }
+}
+
+async function submitLife(): Promise<void> {
+  if (lifeSubmitting.value) return
+  if (lifeMediaType.value === 'video' && !lifeVideo.value) {
+    showToast('请先选择视频', 'alert')
+    return
+  }
+  if (lifeMediaType.value === 'gallery' && lifeImages.value.length === 0) {
+    showToast('请先添加照片', 'alert')
+    return
+  }
+  if (!lifeTitle.value.trim()) {
+    showToast('请填写标题', 'alert')
+    return
+  }
+  lifeSubmitting.value = true
+  try {
+    await lifeService.publish({
+      mediaType: lifeMediaType.value,
+      media: lifeMediaType.value === 'video' ? [lifeVideo.value] : lifeImages.value,
+      title: lifeTitle.value.trim(),
+      description: lifeDescription.value.trim(),
+      category: lifeCategory.value as any,
+    })
+    showToast('生活动态已发布')
+    setTimeout(() => {
+      uni.switchTab({ url: '/pages/home/index' })
+    }, 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '发布失败', 'alert')
+  } finally {
+    lifeSubmitting.value = false
+  }
+}
+
+function onCancel(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+
+function openPublishRule(): void {
+  uni.showModal({
+    title: '发布规范',
+    content: `发布物品须真实、合法、无侵权；禁止发布违禁品与虚假信息。完整规范请访问：${APP_INFO.publishRuleUrl}`,
+    showCancel: false,
+    confirmText: '我知道了',
+  })
+}
+</script>
+
+<style scoped lang="scss">
+.publish {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.publish__header {
+  padding-left: 17px;
+  padding-right: 17px;
+  padding-top: 22px;
+  padding-bottom: 14px;
+  background-image: linear-gradient(150deg, #fff6ef 0%, #fffdfb 100%);
+}
+.publish__head-row {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.publish__head-copy {
+  flex: 1;
+}
+.publish__kicker {
+  font-size: $ni-font-11;
+  color: #a17a64;
+}
+.publish__title {
+  margin-top: 3px;
+  font-size: $ni-font-27;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.5px;
+}
+.publish__cancel {
+  font-size: $ni-font-13;
+  color: $ni-color-text-tertiary;
+  padding-bottom: 4px;
+}
+.publish__mode {
+  padding-left: 14px;
+  padding-right: 14px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  background-color: #f1ede9;
+  border-bottom: 1px solid #e8e2dd;
+}
+.publish__mode-tabs {
+  flex-direction: row;
+  height: 47px;
+  align-items: center;
+}
+.publish__mode-tab {
+  flex: 1;
+  height: 35px;
+  border-radius: $ni-radius-10;
+  align-items: center;
+  justify-content: center;
+}
+.publish__mode-tab--active {
+  background-color: #ffffff;
+  box-shadow: 0 2px 8px rgba(80, 55, 40, 0.07);
+}
+.publish__mode-tab-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.publish__mode-tab-text--active {
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.publish__steps {
+  flex-direction: row;
+  margin: 13px 26px 0;
+  min-height: 64px;
+}
+.publish__step {
+  flex: 1;
+}
+.publish__step-top {
+  flex-direction: row;
+  align-items: center;
+}
+.publish__step-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: #eee9e4;
+  align-items: center;
+  justify-content: center;
+}
+.publish__step-circle--active {
+  background-color: $ni-color-primary;
+}
+.publish__step-circle--done {
+  background-color: $ni-color-gift;
+}
+.publish__step-number {
+  font-size: $ni-font-10;
+  color: #aaaaaa;
+  font-weight: 700;
+}
+.publish__step-number--active {
+  color: #ffffff;
+}
+.publish__step-line {
+  flex: 1;
+  height: 2px;
+  background-color: #eee9e4;
+  margin-left: 4px;
+  margin-right: 4px;
+}
+.publish__step-line--active {
+  background-color: $ni-color-gift;
+}
+.publish__step-label {
+  margin-top: 4px;
+  font-size: $ni-font-10;
+  color: #aaaaaa;
+}
+.publish__step-label--active {
+  color: $ni-color-text-primary;
+  font-weight: 600;
+}
+.publish__content {
+  padding: 7px 14px 10px;
+}
+.publish__card {
+  padding: 15px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: 0 3px 14px rgba(65, 45, 30, 0.045);
+  margin-bottom: 11px;
+}
+.publish__card--rows {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.publish__card-head {
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 9px;
+}
+.publish__card-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__card-hint {
+  margin-left: 6px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__card-count {
+  flex: 1;
+  text-align: right;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__ai-tip {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 9px;
+  padding: 10px;
+  border-radius: $ni-radius-10;
+  background-color: #f8fcf9;
+}
+.publish__ai-tip-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #5f7d69;
+}
+.publish__ai-write {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 7px;
+}
+.publish__ai-write-text {
+  margin-left: 4px;
+  font-size: $ni-font-9;
+  color: #ab6d4d;
+}
+.publish__trade-list {
+  margin-bottom: 4px;
+}
+.publish__trade {
+  min-height: 55px;
+  padding: 8px 10px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  border: 1px solid transparent;
+  background-color: #faf8f6;
+  margin-bottom: 8px;
+}
+.publish__trade--active {
+  border-color: #ffb58b;
+  background-color: #fff9f5;
+}
+.publish__trade-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  align-items: center;
+  justify-content: center;
+}
+.publish__trade-icon--sale {
+  background-color: $ni-color-primary-bg;
+}
+.publish__trade-icon--gift {
+  background-color: $ni-color-gift-bg;
+}
+.publish__trade-icon--swap {
+  background-color: $ni-color-swap-bg;
+}
+.publish__trade-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.publish__trade-title {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__trade-desc {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__radio {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1.5px solid #d5c9c1;
+  align-items: center;
+  justify-content: center;
+}
+.publish__radio--active {
+  border-color: $ni-color-primary;
+}
+.publish__radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background-color: $ni-color-primary;
+}
+.publish__price {
+  height: 50px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: $ni-radius-11;
+  background-color: #f8f6f4;
+  margin-bottom: 10px;
+}
+.publish__price-symbol {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__price-input {
+  flex: 1;
+  height: 100%;
+  margin-left: 6px;
+  font-size: $ni-font-20;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__price-placeholder {
+  font-size: $ni-font-20;
+  color: $ni-color-text-placeholder;
+}
+.publish__price-ref {
+  font-size: $ni-font-9;
+  color: $ni-color-gift-deep;
+}
+.publish__quality {
+  margin-top: 11px;
+}
+.publish__row {
+  min-height: 53px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.publish__row--last {
+  border-bottom: 0;
+}
+.publish__row-label {
+  width: 72px;
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.publish__row-value {
+  flex: 1;
+  text-align: right;
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+  margin-right: 4px;
+}
+.publish__optional-row {
+  flex-direction: row;
+  margin-top: 9px;
+}
+.publish__optional {
+  flex: 1;
+  height: 46px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: $ni-radius-10;
+  background-color: #faf8f6;
+  margin-right: 8px;
+}
+.publish__optional-text {
+  margin-left: 5px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.publish__optional-hint {
+  margin-top: 8px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.publish__confirm {
+  padding: 16px 14px 10px;
+  align-items: center;
+}
+.publish__confirm-icon {
+  width: 66px;
+  height: 66px;
+  border-radius: 24px;
+  background-image: $ni-gradient-success;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(85, 161, 115, 0.24);
+}
+.publish__confirm-title {
+  margin-top: 12px;
+  font-size: $ni-font-20;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__confirm-desc {
+  margin-top: 5px;
+  font-size: $ni-font-12;
+  line-height: 19px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+.publish__confirm-card {
+  width: 100%;
+  margin-top: 16px;
+  padding: 4px 13px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.publish__confirm-item {
+  height: 52px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: $ni-border-divider;
+}
+.publish__confirm-item--last {
+  border-bottom: 0;
+}
+.publish__confirm-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  background-color: $ni-color-success-bg;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+}
+.publish__confirm-item-title {
+  width: 78px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-secondary;
+}
+.publish__confirm-item-value {
+  flex: 1;
+  text-align: right;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.publish__confirm-actions {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 18px;
+}
+.publish__back {
+  width: 96px;
+  height: 46px;
+  border-radius: 13px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+}
+.publish__back-text {
+  font-size: $ni-font-12;
+  color: $ni-color-text-secondary;
+}
+.publish__bottom-space {
+  height: calc(118px + env(safe-area-inset-bottom));
+}
+.publish__footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  min-height: 102px;
+  padding: 10px 16px 9px;
+  padding-bottom: calc(9px + env(safe-area-inset-bottom));
+  background-color: rgba(255, 255, 255, 0.97);
+  border-top: 1px solid #f0ece8;
+}
+.publish__agreement {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+}
+.publish__agreement-text {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__agreement-link {
+  font-size: $ni-font-8;
+  color: #b9653d;
+}
+.publish__life-types {
+  flex-direction: row;
+  margin-top: 10px;
+}
+.publish__life-type {
+  flex: 1;
+  min-height: 90px;
+  padding: 12px;
+  border-radius: $ni-radius-14;
+  background-color: #faf8f6;
+  border: 1px solid transparent;
+  position: relative;
+  margin-right: 9px;
+}
+.publish__life-type--active {
+  background-color: $ni-color-primary-bg;
+  border-color: #ffb58b;
+}
+.publish__life-type-title {
+  margin-top: 6px;
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__life-type-desc {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__life-check {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 17px;
+  height: 17px;
+  border-radius: 9px;
+  background-color: $ni-color-primary;
+  align-items: center;
+  justify-content: center;
+}
+.publish__life-upload {
+  margin-top: 12px;
+  height: 160px;
+  align-items: center;
+  justify-content: center;
+  border-radius: $ni-radius-14;
+  border: $ni-border-dashed;
+  background-color: #fffaf7;
+}
+.publish__life-upload-title {
+  margin-top: 8px;
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.publish__life-upload-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__life-categories {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.publish__life-category {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.publish__life-category--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.publish__life-category-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.publish__life-category-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.publish__life-notice {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 11px 12px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-success-bg;
+}
+.publish__life-notice-copy {
+  flex: 1;
+  margin-left: 7px;
+}
+.publish__life-notice-title {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-success-deep;
+}
+.publish__life-notice-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: #6f8c7d;
+}
+</style>

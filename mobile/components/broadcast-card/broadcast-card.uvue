@@ -1,0 +1,204 @@
+<template>
+  <view
+    class="broadcast-card"
+    :class="`broadcast-card--${broadcast.tone}`"
+    hover-class="broadcast-card--pressed"
+    :hover-stay-time="100"
+    @click="onTap"
+  >
+    <view class="broadcast-card__decor" :class="`broadcast-card__decor--${broadcast.tone}`" />
+
+    <view class="broadcast-card__top">
+      <ni-tag :type="tagType" size="xs" :icon="broadcast.icon">
+        {{ broadcast.type }}
+      </ni-tag>
+      <view class="broadcast-card__dots">
+        <view
+          v-for="dot in total"
+          :key="dot"
+          class="broadcast-card__dot"
+          :class="{ 'broadcast-card__dot--active': dot - 1 === currentIndex }"
+          @click.stop="onDot(dot - 1)"
+        />
+      </view>
+    </view>
+
+    <text class="broadcast-card__title" :lines="1">{{ broadcast.title }}</text>
+    <text class="broadcast-card__detail" :lines="1">{{ broadcast.detail }}</text>
+
+    <view class="broadcast-card__bottom">
+      <text class="broadcast-card__meta" :lines="1">{{ broadcast.meta }}</text>
+      <view class="broadcast-card__action" @click.stop="onAction">
+        <text class="broadcast-card__action-text" :class="`broadcast-card__action-text--${broadcast.tone}`">
+          {{ broadcast.action }}
+        </text>
+        <ni-icon name="chevron" :size="11" :state="actionIconState" />
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { Broadcast } from '../../models'
+
+const props = withDefaults(
+  defineProps<{
+    broadcast: Broadcast
+    total?: number
+    currentIndex?: number
+  }>(),
+  {
+    total: 1,
+    currentIndex: 0,
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'tap'): void
+  (event: 'action'): void
+  (event: 'dot', index: number): void
+}>()
+
+const tagType = computed(() => {
+  if (props.broadcast.tone === 'free') return 'gift'
+  if (props.broadcast.tone === 'reward') return 'service'
+  if (props.broadcast.tone === 'urgent') return 'sale'
+  return 'neutral'
+})
+
+const actionIconState = computed(() => {
+  if (props.broadcast.tone === 'free') return 'green'
+  if (props.broadcast.tone === 'reward') return 'gold'
+  return 'active'
+})
+
+function onTap(): void {
+  emit('tap')
+}
+function onAction(): void {
+  emit('action')
+}
+function onDot(index: number): void {
+  emit('dot', index)
+}
+</script>
+
+<style scoped lang="scss">
+.broadcast-card {
+  width: 100%;
+  min-height: 132px;
+  padding: 12px;
+  border-radius: $ni-radius-18;
+  border: 1px solid #e8e1dc;
+  box-shadow: $ni-shadow-lg;
+  overflow: hidden;
+  position: relative;
+  transition: transform 100ms ease-out;
+}
+.broadcast-card--pressed {
+  transform: scale(0.99);
+}
+.broadcast-card--urgent {
+  background-color: #fff6f2;
+}
+.broadcast-card--free {
+  background-color: #f4fbf7;
+}
+.broadcast-card--reward {
+  background-color: #fffbf0;
+}
+.broadcast-card--new {
+  background-color: #ffffff;
+}
+.broadcast-card__decor {
+  position: absolute;
+  right: -45px;
+  bottom: -55px;
+  width: 100px;
+  height: 100px;
+  border-radius: 50px;
+  border-width: 15px;
+  border-style: solid;
+  border-color: #1f1f1f;
+  opacity: 0.025;
+}
+.broadcast-card__decor--urgent {
+  border-color: #b95a31;
+}
+.broadcast-card__decor--free {
+  border-color: #4e9870;
+}
+.broadcast-card__decor--reward {
+  border-color: #d4a055;
+}
+.broadcast-card__decor--new {
+  border-color: #ff7a3d;
+}
+.broadcast-card__top {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.broadcast-card__dots {
+  flex-direction: row;
+  align-items: center;
+}
+.broadcast-card__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background-color: rgba(125, 112, 103, 0.28);
+  margin-left: 4px;
+}
+.broadcast-card__dot--active {
+  width: 16px;
+  background-color: $ni-color-primary;
+}
+.broadcast-card__title {
+  margin-top: 7px;
+  font-size: $ni-font-15;
+  line-height: 21px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.broadcast-card__detail {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 17px;
+  color: $ni-color-text-secondary;
+}
+.broadcast-card__bottom {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.broadcast-card__meta {
+  flex: 1;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.broadcast-card__action {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 9px;
+}
+.broadcast-card__action-text {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  margin-right: 2px;
+}
+.broadcast-card__action-text--urgent {
+  color: $ni-color-danger-deep;
+}
+.broadcast-card__action-text--free {
+  color: $ni-color-gift-deep;
+}
+.broadcast-card__action-text--reward {
+  color: $ni-color-service-deep;
+}
+.broadcast-card__action-text--new {
+  color: $ni-color-primary-dark;
+}
+</style>

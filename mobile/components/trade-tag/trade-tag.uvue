@@ -1,0 +1,70 @@
+<template>
+  <view class="trade-tag" :class="`trade-tag--${tone}`">
+    <ni-icon :name="icon" :size="size === 'xs' ? 10 : 11" state="white" />
+    <text class="trade-tag__text" :class="`trade-tag__text--${size}`">{{ label }}</text>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    type: '出售' | '免费' | '互换'
+    size?: 'xs' | 'sm' | 'md'
+  }>(),
+  { size: 'sm' },
+)
+
+const tone = computed(() => {
+  if (props.type === '免费') return 'gift'
+  if (props.type === '互换') return 'swap'
+  return 'sale'
+})
+
+const label = computed(() => {
+  if (props.type === '免费') return '免费'
+  if (props.type === '互换') return '互换'
+  return '出售'
+})
+
+const icon = computed(() => {
+  if (props.type === '免费') return 'gift'
+  if (props.type === '互换') return 'swap'
+  return 'wallet'
+})
+</script>
+
+<style scoped lang="scss">
+.trade-tag {
+  flex-direction: row;
+  align-items: center;
+  border-radius: 6px;
+  padding-left: 7px;
+  padding-right: 8px;
+  height: 22px;
+}
+.trade-tag--sale {
+  background-color: rgba(255, 122, 61, 0.94);
+}
+.trade-tag--gift {
+  background-color: rgba(107, 184, 138, 0.96);
+}
+.trade-tag--swap {
+  background-color: rgba(93, 173, 226, 0.96);
+}
+.trade-tag__text {
+  margin-left: 3px;
+  color: #ffffff;
+  font-weight: 700;
+}
+.trade-tag__text--xs {
+  font-size: $ni-font-9;
+}
+.trade-tag__text--sm {
+  font-size: $ni-font-10;
+}
+.trade-tag__text--md {
+  font-size: $ni-font-11;
+}
+</style>

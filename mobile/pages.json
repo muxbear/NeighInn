@@ -1,0 +1,356 @@
+{
+  "easycom": {
+    "autoscan": true,
+    "custom": {
+      "^ni-(.*)": "@/components/ni-$1/ni-$1.uvue"
+    }
+  },
+  "pages": [
+    {
+      "path": "pages/home/index",
+      "style": {
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 120,
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/nearby/index",
+      "style": {
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 120,
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/messages/index",
+      "style": {
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/profile/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/auth/login",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FFF5ED"
+      }
+    },
+    {
+      "path": "pages/auth/realname",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/auth/owner-proof",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/auth/result",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/home/search",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/notifications/index",
+      "style": {
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/community/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/profile/edit",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/settings/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/settings/help",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/mine/favorites",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/mine/credit",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/report/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    }
+  ],
+  "subPackages": [
+    {
+      "root": "pages/zone",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/item",
+      "pages": [
+        {
+          "path": "detail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "audit",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "manage",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/publish",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/life",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationStyle": "custom",
+            "enablePullDownRefresh": true,
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "detail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/broadcast",
+      "pages": [
+        {
+          "path": "detail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/social",
+      "pages": [
+        {
+          "path": "chat",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#F4F1EF"
+          }
+        },
+        {
+          "path": "friends",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "friend-requests",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/orders",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationStyle": "custom",
+            "enablePullDownRefresh": true,
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "detail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/pay",
+      "pages": [
+        {
+          "path": "cashier",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "wallet",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/trade",
+      "pages": [
+        {
+          "path": "appointment",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "inspect",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "review",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
+          "path": "dispute",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
+        }
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/home/index": {
+      "network": "all",
+      "packages": [
+        "pages/social"
+      ]
+    }
+  },
+  "tabBar": {
+    "color": "#8F8A86",
+    "selectedColor": "#FF7A3D",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/nearby/index",
+        "text": "附近"
+      },
+      {
+        "pagePath": "pages/messages/index",
+        "text": "消息"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationStyle": "custom",
+    "backgroundColor": "#FAF8F5",
+    "backgroundColorContent": "#FAF8F5",
+    "backgroundTextStyle": "dark",
+    "enableUcssReset": true
+  }
+}

@@ -1,0 +1,269 @@
+<template>
+  <scroll-view class="report" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="report__header">
+      <ni-status-bar />
+      <view class="report__nav">
+        <view class="report__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="report__nav-title">举报</text>
+        <view class="report__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="report__content">
+      <view class="report__target">
+        <view class="report__target-icon">
+          <ni-icon name="alert" :size="20" state="danger" />
+        </view>
+        <view class="report__target-copy">
+          <text class="report__target-title">举报对象</text>
+          <text class="report__target-desc">{{ targetText }}</text>
+        </view>
+      </view>
+
+      <view class="report__card">
+        <text class="report__card-title">举报原因</text>
+        <view class="report__reasons">
+          <view
+            v-for="reason in reasons"
+            :key="reason"
+            class="report__reason"
+            :class="{ 'report__reason--active': selectedReason === reason }"
+            @click="selectedReason = reason"
+          >
+            <text class="report__reason-text" :class="{ 'report__reason-text--active': selectedReason === reason }">{{ reason }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="report__card">
+        <view class="report__card-head">
+          <text class="report__card-title">补充说明</text>
+          <text class="report__count">{{ description.length }}/300</text>
+        </view>
+        <ni-textarea
+          v-model="description"
+          placeholder="请描述具体情况，便于我们核实处理"
+          :maxlength="300"
+          :height="100"
+        />
+      </view>
+
+      <view class="report__card">
+        <view class="report__card-head">
+          <text class="report__card-title">上传证据</text>
+          <text class="report__count">{{ images.length }}/9</text>
+        </view>
+        <text class="report__card-desc">可上传截图、照片等证据，平台会严格保密</text>
+        <ni-photo-uploader v-model="images" :max="9" :min="0" :columns="3" :tile-height="88" add-text="添加证据" show-count />
+      </view>
+
+      <view class="report__tip">
+        <ni-icon name="shield" :size="15" state="gold" />
+        <text class="report__tip-text">平台会在 24 小时内核实处理。恶意举报将影响你的信用记录，请如实填写。</text>
+      </view>
+
+      <ni-button type="primary" size="lg" block :loading="submitting" @tap="submit">
+        提交举报
+      </ni-button>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useToast } from '../../composables/useToast'
+import { REPORT_REASONS } from '../../config/constants'
+
+const { toast, showToast } = useToast()
+
+const targetType = ref('item')
+const targetId = ref('')
+const selectedReason = ref('')
+const description = ref('')
+const images = ref<string[]>([])
+const submitting = ref(false)
+const reasons = REPORT_REASONS
+
+const targetText = computed(() => {
+  const typeLabel =
+    targetType.value === 'item'
+      ? '物品'
+      : targetType.value === 'life'
+        ? '生活动态'
+        : targetType.value === 'broadcast'
+          ? '喇叭站播报'
+          : '用户'
+  return targetId.value ? `${typeLabel} #${targetId.value}` : typeLabel
+})
+
+onLoad((options: any) => {
+  targetType.value = String(options?.type ?? 'item')
+  targetId.value = String(options?.id ?? '')
+})
+
+async function submit(): Promise<void> {
+  if (submitting.value) return
+  if (!selectedReason.value) {
+    showToast('请选择举报原因', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    showToast('举报已提交，平台会尽快核实')
+    setTimeout(() => goBack(), 600)
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.report {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.report__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.report__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.report__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.report__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.report__nav-placeholder {
+  width: 42px;
+}
+.report__content {
+  padding: 14px;
+}
+.report__target {
+  padding: 12px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-danger-bg;
+}
+.report__target-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.report__target-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.report__target-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-danger-deep;
+}
+.report__target-desc {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: #9a6a55;
+}
+.report__card {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.report__card-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+.report__card-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.report__card-desc {
+  margin-top: 3px;
+  margin-bottom: 9px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.report__count {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.report__reasons {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.report__reason {
+  height: 32px;
+  padding-left: 11px;
+  padding-right: 11px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.report__reason--active {
+  background-color: $ni-color-danger-bg;
+  border: 1px solid #f2b79f;
+}
+.report__reason-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.report__reason-text--active {
+  color: $ni-color-danger-deep;
+  font-weight: 700;
+}
+.report__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+  margin-top: 10px;
+  margin-bottom: 14px;
+}
+.report__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

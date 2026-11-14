@@ -1,0 +1,352 @@
+<template>
+  <scroll-view class="appointment" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="appointment__header">
+      <ni-status-bar />
+      <view class="appointment__nav">
+        <view class="appointment__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="appointment__nav-title">预约见面验货</text>
+        <view class="appointment__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="appointment__content">
+      <view v-if="order" class="appointment__order">
+        <image class="appointment__order-image" :src="order.item.image" mode="aspectFill" />
+        <view class="appointment__order-copy">
+          <text class="appointment__order-title" :lines="1">{{ order.item.title }}</text>
+          <text class="appointment__order-meta">{{ order.tradeType }} · {{ order.statusText }}</text>
+        </view>
+        <ni-icon name="shield" :size="18" state="green" />
+      </view>
+
+      <view class="appointment__section">
+        <text class="appointment__section-title">选择见面时间</text>
+        <view class="appointment__chips">
+          <view
+            v-for="time in timeOptions"
+            :key="time"
+            class="appointment__chip"
+            :class="{ 'appointment__chip--active': selectedTime === time }"
+            @click="selectedTime = time"
+          >
+            <ni-icon name="clock" :size="12" :state="selectedTime === time ? 'active' : 'tertiary'" />
+            <text class="appointment__chip-text" :class="{ 'appointment__chip-text--active': selectedTime === time }">{{ time }}</text>
+          </view>
+        </view>
+        <view class="appointment__custom" @click="chooseCustomTime">
+          <ni-icon name="plus" :size="13" state="tertiary" />
+          <text class="appointment__custom-text">{{ customTime || '自定义时间' }}</text>
+        </view>
+      </view>
+
+      <view class="appointment__section">
+        <text class="appointment__section-title">选择见面地点</text>
+        <view class="appointment__places">
+          <view
+            v-for="place in placeOptions"
+            :key="place.name"
+            class="appointment__place"
+            :class="{ 'appointment__place--active': selectedPlace === place.name }"
+            @click="selectedPlace = place.name"
+          >
+            <view class="appointment__place-icon">
+              <ni-icon :name="place.icon" :size="17" :state="selectedPlace === place.name ? 'active' : 'tertiary'" />
+            </view>
+            <view class="appointment__place-copy">
+              <text class="appointment__place-name">{{ place.name }}</text>
+              <text class="appointment__place-desc">{{ place.desc }}</text>
+            </view>
+            <view v-if="place.recommended" class="appointment__recommend">
+              <text class="appointment__recommend-text">推荐</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view class="appointment__section">
+        <text class="appointment__section-title">备注（选填）</text>
+        <ni-textarea
+          v-model="note"
+          placeholder="例如：我会带一个小推车，麻烦告知具体楼栋入口"
+          :maxlength="120"
+          :height="70"
+        />
+      </view>
+
+      <view class="appointment__tip">
+        <ni-icon name="shield" :size="15" state="gold" />
+        <text class="appointment__tip-text">双方可改期或取消；48 小时未响应将自动取消预约。请在小区公共区域见面。</text>
+      </view>
+
+      <ni-button type="primary" size="lg" block :loading="submitting" @tap="submit">
+        确认预约
+      </ni-button>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { Order } from '../../models'
+import { useOrderStore } from '../../stores/order.store'
+import { useToast } from '../../composables/useToast'
+
+const orderStore = useOrderStore()
+const { toast, showToast } = useToast()
+
+const orderId = ref('')
+const order = ref<Order | null>(null)
+const selectedTime = ref('明天 14:00')
+const customTime = ref('')
+const selectedPlace = ref('物业中心')
+const note = ref('')
+const submitting = ref(false)
+
+const timeOptions = ['今天 14:00', '明天 10:00', '明天 14:00', '后天 16:00']
+const placeOptions = [
+  { name: '物业中心', desc: '有监控与工作人员，最安全', icon: 'home', recommended: true },
+  { name: '快递柜旁', desc: '方便快速交接', icon: 'box', recommended: false },
+  { name: '小区花园', desc: '光线好，适合查看大件物品', icon: 'pin', recommended: false },
+]
+
+onLoad(async (options: any) => {
+  orderId.value = String(options?.orderId ?? '')
+  if (!orderId.value) return
+  try {
+    order.value = await orderStore.fetchDetail(orderId.value)
+    if (order.value.appointment) {
+      selectedTime.value = order.value.appointment.time
+      selectedPlace.value = order.value.appointment.place
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  }
+})
+
+function chooseCustomTime(): void {
+  const options = ['本周六 10:00', '本周六 15:00', '本周日 10:00', '本周日 16:00']
+  uni.showActionSheet({
+    itemList: options,
+    success: (res: any) => {
+      customTime.value = options[Number(res.tapIndex)] ?? ''
+      selectedTime.value = customTime.value
+    },
+  })
+}
+
+async function submit(): Promise<void> {
+  if (!orderId.value || submitting.value) return
+  submitting.value = true
+  try {
+    await orderStore.setAppointment(orderId.value, {
+      time: selectedTime.value,
+      place: selectedPlace.value,
+      note: note.value,
+    })
+    showToast('预约已确认，已通知对方')
+    setTimeout(() => goBack(), 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '预约失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else if (orderId.value) uni.redirectTo({ url: `/pages/orders/detail?id=${orderId.value}` })
+  else uni.redirectTo({ url: '/pages/orders/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.appointment {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.appointment__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.appointment__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.appointment__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.appointment__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.appointment__nav-placeholder {
+  width: 42px;
+}
+.appointment__content {
+  padding: 14px;
+}
+.appointment__order {
+  padding: 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.appointment__order-image {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background-color: #f3ede7;
+}
+.appointment__order-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.appointment__order-title {
+  font-size: $ni-font-12;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.appointment__order-meta {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.appointment__section {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.appointment__section-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.appointment__chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.appointment__chip {
+  flex-direction: row;
+  align-items: center;
+  height: 36px;
+  padding-left: 11px;
+  padding-right: 12px;
+  border-radius: $ni-radius-11;
+  background-color: $ni-color-fill-1;
+  border: 1px solid transparent;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.appointment__chip--active {
+  background-color: $ni-color-primary-bg;
+  border-color: #ffb58b;
+}
+.appointment__chip-text {
+  margin-left: 4px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.appointment__chip-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.appointment__custom {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 2px;
+}
+.appointment__custom-text {
+  margin-left: 4px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.appointment__places {
+  margin-top: 10px;
+}
+.appointment__place {
+  min-height: 58px;
+  padding: 9px 10px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-fill-1;
+  border: 1px solid transparent;
+  margin-bottom: 8px;
+}
+.appointment__place--active {
+  background-color: $ni-color-primary-bg;
+  border-color: #ffb58b;
+}
+.appointment__place-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.appointment__place-copy {
+  flex: 1;
+  margin-left: 8px;
+}
+.appointment__place-name {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.appointment__place-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.appointment__recommend {
+  height: 18px;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-radius: 9px;
+  background-color: $ni-color-gift-bg;
+  align-items: center;
+  justify-content: center;
+}
+.appointment__recommend-text {
+  font-size: 7px;
+  color: $ni-color-gift-deep;
+}
+.appointment__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+  margin-top: 10px;
+  margin-bottom: 14px;
+}
+.appointment__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

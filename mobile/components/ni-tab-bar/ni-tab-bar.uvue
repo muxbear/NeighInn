@@ -1,0 +1,176 @@
+<template>
+  <view class="ni-tab-bar">
+    <view
+      v-for="tab in tabs"
+      :key="tab.key"
+      class="ni-tab-bar__item"
+      @click="onTab(tab)"
+    >
+      <template v-if="tab.key !== 'publish'">
+        <view
+          class="ni-tab-bar__icon-wrap"
+          :class="{ 'ni-tab-bar__icon-wrap--active': active === tab.key }"
+        >
+          <ni-icon
+            :name="tab.icon"
+            :size="22"
+            :state="active === tab.key ? 'active' : 'default'"
+            :filled="active === tab.key"
+          />
+        </view>
+        <text
+          class="ni-tab-bar__label"
+          :class="{ 'ni-tab-bar__label--active': active === tab.key }"
+        >
+          {{ tab.label }}
+        </text>
+        <view v-if="tab.key === 'messages' && unread > 0" class="ni-tab-bar__badge">
+          <text class="ni-tab-bar__badge-text">{{ unread > 99 ? '99+' : unread }}</text>
+        </view>
+      </template>
+      <text v-else class="ni-tab-bar__label ni-tab-bar__label--publish">发布</text>
+    </view>
+
+    <view class="ni-tab-bar__publish" hover-class="ni-tab-bar__publish--pressed" @click="onPublish">
+      <ni-icon name="plus" :size="28" state="white" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { onMounted } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    active: 'home' | 'nearby' | 'messages' | 'profile'
+    unread?: number
+  }>(),
+  { unread: 0 },
+)
+
+const emit = defineEmits<{
+  (event: 'publish'): void
+  (event: 'change', key: string): void
+}>()
+
+const tabs = [
+  { key: 'home', label: '首页', icon: 'home', url: '/pages/home/index' },
+  { key: 'nearby', label: '附近', icon: 'pin', url: '/pages/nearby/index' },
+  { key: 'publish', label: '', icon: 'plus', url: '' },
+  { key: 'messages', label: '消息', icon: 'message', url: '/pages/messages/index' },
+  { key: 'profile', label: '我的', icon: 'user', url: '/pages/profile/index' },
+]
+
+onMounted(() => {
+  if (typeof uni !== 'undefined') {
+    uni.hideTabBar({ animation: false })
+  }
+})
+
+function onTab(tab: { key: string; url: string }): void {
+  if (tab.key === 'publish') {
+    onPublish()
+    return
+  }
+  if (tab.key === props.active) return
+  emit('change', tab.key)
+  uni.switchTab({ url: tab.url })
+}
+
+function onPublish(): void {
+  emit('publish')
+  uni.navigateTo({ url: '/pages/publish/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.ni-tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
+  min-height: 78px;
+  flex-direction: row;
+  align-items: flex-start;
+  padding-top: 7px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  background-color: rgba(255, 255, 255, 0.97);
+  border-top: 1px solid rgba(80, 60, 45, 0.07);
+  box-shadow: 0 -5px 20px rgba(65, 45, 32, 0.05);
+  overflow: visible;
+}
+.ni-tab-bar__item {
+  flex: 1;
+  height: 63px;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.ni-tab-bar__icon-wrap {
+  width: 35px;
+  height: 31px;
+  border-radius: 12px;
+  align-items: center;
+  justify-content: center;
+}
+.ni-tab-bar__icon-wrap--active {
+  background-color: #fff0e5;
+}
+.ni-tab-bar__label {
+  margin-top: 4px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  font-size: $ni-font-10;
+  color: #8f8a86;
+}
+.ni-tab-bar__label--active {
+  color: $ni-color-primary;
+  font-weight: 700;
+}
+.ni-tab-bar__label--publish {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 7px;
+  margin-top: 0;
+  color: #8f8a86;
+}
+.ni-tab-bar__badge {
+  position: absolute;
+  top: 2px;
+  right: 17px;
+  min-width: 16px;
+  height: 16px;
+  padding-left: 3px;
+  padding-right: 3px;
+  border-radius: 8px;
+  background-color: $ni-color-primary;
+  border: 2px solid #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.ni-tab-bar__badge-text {
+  font-size: 9px;
+  color: #ffffff;
+  font-weight: 700;
+}
+.ni-tab-bar__publish {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  margin-left: -27px;
+  width: 54px;
+  height: 54px;
+  border-radius: 20px;
+  border: 4px solid #ffffff;
+  background-image: $ni-gradient-publish-tab;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 5px 16px rgba(255, 122, 61, 0.32);
+}
+.ni-tab-bar__publish--pressed {
+  transform: scale(0.94);
+}
+</style>

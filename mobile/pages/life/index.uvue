@@ -1,0 +1,331 @@
+<template>
+  <scroll-view class="life" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="life__header">
+      <ni-status-bar />
+      <view class="life__glow" />
+      <view class="life__nav">
+        <view class="life__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="life__nav-title">生活频道</text>
+        <view class="life__nav-button" @click="goSearch">
+          <ni-icon name="search" :size="18" state="secondary" />
+        </view>
+      </view>
+
+      <view class="life__intro">
+        <view class="life__intro-icon">
+          <ni-icon name="image" :size="24" state="white" />
+        </view>
+        <view class="life__intro-copy">
+          <text class="life__intro-kicker">记录身边真实生活</text>
+          <text class="life__intro-title">小区里的每一天</text>
+          <text class="life__intro-desc">小区风景、邻里日常、个人风采、萌宠生活</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="life__sticky" :style="{ top: statusBarHeight + 'px' }">
+      <scroll-view class="life__tabs-scroll" scroll-x :show-scrollbar="false">
+        <view class="life__tabs">
+          <view
+            v-for="category in categories"
+            :key="category"
+            class="life__tab"
+            :class="{ 'life__tab--active': activeCategory === category }"
+            @click="selectCategory(category)"
+          >
+            <text class="life__tab-text" :class="{ 'life__tab-text--active': activeCategory === category }">{{ category }}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <view class="life__feed">
+      <view class="life__feed-head">
+        <view class="life__feed-copy">
+          <text class="life__feed-title">邻居们的日常</text>
+          <text class="life__feed-sub">真实的小区生活，正在被邻居们记录</text>
+        </view>
+        <text class="life__feed-sort">最新发布</text>
+      </view>
+
+      <view v-if="loading && lifeStore.posts.length === 0" class="life__loading">
+        <ni-skeleton :rows="3" :avatar="false" />
+      </view>
+
+      <view v-else-if="lifeStore.posts.length === 0" class="life__empty">
+        <ni-empty icon="image" title="这个分类还没有动态" desc="来发布第一条生活记录吧" action-text="去发布" @action="goPublish" />
+      </view>
+
+      <view v-else class="life__list">
+        <life-post-card
+          v-for="post in lifeStore.posts"
+          :key="post.id"
+          :post="post"
+          @open="goDetail(post.id)"
+          @like="onLike(post)"
+          @comment="goDetail(post.id)"
+        />
+      </view>
+
+      <view class="life__end">
+        <view class="life__end-line" />
+        <text class="life__end-text">生活中的美好都在这里了</text>
+        <view class="life__end-line" />
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
+import type { LifePost } from '../../models'
+import { useLifeStore } from '../../stores/life.store'
+import { useToast } from '../../composables/useToast'
+import { useSystemMetrics } from '../../composables/useSystemMetrics'
+import { LIFE_CATEGORIES } from '../../config/constants'
+
+const lifeStore = useLifeStore()
+const { toast, showToast } = useToast()
+const { statusBarHeight } = useSystemMetrics()
+
+const categories = LIFE_CATEGORIES
+const activeCategory = ref('全部')
+const loading = computed(() => lifeStore.loading)
+
+onLoad(() => {
+  loadPosts()
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await lifeStore.fetchPosts(activeCategory.value, true)
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+onReachBottom(() => {
+  if (lifeStore.hasMore && !lifeStore.loading) {
+    lifeStore.fetchPosts(activeCategory.value, false).catch(() => undefined)
+  }
+})
+
+async function loadPosts(): Promise<void> {
+  try {
+    await lifeStore.fetchPosts('全部', true)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  }
+}
+
+async function selectCategory(category: string): Promise<void> {
+  if (activeCategory.value === category) return
+  activeCategory.value = category
+  try {
+    await lifeStore.fetchPosts(category, true)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  }
+}
+
+async function onLike(post: LifePost): Promise<void> {
+  try {
+    await lifeStore.toggleLike(post)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '点赞失败', 'alert')
+  }
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/home/index' })
+}
+function goSearch(): void {
+  uni.navigateTo({ url: '/pages/home/search' })
+}
+function goDetail(id: string): void {
+  uni.navigateTo({ url: `/pages/life/detail?id=${id}` })
+}
+function goPublish(): void {
+  uni.navigateTo({ url: '/pages/publish/index?mode=life' })
+}
+</script>
+
+<style scoped lang="scss">
+.life {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.life__header {
+  padding-left: 15px;
+  padding-right: 15px;
+  padding-bottom: 18px;
+  background-image: linear-gradient(150deg, #fff5ed 0%, #fffaf5 58%, #faf8f5 100%);
+  position: relative;
+  overflow: hidden;
+}
+.life__glow {
+  position: absolute;
+  top: -80px;
+  right: -50px;
+  width: 210px;
+  height: 210px;
+  border-radius: 105px;
+  background-color: rgba(255, 179, 122, 0.2);
+}
+.life__nav {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.life__nav-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.8);
+  align-items: center;
+  justify-content: center;
+}
+.life__nav-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.life__intro {
+  min-height: 89px;
+  padding: 14px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-18;
+  background-color: rgba(255, 255, 255, 0.76);
+  box-shadow: $ni-shadow-sm;
+}
+.life__intro-icon {
+  width: 53px;
+  height: 53px;
+  border-radius: 18px;
+  background-image: linear-gradient(135deg, #ff9a62 0%, #ffb866 100%);
+  align-items: center;
+  justify-content: center;
+}
+.life__intro-copy {
+  flex: 1;
+  margin-left: 11px;
+}
+.life__intro-kicker {
+  font-size: $ni-font-8;
+  color: #a17a64;
+  font-weight: 600;
+}
+.life__intro-title {
+  margin-top: 2px;
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.life__intro-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.life__sticky {
+  position: sticky;
+  z-index: 20;
+  height: 49px;
+  background-color: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #f0ece8;
+}
+.life__tabs-scroll {
+  height: 49px;
+}
+.life__tabs {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 15px;
+  padding-right: 15px;
+  height: 49px;
+}
+.life__tab {
+  height: 28px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 9px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 7px;
+}
+.life__tab--active {
+  background-image: $ni-gradient-brand;
+}
+.life__tab-text {
+  font-size: $ni-font-8;
+  color: $ni-color-text-secondary;
+}
+.life__tab-text--active {
+  color: #ffffff;
+  font-weight: 700;
+}
+.life__feed {
+  padding: 16px 14px 10px;
+}
+.life__feed-head {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.life__feed-copy {
+  flex: 1;
+}
+.life__feed-title {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.life__feed-sub {
+  margin-top: 3px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.life__feed-sort {
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.life__loading {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.life__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.life__list {
+  margin-top: 2px;
+}
+.life__end {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
+.life__end-line {
+  width: 25px;
+  height: 1px;
+  background-color: #e5ded8;
+}
+.life__end-text {
+  margin-left: 10px;
+  margin-right: 10px;
+  font-size: $ni-font-9;
+  color: #b2aaa4;
+}
+</style>

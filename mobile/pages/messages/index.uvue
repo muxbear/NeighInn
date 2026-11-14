@@ -1,0 +1,416 @@
+<template>
+  <scroll-view class="messages" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="messages__header">
+      <ni-status-bar />
+      <view class="messages__head-row">
+        <text class="messages__title">消息</text>
+        <view class="messages__head-button" @click="goFriends">
+          <ni-icon name="friend" :size="19" state="secondary" />
+        </view>
+      </view>
+    </view>
+
+    <view class="messages__segment">
+      <view
+        class="messages__segment-button"
+        :class="{ 'messages__segment-button--active': tab === 'messages' }"
+        @click="tab = 'messages'"
+      >
+        <text class="messages__segment-text" :class="{ 'messages__segment-text--active': tab === 'messages' }">消息</text>
+        <text v-if="socialStore.unreadTotal > 0" class="messages__segment-count">{{ socialStore.unreadTotal }}</text>
+      </view>
+      <view
+        class="messages__segment-button"
+        :class="{ 'messages__segment-button--active': tab === 'neighbors' }"
+        @click="tab = 'neighbors'"
+      >
+        <text class="messages__segment-text" :class="{ 'messages__segment-text--active': tab === 'neighbors' }">邻居</text>
+        <text v-if="socialStore.friends.length > 0" class="messages__segment-count">{{ socialStore.friends.length }}</text>
+      </view>
+    </view>
+
+    <template v-if="tab === 'messages'">
+      <view class="messages__quick">
+        <view class="messages__quick-item" @click="goNotifications()">
+          <view class="messages__quick-icon messages__quick-icon--trade">
+            <ni-icon name="wallet" :size="19" state="active" />
+          </view>
+          <text class="messages__quick-title">交易通知</text>
+          <text class="messages__quick-desc">订单与验货提醒</text>
+        </view>
+        <view class="messages__quick-item" @click="goNotifications()">
+          <view class="messages__quick-icon messages__quick-icon--social">
+            <ni-icon name="message" :size="19" state="green" />
+          </view>
+          <text class="messages__quick-title">留言互动</text>
+          <text class="messages__quick-desc">留言、点赞与评论</text>
+        </view>
+        <view class="messages__quick-item" @click="goFriendRequests">
+          <view class="messages__quick-icon messages__quick-icon--friend">
+            <ni-icon name="friend" :size="19" state="blue" />
+            <view v-if="socialStore.pendingRequestCount > 0" class="messages__quick-badge">
+              <ni-badge :count="socialStore.pendingRequestCount" :max="9" />
+            </view>
+          </view>
+          <text class="messages__quick-title">好友申请</text>
+          <text class="messages__quick-desc">{{ socialStore.pendingRequestCount }} 条待处理</text>
+        </view>
+      </view>
+
+      <view class="messages__list-head">
+        <text class="messages__list-title">最近会话</text>
+        <text class="messages__list-action" @click="readAll">全部已读</text>
+      </view>
+
+      <view v-if="loading && messages.length === 0" class="messages__loading">
+        <ni-skeleton :rows="4" :avatar="true" />
+      </view>
+
+      <view v-else-if="messages.length === 0" class="messages__empty">
+        <ni-empty icon="message" title="还没有会话" desc="在物品详情页私信邻居，开始第一次交流" action-text="去逛逛" @action="goHome" />
+      </view>
+
+      <view v-else class="messages__list">
+        <conversation-item
+          v-for="conversation in messages"
+          :key="conversation.id"
+          :conversation="conversation"
+          @tap="openChat(conversation.id)"
+        />
+      </view>
+    </template>
+
+    <template v-else>
+      <view class="messages__neighbor-actions">
+        <view class="messages__neighbor-action" @click="goFriendRequests">
+          <ni-icon name="friend" :size="17" state="blue" />
+          <text class="messages__neighbor-action-text">好友申请</text>
+          <ni-badge v-if="socialStore.pendingRequestCount > 0" :count="socialStore.pendingRequestCount" :max="9" />
+        </view>
+        <view class="messages__neighbor-action" @click="goFriends">
+          <ni-icon name="search" :size="17" state="tertiary" />
+          <text class="messages__neighbor-action-text">查找邻居</text>
+        </view>
+      </view>
+
+      <view v-if="socialStore.friends.length === 0" class="messages__empty">
+        <ni-empty icon="friend" title="还没有邻居好友" desc="认识同小区的邻居，从一次互助开始" action-text="去找邻居" @action="goFriends" />
+      </view>
+
+      <view v-else class="messages__friends">
+        <view v-for="friend in socialStore.friends" :key="friend.id" class="messages__friend" @click="chatWithFriend(friend.id)">
+          <ni-avatar :src="friend.avatar" :name="friend.name" :size="48" variant="green" />
+          <view class="messages__friend-copy">
+            <view class="messages__friend-row">
+              <text class="messages__friend-name">{{ friend.name }}</text>
+              <ni-icon v-if="friend.verified" name="shield" :size="9" state="gold" />
+            </view>
+            <text class="messages__friend-meta">{{ friend.community }}</text>
+          </view>
+          <view class="messages__friend-status">
+            <view v-if="friend.online" class="messages__online-dot" />
+            <ni-icon name="message" :size="18" state="tertiary" />
+          </view>
+        </view>
+      </view>
+    </template>
+
+    <view class="messages__bottom-space" />
+    <ni-tab-bar active="messages" :unread="socialStore.unreadTotal" />
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="92" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import type { Conversation } from '../../models'
+import { useSocialStore } from '../../stores/social.store'
+import { useNotificationStore } from '../../stores/notification.store'
+import { useToast } from '../../composables/useToast'
+
+const socialStore = useSocialStore()
+const notificationStore = useNotificationStore()
+const { toast, showToast } = useToast()
+
+const tab = ref<'messages' | 'neighbors'>('messages')
+const loading = computed(() => socialStore.loading)
+const messages = computed<Conversation[]>(() => socialStore.conversations)
+
+onLoad(() => {
+  loadData()
+})
+
+onShow(() => {
+  if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
+  loadData()
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await loadData()
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+async function loadData(): Promise<void> {
+  await Promise.all([
+    socialStore.fetchConversations().catch(() => undefined),
+    socialStore.fetchFriends().catch(() => undefined),
+    socialStore.fetchRequests().catch(() => undefined),
+    notificationStore.fetchUnread().catch(() => undefined),
+  ])
+}
+
+async function readAll(): Promise<void> {
+  try {
+    await socialStore.readAll()
+    notificationStore.readAll().catch(() => undefined)
+    showToast('已全部标记为已读')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  }
+}
+
+function openChat(conversationId: string): void {
+  uni.navigateTo({ url: `/pages/social/chat?id=${conversationId}` })
+}
+
+async function chatWithFriend(friendId: string): Promise<void> {
+  try {
+    const conversation = await socialStore.openConversation(friendId)
+    openChat(conversation.id)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
+  }
+}
+
+function goNotifications(): void {
+  uni.navigateTo({ url: '/pages/notifications/index' })
+}
+function goFriendRequests(): void {
+  uni.navigateTo({ url: '/pages/social/friend-requests' })
+}
+function goFriends(): void {
+  uni.navigateTo({ url: '/pages/social/friends' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.messages {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.messages__header {
+  padding-left: 16px;
+  padding-right: 16px;
+  padding-top: 11px;
+  padding-bottom: 6px;
+}
+.messages__head-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.messages__title {
+  font-size: $ni-font-27;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.6px;
+}
+.messages__head-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(92, 73, 62, 0.06);
+  align-items: center;
+  justify-content: center;
+}
+.messages__segment {
+  width: 190px;
+  height: 36px;
+  margin: 12px 16px;
+  padding: 3px;
+  flex-direction: row;
+  border-radius: $ni-radius-11;
+  background-color: #ede9e5;
+}
+.messages__segment-button {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+.messages__segment-button--active {
+  background-color: #ffffff;
+  box-shadow: 0 1px 4px rgba(60, 45, 35, 0.08);
+}
+.messages__segment-text {
+  font-size: $ni-font-12;
+  color: $ni-color-text-secondary;
+}
+.messages__segment-text--active {
+  color: $ni-color-text-primary;
+  font-weight: 700;
+}
+.messages__segment-count {
+  margin-left: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-primary;
+  font-weight: 700;
+}
+.messages__quick {
+  margin: 0 14px 12px;
+  padding: 15px 8px;
+  flex-direction: row;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.messages__quick-item {
+  flex: 1;
+  align-items: center;
+  overflow: visible;
+}
+.messages__quick-icon {
+  width: 43px;
+  height: 43px;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+}
+.messages__quick-icon--trade {
+  background-color: #fff0e7;
+}
+.messages__quick-icon--social {
+  background-color: $ni-color-success-bg;
+}
+.messages__quick-icon--friend {
+  background-color: $ni-color-swap-bg;
+}
+.messages__quick-badge {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+}
+.messages__quick-title {
+  margin-top: 7px;
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.messages__quick-desc {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.messages__list-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 16px;
+  padding-right: 16px;
+  margin-bottom: 2px;
+}
+.messages__list-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.messages__list-action {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.messages__list {
+  padding: 5px 14px;
+  background-color: $ni-color-white;
+  margin-left: 14px;
+  margin-right: 14px;
+  border-radius: $ni-radius-16;
+}
+.messages__loading {
+  margin: 0 14px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.messages__empty {
+  margin: 0 14px;
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.messages__neighbor-actions {
+  flex-direction: row;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.messages__neighbor-action {
+  flex: 1;
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-white;
+  margin-right: 10px;
+}
+.messages__neighbor-action-text {
+  margin-left: 5px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 5px;
+}
+.messages__friends {
+  margin: 12px 14px 0;
+  padding: 0 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+}
+.messages__friend {
+  height: 72px;
+  flex-direction: row;
+  align-items: center;
+  border-bottom: 1px solid #eeeae6;
+}
+.messages__friend-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.messages__friend-row {
+  flex-direction: row;
+  align-items: center;
+}
+.messages__friend-name {
+  font-size: $ni-font-13;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.messages__friend-meta {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.messages__friend-status {
+  flex-direction: row;
+  align-items: center;
+}
+.messages__online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: $ni-color-gift;
+  margin-right: 8px;
+}
+.messages__bottom-space {
+  height: calc(92px + env(safe-area-inset-bottom));
+}
+</style>

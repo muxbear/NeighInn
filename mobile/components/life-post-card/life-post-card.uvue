@@ -1,0 +1,263 @@
+<template>
+  <view class="life-card" hover-class="life-card--pressed" :hover-stay-time="100" @click="onOpen">
+    <view class="life-card__media">
+      <view v-if="post.type === 'gallery' && post.images.length > 1" class="life-card__gallery">
+        <image class="life-card__gallery-image" :src="imageSrc(post.images[0])" mode="aspectFill" lazy-load @error="markFailed(post.images[0])" />
+        <image class="life-card__gallery-image life-card__gallery-image--right" :src="imageSrc(post.images[1])" mode="aspectFill" lazy-load @error="markFailed(post.images[1])" />
+      </view>
+      <image v-else class="life-card__cover" :src="imageSrc(post.cover || post.images[0])" mode="aspectFill" lazy-load @error="markFailed(post.cover || post.images[0])" />
+
+      <view v-if="post.type === 'video'" class="life-card__play">
+        <ni-icon name="play" :size="20" state="white" :filled="true" />
+      </view>
+      <view class="life-card__type">
+        <ni-icon :name="post.type === 'video' ? 'play' : 'image'" :size="10" state="white" />
+        <text class="life-card__type-text">{{ post.type === 'video' ? '视频' : post.images.length + ' 张照片' }}</text>
+      </view>
+      <text v-if="post.type === 'video' && post.duration" class="life-card__duration">{{ post.duration }}</text>
+    </view>
+
+    <view class="life-card__body">
+      <view class="life-card__author">
+        <ni-avatar :src="post.avatar" :name="post.author" :size="34" :variant="avatarVariant" />
+        <view class="life-card__author-copy">
+          <view class="life-card__author-row">
+            <text class="life-card__author-name">{{ post.author }}</text>
+            <ni-icon name="shield" :size="8" state="gold" />
+            <text class="life-card__verified">认证业主</text>
+          </view>
+          <text class="life-card__meta">{{ post.area }} · {{ post.time }}</text>
+        </view>
+        <view class="life-card__category">
+          <text class="life-card__category-text">{{ post.category }}</text>
+        </view>
+      </view>
+
+      <text class="life-card__title" :lines="2">{{ post.title }}</text>
+      <text class="life-card__desc" :lines="2">{{ post.description }}</text>
+
+      <view class="life-card__actions">
+        <view class="life-card__action">
+          <ni-icon name="eye" :size="13" state="tertiary" />
+          <text class="life-card__action-text">{{ formatCount(post.views) }}</text>
+        </view>
+        <view class="life-card__action" @click.stop="onLike">
+          <ni-icon name="heart" :size="13" :state="post.liked ? 'active' : 'tertiary'" :filled="post.liked" />
+          <text class="life-card__action-text" :class="{ 'life-card__action-text--active': post.liked }">
+            {{ formatCount(post.likes) }}
+          </text>
+        </view>
+        <view class="life-card__action" @click.stop="onComment">
+          <ni-icon name="message" :size="13" state="tertiary" />
+          <text class="life-card__action-text">{{ formatCount(post.comments) }}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import type { LifePost } from '../../models'
+import { formatCount } from '../../utils/formatter'
+import { ERROR_IMAGE } from '../../utils/image'
+
+const failedImages = ref<string[]>([])
+
+function imageSrc(url: string): string {
+  return failedImages.value.indexOf(url) >= 0 ? ERROR_IMAGE : url
+}
+
+function markFailed(url: string): void {
+  if (failedImages.value.indexOf(url) < 0) {
+    failedImages.value = [...failedImages.value, url]
+  }
+}
+
+const props = defineProps<{ post: LifePost }>()
+const emit = defineEmits<{
+  (event: 'open'): void
+  (event: 'like'): void
+  (event: 'comment'): void
+}>()
+
+const avatarVariant = computed(() => {
+  const value = props.post.avatarClass
+  if (value === 'green' || value === 'blue') return value
+  return 'orange'
+})
+
+function onOpen(): void {
+  emit('open')
+}
+function onLike(): void {
+  emit('like')
+}
+function onComment(): void {
+  emit('comment')
+}
+</script>
+
+<style scoped lang="scss">
+.life-card {
+  width: 100%;
+  border-radius: $ni-radius-18;
+  background-color: $ni-color-white;
+  border: $ni-border-card;
+  box-shadow: $ni-shadow-card;
+  overflow: hidden;
+  margin-bottom: 13px;
+  transition: transform 100ms ease-out;
+}
+.life-card--pressed {
+  transform: scale(0.99);
+}
+.life-card__media {
+  width: calc(100% - 12px);
+  height: 194px;
+  margin-left: 6px;
+  margin-right: 6px;
+  margin-top: 6px;
+  position: relative;
+  border-radius: $ni-radius-12;
+  overflow: hidden;
+  background-color: #e9e5e2;
+}
+.life-card__cover {
+  width: 100%;
+  height: 100%;
+}
+.life-card__gallery {
+  width: 100%;
+  height: 100%;
+  flex-direction: row;
+}
+.life-card__gallery-image {
+  flex: 1;
+  height: 100%;
+}
+.life-card__gallery-image--right {
+  margin-left: 2px;
+}
+.life-card__play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -25px;
+  margin-top: -25px;
+  width: 49px;
+  height: 49px;
+  border-radius: 25px;
+  background-color: rgba(25, 22, 20, 0.42);
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  align-items: center;
+  justify-content: center;
+}
+.life-card__type {
+  position: absolute;
+  left: 9px;
+  bottom: 9px;
+  flex-direction: row;
+  align-items: center;
+  height: 20px;
+  padding-left: 6px;
+  padding-right: 7px;
+  border-radius: 7px;
+  background-color: rgba(25, 22, 20, 0.45);
+}
+.life-card__type-text {
+  margin-left: 3px;
+  font-size: 8px;
+  color: #ffffff;
+}
+.life-card__duration {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  padding-left: 6px;
+  padding-right: 6px;
+  height: 18px;
+  border-radius: 6px;
+  background-color: rgba(25, 22, 20, 0.5);
+  color: #ffffff;
+  font-size: 8px;
+}
+.life-card__body {
+  padding: 12px 13px 11px;
+}
+.life-card__author {
+  flex-direction: row;
+  align-items: center;
+}
+.life-card__author-copy {
+  flex: 1;
+  margin-left: 7px;
+}
+.life-card__author-row {
+  flex-direction: row;
+  align-items: center;
+}
+.life-card__author-name {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+  margin-right: 3px;
+}
+.life-card__verified {
+  margin-left: 2px;
+  font-size: 6px;
+  color: $ni-color-credit-deep;
+}
+.life-card__meta {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.life-card__category {
+  height: 17px;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-radius: 5px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+}
+.life-card__category-text {
+  font-size: 7px;
+  color: $ni-color-text-secondary;
+}
+.life-card__title {
+  margin-top: 8px;
+  font-size: $ni-font-14;
+  line-height: 20px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.life-card__desc {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #817872;
+}
+.life-card__actions {
+  flex-direction: row;
+  align-items: center;
+  min-height: 32px;
+  padding-top: 8px;
+  margin-top: 6px;
+  border-top: $ni-border-divider;
+}
+.life-card__action {
+  flex-direction: row;
+  align-items: center;
+  margin-right: 17px;
+}
+.life-card__action-text {
+  margin-left: 3px;
+  font-size: 8px;
+  color: $ni-color-text-tertiary;
+}
+.life-card__action-text--active {
+  color: $ni-color-primary;
+}
+</style>

@@ -1,0 +1,89 @@
+<template>
+  <view
+    class="ni-avatar"
+    :class="[`ni-avatar--${variant}`, { 'ni-avatar--ring': ring }]"
+    :style="{ width: size + 'px', height: size + 'px', borderRadius: size / 2 + 'px' }"
+  >
+    <image
+      v-if="src && !failed"
+      class="ni-avatar__image"
+      :src="src"
+      mode="aspectFill"
+      @error="onError"
+    />
+    <text v-else class="ni-avatar__text" :style="{ fontSize: Math.round(size * 0.36) + 'px' }">
+      {{ initial }}
+    </text>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    src?: string
+    name?: string
+    size?: number
+    variant?: 'orange' | 'green' | 'blue' | 'gold'
+    ring?: boolean
+  }>(),
+  {
+    src: '',
+    name: '',
+    size: 44,
+    variant: 'orange',
+    ring: false,
+  },
+)
+
+const failed = ref(false)
+const initial = computed(() => {
+  const text = Array.from(props.name || '邻')
+  return text[0] ?? '邻'
+})
+
+watch(
+  () => props.src,
+  () => {
+    failed.value = false
+  },
+)
+
+function onError(): void {
+  failed.value = true
+}
+</script>
+
+<style scoped lang="scss">
+.ni-avatar {
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ni-avatar--ring {
+  border: 2px solid #ffffff;
+}
+.ni-avatar--orange {
+  background-image: linear-gradient(135deg, #ff9a62 0%, #ff7a3d 100%);
+}
+.ni-avatar--green {
+  background-image: linear-gradient(135deg, #85c9a0 0%, #6bb88a 100%);
+}
+.ni-avatar--blue {
+  background-image: linear-gradient(135deg, #7fc2ea 0%, #5dade2 100%);
+}
+.ni-avatar--gold {
+  background-image: linear-gradient(135deg, #e8bd73 0%, #d4a055 100%);
+}
+.ni-avatar__image {
+  width: 100%;
+  height: 100%;
+}
+.ni-avatar__text {
+  color: #ffffff;
+  font-weight: 600;
+  text-align: center;
+}
+</style>
