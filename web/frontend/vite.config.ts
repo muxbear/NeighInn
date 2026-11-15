@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const backendEnv = loadEnv(mode, backendDir, '')
   const backendHost = backendEnv.APP_HOST || '127.0.0.1'
   const proxyHost = backendHost === '0.0.0.0' ? '127.0.0.1' : backendHost
-  const backendPort = backendEnv.APP_PORT || '5194'
+  const backendPort = backendEnv.APP_PORT || '5193'
 
   return {
     plugins: [vue()],

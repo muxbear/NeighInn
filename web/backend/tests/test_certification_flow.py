@@ -47,6 +47,17 @@ async def test_wrong_sms_code_rejected(client):
 
 
 @pytest.mark.asyncio
+async def test_sms_code_requires_provider_outside_dev(client, monkeypatch):
+    """非 dev 环境未接短信通道时必须显式报错，避免“发送成功但收不到”。"""
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "app_env", "prod")
+    resp = await client.post(f"{C_BASE}/auth/sms-code", json={"phone": TEST_PHONE})
+    assert resp.status_code == 503
+    assert resp.json()["code"] == 50301
+
+
+@pytest.mark.asyncio
 async def test_auth_status_transitions(client):
     result = await register_user(client)
     headers = bearer(result["token"])

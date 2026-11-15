@@ -19,7 +19,7 @@ npm run dev
 
 默认地址：<http://127.0.0.1:5192>
 
-Vite 已将 `/api` 代理到 `http://127.0.0.1:5194`，请先启动 backend。
+Vite 已将 `/api` 代理到 `http://127.0.0.1:5193`，请先启动 backend。
 
 ## 构建
 

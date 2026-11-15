@@ -35,7 +35,7 @@ NeighInn‌/                          # 根目录名末尾含 U+200C
 │   │   ├── src/domain/             # 业务枚举 + 8 个状态机
 │   │   ├── src/services/           # 认证/物品/AI 质检/订单/资金/参数/IM
 │   │   ├── alembic/                # 数据库迁移
-│   │   ├── tests/                  # 78 个测试
+│   │   ├── tests/                  # 80 个测试
 │   │   └── scripts/smoke_e2e.py    # 真实 HTTP 端到端冒烟
 │   ├── frontend/                   # Vue 3 + TypeScript + Pinia + Vite
 │   ├── docs/邻里小栈后台管理系统详细设计说明书.md
@@ -68,7 +68,7 @@ NeighInn‌/                          # 根目录名末尾含 U+200C
 - 布局一律 Flex；文字样式必须写在 `<text>` 上；非 Web 端 SVG 不换色，按状态导出多份；
 - 最低系统：Android 6.0+ / iOS 15+ / HarmonyOS 6.0+（API 20+）；微信小程序基础库 3.7.1+；
 - 状态管理 Pinia 2.x；原生扩展仅 UTS 插件；
-- H5 开发端口：**5191**（`mobile/manifest.json` → `h5.devServer.port`）。
+- H5 开发端口：HBuilderX 5.34 实际使用 Vite 默认 **5173**（被占用时自动 +1，以控制台输出为准；`manifest.json` 的 `h5.devServer.port=5191` 在该版本未生效）。后端 CORS 同时放行 5173/5191/5192 与私网任意端口。
 
 Figma Make 原型：`https://www.figma.com/make/OEw7s8EWAlGNNd4xnjZXkS/NeighInn%E2%80%8CMobile?t=oDXGBVFADNsqDfZu-6`（2026-11-14）。
 
@@ -97,7 +97,8 @@ utils/ config/ styles/ static/ tests/ scripts/
 ### 移动端网络与 Mock
 
 - `api/request.ts`：BaseURL、Bearer Token、`X-Refresh-Token` 续期、写操作自动 `X-Idempotency-Key`、统一响应 `{ code, message, data, traceId }`、错误码映射、GET 重试、日志脱敏。
-- `config/env.ts`：`CURRENT_ENV` 默认 `dev` 且 `env.mock = true`；Mock 路由在 `api/mock.ts`，数据在 `config/mock/data.ts`。切真实后端时关闭 mock 并替换 `baseUrl` / `wsUrl`。
+- `config/env.ts`：`CURRENT_ENV = 'local'`（联调统一服务端 5193）；离线演示改为 `dev`（`env.mock = true`）。`LOCAL_HOST` 统一控制本地后端主机：H5/微信开发者工具用 `127.0.0.1`，Android 模拟器用 `10.0.2.2`，真机改为电脑局域网 IP（后端 `APP_HOST` 同步改为 `0.0.0.0`）。
+- Mock 路由在 `api/mock.ts`，数据在 `config/mock/data.ts`。切真实后端时关闭 mock 并替换 `baseUrl` / `wsUrl`。
 - `services/ws.service.ts`：心跳 30s、指数退避重连、`MSG_PUSH` / `ORDER_EVENT` 等事件由 `App.uvue` 分发；页面不直连长连接。
 
 ## Web 管理端工程
@@ -105,10 +106,10 @@ utils/ config/ styles/ static/ tests/ scripts/
 ### 技术栈与端口
 
 - 前端：Vue 3 + TypeScript + Pinia + Vue Router + Vite + SCSS + Lucide；端口 **5192**。
-- 后端：Python 3.11+ + FastAPI + SQLAlchemy 2.0 async + Pydantic 2 + PostgreSQL（psycopg）；端口 **5194**。
+- 后端：Python 3.11+ + FastAPI + SQLAlchemy 2.0 async + Pydantic 2 + PostgreSQL（psycopg）；端口 **5193**。
 - 中间件：Redis（会话/缓存，需配置有效认证信息）、RabbitMQ（未配置时进程内降级）、MinIO（`ni-public` / `ni-private` / `ni-system`）。
 - 开发数据库：由 `web/backend/.env` 的 `DATABASE_URL` 指定；开发账号 `admin / Admin@2025`（仅本地）。
-- 前端 API 代理：`/api` → `http://127.0.0.1:5194`。
+- 前端 API 代理：`/api` → `http://127.0.0.1:5193`。
 
 ### Web 目录与分层
 
@@ -150,9 +151,9 @@ npm run dev
 ```
 
 - Web：`http://127.0.0.1:5192`
-- 管理端 API：`http://127.0.0.1:5194/api/v1/admin`
-- 移动端 API：`http://127.0.0.1:5194/api/v1`
-- Swagger：`http://127.0.0.1:5194/docs`
+- 管理端 API：`http://127.0.0.1:5193/api/v1/admin`
+- 移动端 API：`http://127.0.0.1:5193/api/v1`
+- Swagger：`http://127.0.0.1:5193/docs`
 
 > **注意**：Windows 上不要直接 `uvicorn src.main:app`，否则 psycopg 异步驱动会因 ProactorEventLoop 启动失败；`run.py` 已处理 SelectorEventLoop。
 
@@ -171,12 +172,14 @@ npm run dev
 评估结论与改造方案见 `docs/邻里小栈双端业务闭环评估报告与优化改造方案.md`。`web/backend` 是移动端与 Web 后台的**共享服务端**，原独立演示后台已由统一服务端替换。
 
 - **技术栈**：FastAPI + SQLAlchemy 2.0 async + PostgreSQL（测试 SQLite）+ Redis + MinIO + RabbitMQ（Outbox）。
-- **端口 5194**：C 端 `/api/v1`（JWT Bearer）；管理端 `/api/v1/admin`（Cookie + CSRF 双提交）；WebSocket `/api/v1/ws`。
+- **端口 5193**：C 端 `/api/v1`（JWT Bearer）；管理端 `/api/v1/admin`（Cookie + CSRF 双提交）；WebSocket `/api/v1/ws`。
+- **CORS 与本地联调**：`web/backend/.env` 的 `CORS_ORIGINS` 必须包含移动端 H5（实际 5173 / manifest 5191）与 Web 前端（5192）；开发环境 `CORS_ORIGIN_REGEX` 放行本机/私网 IP 的任意端口；真机联调把 `APP_HOST` 改为 `0.0.0.0` 并调整移动端 `LOCAL_HOST`。
+- **验证码存储**：`SMS_CODE_BACKEND=redis`（推荐，重启/多副本不丢）/ `memory`；非 dev 环境未接短信通道时 `/auth/sms-code` 返回 50301。
 - **已实现**：46+ 张表与 Alembic 迁移；8 个状态机；认证（实名/业主证明/审核/冻结联动下架）；物品（发布校验/AI 质检 Mock 适配器/人工复核/快车道）；订单（三种交易方式/BR-08 一物一卖/验货双向确认）；资金（复式账本/托管/放款/退款/提现双人复核/纠纷资金处置）；内容（生活/喇叭/互助/评论审核）；社交（好友/私信 client_msg_id 幂等/内容安全）；通知（公告下发/任务投递/已读）；参数（发布即生效下发 AppConfig）；管理面（社区 CRUD/用户处置/角色权限/管理员账号/审计/导出/举报工作台）；WebSocket 推送。
 - **铁律**：状态变更只经 `src/domain/state.py`；金额一律整数分；余额只由 `ledger_entries` 推导；管理端路由默认 `require_permission`；写操作走幂等键；跨端一致性靠事件+缓存失效，不做双写。
-- **测试**：`cd web/backend && uv run pytest -q`（78 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
-- **双端接线**：移动端 `config/env.ts` → `CURRENT_ENV='local'` 指向 5194；Web 前端 Vite 代理 `/api` → 5194，页面通过 `src/api/compat.ts` 适配统一服务端契约。
-- **端到端冒烟**：`PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py`（对运行中的 5194 执行 AC-01 全链路）。
+- **测试**：`cd web/backend && uv run pytest -q`（80 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
+- **双端接线**：移动端 `config/env.ts` → `CURRENT_ENV='local'` 指向 5193；Web 前端 Vite 代理 `/api` → 5193，页面通过 `src/api/compat.ts` 适配统一服务端契约。
+- **端到端冒烟**：`PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py`（对运行中的 5193 执行 AC-01 全链路）。
 
 ## 构建与测试
 
@@ -198,7 +201,7 @@ npm run icons        # 重新生成多状态 SVG 图标与内置头像
 
 - 开发/真机：HBuilderX 5.34 打开 `mobile/`，运行到 Android/iOS/HarmonyOS/微信开发者工具/浏览器。
   - 已实测：**HBuilderX 5.34 Web 编译通过、微信小程序编译通过**（36 页面 + 40 组件）。
-  - H5 开发端口 **5191**；需安装 `compile-dart-sass` 插件（CLI：`cli installPlugin --name compile-dart-sass`）。
+  - H5 开发端口以 HBuilderX 控制台为准（5.34 实际为 **5173**，被占用时自动 +1；manifest 的 5191 未生效）；需安装 `compile-dart-sass` 插件（CLI：`cli installPlugin --name compile-dart-sass`）。
   - Android 运行需要连接真机/模拟器；iOS 需 macOS；HarmonyOS 需 DevEco Studio。
 - 常用 CLI（安装路径示例 `D:\opt\DCloud\HBuilderX`）：
   - `cli project open --path <项目绝对路径>`
@@ -256,7 +259,7 @@ npm run build
 
 **Web 管理端已完成第一版**：FastAPI + Vue 3 前后端可运行；登录/会话/CSRF、工作台、社区运营四页、公告、通知任务、社区运维、社区业主、用户、角色权限、资源管理、参数配置、审计日志、资金看板/流水/提现/对账/订单、纠纷调解、报事报修、投诉建议；PostgreSQL 种子数据、MinIO 预签名、本地构建与 API 冒烟测试通过。**Redis 认证、RabbitMQ、真实支付/短信/Push/AI、2FA 界面、Alembic 迁移与部分新增/编辑抽屉仍待补齐。**
 
-**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82 路径 + 管理端 148 路径）、认证/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、78 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5194 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
+**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82 路径 + 管理端 148 路径）、认证/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、80 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5193 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
 
 **Git 现状**：
 

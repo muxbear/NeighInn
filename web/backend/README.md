@@ -75,24 +75,35 @@ uv run alembic upgrade head
 uv run python run.py
 ```
 
-- C 端 API：<http://127.0.0.1:5194/api/v1>
-- 管理端 API：<http://127.0.0.1:5194/api/v1/admin>
-- OpenAPI / Swagger：<http://127.0.0.1:5194/docs>（双端契约完整可见）
+- C 端 API：<http://127.0.0.1:5193/api/v1>
+- 管理端 API：<http://127.0.0.1:5193/api/v1/admin>
+- OpenAPI / Swagger：<http://127.0.0.1:5193/docs>（双端契约完整可见）
 
 ## 质量门槛
 
 ```bash
 uv run ruff check src tests run.py scripts
-uv run pytest -q            # 78 个测试（状态机/认证/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
+uv run pytest -q            # 80 个测试（状态机/认证/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
 ```
 
 ## 双端接线（联调）
 
 | 端 | 配置 | 指向 |
 | --- | --- | --- |
-| 移动端 | `mobile/config/env.ts` → `CURRENT_ENV = 'local'` | `http://127.0.0.1:5194/api/v1`（`dev` 可切回 Mock） |
-| Web 管理端 | `web/frontend/vite.config.ts` 代理 | `/api` → `http://127.0.0.1:5194` |
-| WebSocket | `ws://127.0.0.1:5194/api/v1/ws?token=<accessToken>` | 移动端 IM/通知实时推送 |
+| 移动端 | `mobile/config/env.ts` → `CURRENT_ENV = 'local'` | `http://127.0.0.1:5193/api/v1`（`dev` 可切回 Mock） |
+| Web 管理端 | `web/frontend/vite.config.ts` 代理 | `/api` → `http://127.0.0.1:5193` |
+| WebSocket | `ws://127.0.0.1:5193/api/v1/ws?token=<accessToken>` | 移动端 IM/通知实时推送 |
+
+> **移动端联调注意**
+>
+> - 移动端 H5 端口以 HBuilderX 控制台为准：5.34 实际为 **5173**（manifest 配置的 5191 未生效，被占用时会自动 +1）。
+>   `web/backend/.env` 的 `CORS_ORIGINS` 已同时包含 5173/5191/5192；开发环境 `CORS_ORIGIN_REGEX` 进一步放行本机/私网任意端口，
+>   否则浏览器预检会返回 `400 Disallowed CORS origin`。
+> - 真机联调：后端 `APP_HOST` 改为 `0.0.0.0`，并把 `mobile/config/env.ts` 的 `LOCAL_HOST` 改为电脑局域网 IP；
+>   开发环境 `CORS_ORIGIN_REGEX` 已放行私网 IP 的 H5 来源（生产不生效）。
+> - 验证码存储由 `SMS_CODE_BACKEND` 控制：`redis` 重启/多副本不丢（推荐）；`memory` 仅用于无 Redis 的开发降级。
+> - Redis 不可用或认证失败时，管理端会话与验证码存储会自动降级为进程内内存（启动日志告警）；补全 `REDIS_URL` 凭据后重启即可启用。
+> - 非 `dev` 环境尚未接入真实短信通道，`POST /api/v1/auth/sms-code` 会返回 `50301`，避免“发送成功但收不到”。
 
 **契约适配说明**：
 
@@ -109,7 +120,7 @@ uv run pytest -q            # 78 个测试（状态机/认证/物品/订单资�
 DEBUG=false APP_ENV=dev DATABASE_URL="sqlite+aiosqlite:///./dev-smoke.db" uv run python -c "
 import asyncio, uvicorn
 from src.main import app
-asyncio.run(uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=5194)).serve())"
+asyncio.run(uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=5193)).serve())"
 
 # 终端 2：跑 AC-01 认证闭环
 PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py

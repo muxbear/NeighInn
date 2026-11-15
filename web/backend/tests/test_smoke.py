@@ -15,6 +15,22 @@ async def test_liveness():
     assert response.json()["status"] == "ok"
 
 
+@pytest.mark.asyncio
+async def test_mobile_h5_cors_preflight(client):
+    """移动端 H5（HBuilderX 实际 5173 / manifest 配置 5191）必须通过 CORS 预检。"""
+    for origin in ("http://localhost:5173", "http://localhost:5191"):
+        resp = await client.options(
+            "/api/v1/auth/sms-code",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-idempotency-key,x-trace-id",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["access-control-allow-origin"] == origin
+
+
 def test_openapi_contract_surface():
     """契约骨架：C 端与管理端关键路径均已声明。"""
     spec = app.openapi()

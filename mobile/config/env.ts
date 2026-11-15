@@ -12,6 +12,15 @@ export interface EnvConfig {
   requestTimeout: number
 }
 
+/**
+ * 本地联调主机（local 环境使用）。
+ * - H5 / 微信开发者工具：保持 127.0.0.1；
+ * - Android 模拟器：改为 10.0.2.2；
+ * - 真机：改为电脑局域网 IP（如 192.168.1.100），并把 web/backend/.env 的 APP_HOST 改为 0.0.0.0。
+ */
+const LOCAL_HOST = '127.0.0.1'
+const LOCAL_API_URL = `http://${LOCAL_HOST}:5193/api/v1`
+
 const ENVS: Record<EnvConfig['name'], EnvConfig> = {
   dev: {
     name: 'dev',
@@ -24,9 +33,9 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
   },
   local: {
     name: 'local',
-    baseUrl: 'http://127.0.0.1:5194/api/v1',
-    wsUrl: 'ws://127.0.0.1:5194/api/v1/ws',
-    uploadUrl: 'http://127.0.0.1:5194/api/v1',
+    baseUrl: LOCAL_API_URL,
+    wsUrl: `ws://${LOCAL_HOST}:5193/api/v1/ws`,
+    uploadUrl: LOCAL_API_URL,
     mock: false,
     mockLatency: 0,
     requestTimeout: 15000,
@@ -61,7 +70,7 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
 }
 
 /** 切换环境：改这里即可；HBuilderX 发版前务必确认为 staging / prod。
- * dev = 本地 Mock（离线演示）；local = 联调 web/backend 统一服务端（http://127.0.0.1:5194）。 */
+ * dev = 本地 Mock（离线演示）；local = 联调 web/backend 统一服务端（http://127.0.0.1:5193）。 */
 export const CURRENT_ENV: EnvConfig['name'] = 'local'
 
 export const env: EnvConfig = ENVS[CURRENT_ENV]

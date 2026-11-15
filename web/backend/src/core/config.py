@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "Neighbor's Inn Platform API"
     app_env: str = "dev"
     app_host: str = "127.0.0.1"
-    app_port: int = 5194
+    app_port: int = 5193
     debug: bool = True
     secret_key: str = "dev-only-change-me-please-32bytes-min"
 
@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     redis_url: str = ""
+    # 短信验证码存储后端：memory（进程内，重启失效）| redis（重启/多副本不丢）。
+    sms_code_backend: str = "memory"
     rabbitmq_url: str = ""
 
     minio_endpoint: str = "127.0.0.1:9000"
@@ -36,7 +38,13 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 480
     auth_require_2fa: bool = True
     auth_enforce_csrf: bool = True
-    cors_origins: str = "http://localhost:5191,http://127.0.0.1:5191,http://localhost:5192,http://127.0.0.1:5192"
+    cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5191,http://127.0.0.1:5191,"
+        "http://localhost:5192,http://127.0.0.1:5192"
+    )
+    # 开发环境额外允许的跨域来源正则（私网 IP 的移动端 H5）；生产环境不生效。
+    cors_origin_regex: str = ""
 
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 120

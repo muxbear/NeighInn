@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
-from src.core.responses import ERR_PARAM, ERR_UNAUTHORIZED, ApiError, ok
+from src.core.responses import ERR_DEPENDENCY, ERR_PARAM, ERR_UNAUTHORIZED, ApiError, ok
 from src.core.security import decode_token, issue_access_token, issue_refresh_token
 from src.db.models import Certification
 from src.services import auth_service as svc
@@ -44,18 +44,18 @@ class OwnerProofIn(BaseModel):
 @router.post("/auth/sms-code")
 async def send_sms_code(payload: SmsCodeIn):
     svc.validate_phone(payload.phone)
-    code, cooldown = sms_code_store.issue(payload.phone)
-    # 生产：通过短信适配器下发，绝不返回验证码本体（NF-06）。
-    data: dict = {"cooldown": cooldown}
-    if settings.app_env == "dev":
-        data["mockCode"] = code  # 仅开发环境回显（与移动端 Mock 行为一致）
-    return ok(data, "验证码已发送")
+    if settings.app_env != "dev":
+        # 真实短信通道尚未接入：显式报错，避免前端收到“发送成功”却永远收不到验证码。
+        raise ApiError(ERR_DEPENDENCY, "短信通道尚未接入，暂无法发送验证码", 503)
+    code, cooldown = await sms_code_store.issue(payload.phone)
+    # 仅开发环境回显验证码（NF-06：生产绝不返回验证码本体）。
+    return ok({"cooldown": cooldown, "mockCode": code}, "验证码已发送")
 
 
 @router.post("/auth/login/sms")
 async def login_by_sms(payload: LoginSmsIn, db: DbSession):
     svc.validate_phone(payload.phone)
-    if not sms_code_store.verify(payload.phone, payload.code):
+    if not await sms_code_store.verify(payload.phone, payload.code):
         raise ApiError(ERR_UNAUTHORIZED, "验证码错误或已过期", 401)
     user, is_new = await svc.get_or_create_user_by_phone(db, payload.phone)
     await db.commit()

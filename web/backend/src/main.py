@@ -29,8 +29,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from src.services.auth_service import sms_code_store
+
     await init_db()
     await session_store.init()
+    await sms_code_store.init()
     if settings.app_env == "dev":
         # 幂等种子：区划/社区/类目/字典/权限/角色/超管/参数/热词（生产用 alembic data migration）
         async with SessionLocal() as session:
@@ -56,6 +59,7 @@ async def lifespan(_: FastAPI):
         task.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+    await sms_code_store.close()
     await session_store.close()
 
 
@@ -66,9 +70,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 开发环境允许私网 IP 的移动端 H5 来源（真机/局域网调试）；生产环境仅使用显式白名单。
+_origin_regex = settings.cors_origin_regex if settings.app_env == "dev" else ""
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    allow_origin_regex=_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -76,15 +76,52 @@ class RedisSessionStore:
             await self._client.delete(f"ni:admin:session:{token}")
 
 
-def build_session_store() -> SessionStore:
-    if settings.redis_url:
+class FailoverSessionStore:
+    """优先 Redis；初始化失败（未配置/认证失败/不可达）时自动降级到进程内会话。
+
+    保证开发环境 Redis 配错不会导致服务无法启动；生产应修复 REDIS_URL 以恢复多副本会话。
+    """
+
+    def __init__(self) -> None:
+        self._fallback = MemorySessionStore()
+        self._redis: RedisSessionStore | None = None
+        self._active: SessionStore = self._fallback
+
+    async def init(self) -> None:
+        if not settings.redis_url:
+            logger.warning("未配置 REDIS_URL，管理端会话使用进程内内存（重启失效）")
+            return
         try:
-            return RedisSessionStore(settings.redis_url)
+            redis_store = RedisSessionStore(settings.redis_url)
+            await redis_store.init()
         except ImportError:  # pragma: no cover
             logger.warning("redis 依赖不可用，管理端会话降级为进程内内存（重启失效）")
-    else:
-        logger.warning("未配置 REDIS_URL，管理端会话使用进程内内存（重启失效）")
-    return MemorySessionStore()
+            return
+        except Exception as exc:  # noqa: BLE001 - 连接/认证失败均降级，避免服务无法启动
+            logger.warning("Redis 会话存储不可用（%s），降级为进程内内存（重启失效）", exc)
+            return
+        self._redis = redis_store
+        self._active = redis_store
+        logger.info("管理端会话使用 Redis 存储")
+
+    async def close(self) -> None:
+        if self._redis is not None:
+            await self._redis.close()
+            self._redis = None
+        self._active = self._fallback
+
+    async def set(self, token: str, data: dict, ttl: int) -> None:
+        await self._active.set(token, data, ttl)
+
+    async def get(self, token: str | None) -> dict | None:
+        return await self._active.get(token)
+
+    async def delete(self, token: str | None) -> None:
+        await self._active.delete(token)
+
+
+def build_session_store() -> SessionStore:
+    return FailoverSessionStore()
 
 
 session_store: SessionStore = build_session_store()

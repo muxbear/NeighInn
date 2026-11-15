@@ -5,7 +5,7 @@
 - 技术栈：uni-app x 蒸汽模式（Vapor）+ Vue 3 组合式 API + TypeScript + Pinia + SCSS/ucss
 - 目标端：Android / iOS / HarmonyOS / 微信小程序（支付宝小程序、Web 为可选扩展）
 - 设计基线：430 × 932，Figma 原值 Token（`uni.scss` 全局注入，`styles/tokens.scss` 兼容转发）
-- 当前模式：**本地 Mock 全流程可用**（`config/env.ts` 中 `env.mock = true`）
+- 当前模式：`CURRENT_ENV = 'local'`，默认联调 `web/backend` 统一服务端（5193）；切回 `dev` 可离线 Mock 全流程演示
 
 ## 快速开始（HBuilderX 5.34 已验证）
 
@@ -17,7 +17,7 @@
    ```
 3. 打开 `manifest.json` 可视化界面，在“基础配置”中**重新获取 DCloud AppID**；微信小程序端填写自己的 AppID（当前为占位值）。
 4. 选择运行目标：
-   - **Web 预览**：运行 → 运行到浏览器 → Chrome（已验证 HBuilderX 5.34 编译通过；根目录 `index.html` 为 H5 入口；H5 开发端口为 `5191`，配置见 `manifest.json` 的 `h5.devServer.port`）
+   - **Web 预览**：运行 → 运行到浏览器 → Chrome（已验证 HBuilderX 5.34 编译通过；根目录 `index.html` 为 H5 入口；HBuilderX 5.34 实际使用 Vite 默认端口 **5173**，被占用时自动 +1，以控制台输出为准；`manifest.json` 的 `h5.devServer.port=5191` 在该版本未生效）
    - **微信小程序**：运行 → 运行到小程序模拟器 → 微信开发者工具（已验证 HBuilderX 5.34 编译通过；需在微信开发者工具“设置 → 安全设置”中开启服务端口）
    - **Android**：手机开启 USB 调试并连接 → 运行 → 运行到手机或模拟器 → 运行到 Android App 基座（Vapor 蒸汽模式）
    - **iOS**：需要 macOS；**HarmonyOS**：需要 DevEco Studio 与 HarmonyOS SDK
@@ -55,8 +55,13 @@ npm run icons        # 重新生成图标与内置头像资源
 
 ## Mock 与真实接口
 
-- `config/env.ts`：`CURRENT_ENV` 默认 `dev`，`env.mock = true`。
+- `config/env.ts`：`CURRENT_ENV = 'local'`（联调统一服务端）；离线演示改为 `dev`（`env.mock = true`）。
 - Mock 路由在 `api/mock.ts`，与真实接口保持相同路径与响应形状；数据在 `config/mock/data.ts`。
+- `local` 环境的后端主机由 `LOCAL_HOST` 统一配置（默认 `127.0.0.1:5193`）：
+  - Web 预览 / 微信开发者工具：`127.0.0.1`；
+  - Android 模拟器：`10.0.2.2`；
+  - 真机：电脑局域网 IP（如 `192.168.1.100`），同时把 `web/backend/.env` 的 `APP_HOST` 改为 `0.0.0.0`。
+- 后端 `CORS_ORIGINS` 必须放行移动端 H5 实际端口（HBuilderX 当前为 `5173`，manifest 配置为 `5191`），否则浏览器预检会被拒绝；开发环境已用 `CORS_ORIGIN_REGEX` 放宽本机/私网任意端口（详见 `web/backend/README.md`）。
 - 切换到 staging/prod：修改 `CURRENT_ENV`，并把 `mock` 设为 `false`，替换 `baseUrl` / `wsUrl`。
 - 首次进入 App 会注入一个演示会话；在「设置 - 退出登录」后可体验登录页（验证码演示码 `123456`）。
 

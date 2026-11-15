@@ -6,10 +6,16 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+
+# 测试固定使用进程内会话/验证码存储，避免依赖外部 Redis 或污染其数据。
+os.environ["REDIS_URL"] = ""
+os.environ["SMS_CODE_BACKEND"] = "memory"
 
 from src.db.base import Base, get_db
 from src.db.seed import seed_if_empty
@@ -72,10 +78,10 @@ TEST_PHONE = "13900001111"
 
 async def register_user(client: AsyncClient, phone: str = TEST_PHONE) -> dict:
     """短信注册登录全流程：返回 {token, profile}。
-    测试内重置验证码冷却（模块级内存存储跨用例共享）。"""
+    测试内清理验证码与冷却（模块级存储跨用例共享）。"""
     from src.services.auth_service import sms_code_store
 
-    sms_code_store._codes.pop(phone, None)
+    await sms_code_store.clear(phone)
     resp = await client.post(f"{C_BASE}/auth/sms-code", json={"phone": phone})
     assert resp.status_code == 200, resp.text
     code = resp.json()["data"]["mockCode"]
