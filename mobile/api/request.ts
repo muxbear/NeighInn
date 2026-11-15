@@ -2,6 +2,7 @@ import { env } from '../config/env'
 import { ERROR_MESSAGES } from '../config/constants'
 import { ApiError } from './errors'
 import { mockRequest } from './mock'
+import { normalizePageResult } from './pagination'
 import { createTraceId, logger } from '../utils/logger'
 import { secureStorage } from '../utils/storage'
 import { createIdempotencyKey } from '../utils/idempotency'
@@ -75,7 +76,7 @@ function unwrap<T>(response: any, traceId: string): T {
     const message = body.message || ERROR_MESSAGES[body.code] || '请求失败'
     throw new ApiError(body.code, message, body.traceId || traceId, status)
   }
-  return body.data as T
+  return normalizePageResult<T>(body.data)
 }
 
 async function refreshToken(): Promise<boolean> {
