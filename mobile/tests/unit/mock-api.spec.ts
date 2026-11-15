@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { mockRequest } from '../../api/mock'
 import { env } from '../../config/env'
-import type { HomeBundle, PageResult } from '../../models'
+import type { CommunityBinding, HomeBundle, PageResult, RegionNode } from '../../models'
 import type { Item, Order } from '../../models'
 
 beforeAll(() => {
@@ -32,6 +32,51 @@ describe('mock api', () => {
 
     const search = await mockRequest<PageResult<Item>>({ url: '/items?keyword=儿童椅', method: 'GET' })
     expect(search.list.some((item) => item.title.indexOf('儿童') >= 0)).toBe(true)
+  })
+
+  it('cascades regions and filters communities by street', async () => {
+    const provinces = await mockRequest<RegionNode[]>({ url: '/regions/children', method: 'GET' })
+    expect(provinces[0].name).toBe('浙江省')
+
+    const cities = await mockRequest<RegionNode[]>({
+      url: `/regions/children?parentId=${provinces[0].id}`,
+      method: 'GET',
+    })
+    const districts = await mockRequest<RegionNode[]>({
+      url: `/regions/children?parentId=${cities[0].id}`,
+      method: 'GET',
+    })
+    const streets = await mockRequest<RegionNode[]>({
+      url: `/regions/children?parentId=${districts[0].id}`,
+      method: 'GET',
+    })
+    const communities = await mockRequest<CommunityBinding[]>({
+      url: `/communities/search?streetId=${streets[0].id}`,
+      method: 'GET',
+    })
+    expect(communities.length).toBeGreaterThan(0)
+    expect(communities[0].street).toBe('文新街道')
+    expect(communities[0].regionPath).toBe('浙江省 杭州市 西湖区 文新街道')
+
+    // 不强制选择街道：区县/地市范围 + 关键词搜索
+    const byRegion = await mockRequest<CommunityBinding[]>({
+      url: `/communities/search?regionId=${districts[0].id}`,
+      method: 'GET',
+    })
+    expect(byRegion.length).toBeGreaterThan(0)
+    expect(byRegion.every((item) => item.regionId === districts[0].id)).toBe(true)
+
+    const byCity = await mockRequest<CommunityBinding[]>({
+      url: `/communities/search?cityId=${cities[0].id}`,
+      method: 'GET',
+    })
+    expect(byCity.length).toBeGreaterThanOrEqual(byRegion.length)
+
+    const byKeyword = await mockRequest<CommunityBinding[]>({
+      url: `/communities/search?keyword=${encodeURIComponent('阳光')}`,
+      method: 'GET',
+    })
+    expect(byKeyword.some((item) => item.name.includes('阳光'))).toBe(true)
   })
 
   it('logs in with a mock sms code', async () => {

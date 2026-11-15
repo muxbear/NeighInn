@@ -211,7 +211,7 @@ export function normalizeAudit(row: any): any {
 }
 
 export function normalizeCommunity(row: any): any {
-  return { ...row, status: mapStatus(row.status) }
+  return { ...row, status: mapStatus(row.status), statusCode: row.status }
 }
 
 export function normalizeCertification(row: any): any {

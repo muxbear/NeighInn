@@ -119,7 +119,7 @@
           </view>
           <view class="pedit__auth-copy">
             <text class="pedit__auth-title">{{ communityName }}</text>
-            <text class="pedit__auth-desc">业主认证 · 已认证</text>
+            <text class="pedit__auth-desc">{{ communityDesc }}</text>
           </view>
           <view class="pedit__auth-badge">
             <ni-icon name="shield" :size="10" state="green" />
@@ -196,6 +196,7 @@ import { useCommunityStore } from '../../stores/community.store'
 import { useToast } from '../../composables/useToast'
 import { profileService } from '../../services/profile.service'
 import { chooseImages } from '../../utils/image'
+import { formatCommunityRegion } from '../../utils/formatter'
 import { validateProfile } from '../../utils/validator'
 
 const userStore = useUserStore()
@@ -225,6 +226,12 @@ const avatarPreview = computed(() => {
 })
 
 const communityName = computed(() => communityStore.current?.name || userStore.profile?.communityName || '阳光花园小区')
+const communityDesc = computed(() => {
+  const current = communityStore.current
+  const region = formatCommunityRegion(current)
+  const status = current?.status || '已认证'
+  return region ? `${region} · ${status}` : `业主认证 · ${status}`
+})
 
 onLoad(async () => {
   hydrateForm()

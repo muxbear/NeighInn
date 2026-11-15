@@ -18,6 +18,7 @@ import type {
   LifeComment,
   LifePost,
   Order,
+  RegionNode,
   SellerSummary,
   ServicePost,
   UserProfile,
@@ -1406,6 +1407,89 @@ export const FRIEND_REQUESTS: FriendRequest[] = [
   },
 ]
 
+export interface RegionTreeNode extends RegionNode {
+  children?: RegionTreeNode[]
+}
+
+/** 与后端 REGIONS 种子对齐的行政区划树（Mock 四级联动） */
+export const REGION_TREE: RegionTreeNode[] = [
+  {
+    id: 'r-zhejiang',
+    name: '浙江省',
+    level: 'PROVINCE',
+    code: '330000',
+    children: [
+      {
+        id: 'r-hangzhou',
+        name: '杭州市',
+        level: 'CITY',
+        code: '330100',
+        children: [
+          {
+            id: 'r-xihu',
+            name: '西湖区',
+            level: 'DISTRICT',
+            code: '330106',
+            children: [
+              { id: 'r-wenxin', name: '文新街道', level: 'STREET', code: '330106001' },
+              { id: 'r-xixi', name: '西溪街道', level: 'STREET', code: '330106002' },
+              { id: 'r-cuiyuan', name: '翠苑街道', level: 'STREET', code: '330106003' },
+            ],
+          },
+          {
+            id: 'r-shangcheng',
+            name: '上城区',
+            level: 'DISTRICT',
+            code: '330102',
+            children: [
+              { id: 'r-hubin', name: '湖滨街道', level: 'STREET', code: '330102001' },
+            ],
+          },
+          {
+            id: 'r-gongshu',
+            name: '拱墅区',
+            level: 'DISTRICT',
+            code: '330105',
+            children: [
+              { id: 'r-xiaohe', name: '小河街道', level: 'STREET', code: '330105001' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]
+
+const WENXIN_REGION = {
+  province: '浙江省',
+  city: '杭州市',
+  district: '西湖区',
+  street: '文新街道',
+  regionPath: '浙江省 杭州市 西湖区 文新街道',
+  regionId: 'r-xihu',
+  streetId: 'r-wenxin',
+}
+
+const XIXI_REGION = {
+  province: '浙江省',
+  city: '杭州市',
+  district: '西湖区',
+  street: '西溪街道',
+  regionPath: '浙江省 杭州市 西湖区 西溪街道',
+  regionId: 'r-xihu',
+  streetId: 'r-xixi',
+}
+
+const HUBIN_REGION = {
+  province: '浙江省',
+  city: '杭州市',
+  district: '上城区',
+  street: '湖滨街道',
+  regionPath: '浙江省 杭州市 上城区 湖滨街道',
+  regionId: 'r-shangcheng',
+  streetId: 'r-hubin',
+}
+
 export const COMMUNITIES: CommunityBinding[] = [
   {
     id: 'c1',
@@ -1418,6 +1502,7 @@ export const COMMUNITIES: CommunityBinding[] = [
     helpCount: 24,
     distance: '当前位置',
     address: '云杉路 88 号',
+    ...WENXIN_REGION,
   },
   {
     id: 'c2',
@@ -1430,6 +1515,7 @@ export const COMMUNITIES: CommunityBinding[] = [
     helpCount: 16,
     distance: '约 1.2km',
     address: '梧桐路 16 号',
+    ...WENXIN_REGION,
   },
 ]
 
@@ -1444,6 +1530,7 @@ export const NEARBY_COMMUNITIES: CommunityBinding[] = [
     helpCount: 16,
     distance: '约 1.2km',
     address: '梧桐路 16 号',
+    ...WENXIN_REGION,
   },
   {
     id: 'c3',
@@ -1455,6 +1542,7 @@ export const NEARBY_COMMUNITIES: CommunityBinding[] = [
     helpCount: 31,
     distance: '约 1.8km',
     address: '悦府路 9 号',
+    ...XIXI_REGION,
   },
   {
     id: 'c4',
@@ -1466,6 +1554,7 @@ export const NEARBY_COMMUNITIES: CommunityBinding[] = [
     helpCount: 12,
     distance: '约 2.4km',
     address: '云栖街 26 号',
+    ...XIXI_REGION,
   },
   {
     id: 'c5',
@@ -1477,6 +1566,7 @@ export const NEARBY_COMMUNITIES: CommunityBinding[] = [
     helpCount: 8,
     distance: '约 3.6km',
     address: '湖畔路 1 号',
+    ...HUBIN_REGION,
   },
 ]
 

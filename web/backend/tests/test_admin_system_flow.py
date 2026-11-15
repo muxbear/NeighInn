@@ -21,19 +21,36 @@ from tests.conftest import (
 )
 
 
+async def _admin_region_children(client, parent_id: int | None = None) -> list[dict]:
+    url = (f"{ADMIN_BASE}/regions/roots" if parent_id is None
+           else f"{ADMIN_BASE}/regions/{parent_id}/children")
+    resp = await client.get(url, headers=admin_headers(client))
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
 @pytest.mark.asyncio
 async def test_community_crud_and_status(client):
-    """W04-01：社区新增（坐标必填）/编辑/停用；停用后移动端不可见。"""
+    """W04-01：社区新增（区县必填、经纬度选填）/编辑/停用；停用后移动端不可见。"""
     await admin_login(client)
 
-    # 坐标必填（SRS 8.2 数据基础）
+    # 区县必填（经纬度已改为选填）
     bad = await client.post(f"{ADMIN_BASE}/communities",
                             json={"name": "测试社区"}, headers=admin_headers(client))
     assert bad.status_code == 400
 
+    provinces = await _admin_region_children(client)
+    zhejiang = next(node for node in provinces if node["name"] == "浙江省")
+    hangzhou = (await _admin_region_children(client, int(zhejiang["id"])))[0]
+    xihu = next(node for node in await _admin_region_children(client, int(hangzhou["id"]))
+                if node["name"] == "西湖区")
+    wenxin = next(node for node in await _admin_region_children(client, int(xihu["id"]))
+                  if node["name"] == "文新街道")
+
     create = await client.post(f"{ADMIN_BASE}/communities", json={
         "name": "银杏湾社区", "type": "商品房社区", "address": "文新街道银杏湾",
-        "longitude": 120.112, "latitude": 30.292, "streetId": 1,
+        "longitude": 120.112, "latitude": 30.292,
+        "regionId": int(xihu["id"]), "streetId": int(wenxin["id"]),
         "households": 1200, "population": 3200}, headers=admin_headers(client))
     assert create.status_code == 200, create.text
     community_id = create.json()["data"]["id"]

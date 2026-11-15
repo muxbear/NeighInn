@@ -1,5 +1,11 @@
 import * as communityApi from '../api/community.api'
-import type { CommunityApplyPayload, CommunityBinding, CommunityVerifyResult } from '../models'
+import type {
+  CommunityApplyPayload,
+  CommunityBinding,
+  CommunitySearchFilter,
+  CommunityVerifyResult,
+  RegionNode,
+} from '../models'
 
 export const communityService = {
   getMine(): Promise<CommunityBinding[]> {
@@ -10,8 +16,20 @@ export const communityService = {
     return communityApi.getNearbyCommunities()
   },
 
-  search(keyword: string): Promise<CommunityBinding[]> {
-    return communityApi.searchCommunities(keyword)
+  search(filter: string | CommunitySearchFilter): Promise<CommunityBinding[]> {
+    return communityApi.searchCommunities(filter)
+  },
+
+  getByRegion(regionId: string): Promise<CommunityBinding[]> {
+    return communityApi.searchCommunities({ regionId })
+  },
+
+  getByStreet(streetId: string): Promise<CommunityBinding[]> {
+    return communityApi.searchCommunities({ streetId })
+  },
+
+  getRegionChildren(parentId = ''): Promise<RegionNode[]> {
+    return communityApi.getRegionChildren(parentId)
   },
 
   verify(id: string, payload: CommunityApplyPayload): Promise<CommunityVerifyResult> {

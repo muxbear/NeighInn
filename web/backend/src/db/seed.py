@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
+from pathlib import Path
 
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import hash_password
@@ -33,18 +35,16 @@ from src.db.models import (
 
 # ---------------------------------------------------------------- 行政区划
 
+# 全国 31 个省级行政区；浙江省保留既有夹具编码，北京市与陕西省下钻到街道。
+# 数据源：modood/Administrative-divisions-of-China（dist/pcas-code.json，2023-09-13）。
+REGION_DATA_PATH = Path(__file__).with_name("data") / "regions.json"
+with REGION_DATA_PATH.open(encoding="utf-8") as _region_file:
+    _REGION_ITEMS = json.load(_region_file)
+
 REGIONS = [
     # (name, level, code, parent_code, sort)
-    ("浙江省", "PROVINCE", "330000", None, 0),
-    ("杭州市", "CITY", "330100", "330000", 1),
-    ("西湖区", "DISTRICT", "330106", "330100", 1),
-    ("上城区", "DISTRICT", "330102", "330100", 2),
-    ("拱墅区", "DISTRICT", "330105", "330100", 3),
-    ("文新街道", "STREET", "330106001", "330106", 1),
-    ("西溪街道", "STREET", "330106002", "330106", 2),
-    ("翠苑街道", "STREET", "330106003", "330106", 3),
-    ("湖滨街道", "STREET", "330102001", "330102", 1),
-    ("小河街道", "STREET", "330105001", "330105", 1),
+    (item["name"], item["level"], item["code"], item["parentCode"], item["sort"])
+    for item in _REGION_ITEMS
 ]
 
 # 与移动端 Mock（mobile/config/mock/data.ts）对齐的小区夹具。
@@ -246,20 +246,108 @@ PARAMETER_TREE: dict[str, list[tuple[str, str, str]]] = {
 HOT_KEYWORDS = ["儿童椅", "婴儿床", "绘本", "露营", "戴森", "免费领取"]
 
 
+def _parent_code_for(level: str, code: str) -> str | None:
+    """按国标区划编码规则推导上级编码（省 2 位 / 市 4 位 / 区县 6 位）。"""
+    if len(code) < 6:
+        return None
+    if level == "CITY":
+        return f"{code[:2]}0000"
+    if level == "DISTRICT":
+        return f"{code[:4]}00"
+    if level == "STREET":
+        return code[:6]
+    return None
+
+
+async def _regions_need_sync(session: AsyncSession) -> bool:
+    """用轻量计数判断是否需同步：避免每次启动拉取 1800+ 行区划。"""
+    total = await session.scalar(select(func.count()).select_from(Region)) or 0
+    if total < len(REGIONS):
+        return True
+    sentinel = ("110101001", "610102001", "330106001")
+    found = await session.scalar(
+        select(func.count()).select_from(Region).where(Region.code.in_(sentinel))) or 0
+    if found != len(sentinel):
+        return True
+    broken_parents = await session.scalar(
+        select(func.count()).select_from(Region)
+        .where(Region.level != "PROVINCE", Region.parent_id.is_(None))) or 0
+    if broken_parents:
+        return True
+    missing_binding = await session.scalar(
+        select(func.count()).select_from(Community)
+        .where(Community.street_id.is_not(None), Community.region_id.is_(None))) or 0
+    return bool(missing_binding)
+
+
+async def _sync_regions(session: AsyncSession) -> dict[str, Region]:
+    """按 REGIONS 幂等同步区划：补齐缺失节点并校正父级/排序，不删除管理员新增区划。"""
+    rows = list((await session.execute(select(Region))).scalars().all())
+    by_code = {row.code: row for row in rows}
+    # 按层级批量写入：每层 flush 一次，父节点先取得主键，避免 1800+ 次逐条往返。
+    for level in ("PROVINCE", "CITY", "DISTRICT", "STREET"):
+        for name, item_level, code, parent_code, sort in REGIONS:
+            if item_level != level:
+                continue
+            parent = by_code.get(parent_code) if parent_code else None
+            desired_parent_id = parent.id if parent else None
+            existing = by_code.get(code)
+            if existing is None:
+                region = Region(name=name, level=level, code=code,
+                                parent_id=desired_parent_id, sort=sort)
+                session.add(region)
+                by_code[code] = region
+                continue
+            if (existing.name != name or existing.level != level
+                    or existing.parent_id != desired_parent_id or existing.sort != sort):
+                existing.name = name
+                existing.level = level
+                existing.parent_id = desired_parent_id
+                existing.sort = sort
+        await session.flush()
+    return by_code
+
+
+async def _repair_region_links(session: AsyncSession) -> None:
+    """修复历史种子数据的区划父子关系（早期版本在 flush 前取 parent.id，导致全为 NULL）。"""
+    rows = list((await session.execute(select(Region))).scalars().all())
+    by_code = {row.code: row for row in rows}
+    changed = False
+    for row in rows:
+        if row.level == "PROVINCE" or row.parent_id:
+            continue
+        parent_code = _parent_code_for(row.level, row.code)
+        parent = by_code.get(parent_code) if parent_code else None
+        if parent is not None and parent.id != row.id:
+            row.parent_id = parent.id
+            changed = True
+    if changed:
+        await session.flush()
+    street_by_id = {row.id: row for row in rows if row.level == "STREET"}
+    communities = list((await session.execute(
+        select(Community).where(Community.street_id.is_not(None))
+    )).scalars().all())
+    for community in communities:
+        street = street_by_id.get(community.street_id)
+        if street is not None and street.parent_id and community.region_id != street.parent_id:
+            community.region_id = street.parent_id
+            changed = True
+    if changed:
+        await session.commit()
+
+
 async def seed_if_empty(session: AsyncSession) -> dict[str, int] | None:
     """初始化种子；已初始化返回 None，本次写入返回各领域数量摘要。"""
     if await session.scalar(select(AdminUser.id).limit(1)):
+        # 已初始化：仅当区划缺失/父子关系或小区绑定未修复时才同步，避免拖慢每次启动。
+        if await _regions_need_sync(session):
+            await _sync_regions(session)
+            await _repair_region_links(session)
+            await session.commit()
         return None
 
     # 区划
-    region_by_code: dict[str, Region] = {}
-    for name, level, code, parent_code, sort in REGIONS:
-        parent = region_by_code.get(parent_code) if parent_code else None
-        region = Region(name=name, level=level, code=code,
-                        parent_id=parent.id if parent else None, sort=sort)
-        session.add(region)
-        region_by_code[code] = region
-    await session.flush()
+    region_by_code = await _sync_regions(session)
 
     # 社区
     for i, (name, code, ctype, street_code, address, lng, lat, households, population) in enumerate(COMMUNITIES):

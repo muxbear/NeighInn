@@ -10,10 +10,10 @@
         <ni-tag v-else-if="community.status === '审核中'" type="neutral" size="xs">审核中</ni-tag>
       </view>
       <text class="community-card__meta" :lines="1">
-        {{ community.address || '小区地址' }} · {{ community.distance || '附近' }}
+        {{ formatCommunityRegion(community) || '行政区划待补充' }} · {{ community.address || '小区地址' }}
       </text>
       <text class="community-card__stats">
-        {{ community.memberCount }} 位邻居 · {{ community.itemCount }} 件在售
+        {{ community.memberCount }} 位邻居 · {{ community.itemCount }} 件在售 · {{ community.distance || '附近' }}
       </text>
     </view>
     <view
@@ -29,6 +29,7 @@
 
 <script setup lang="ts">
 import type { CommunityBinding } from '../../models'
+import { formatCommunityRegion } from '../../utils/formatter'
 
 const props = defineProps<{ community: CommunityBinding }>()
 const emit = defineEmits<{

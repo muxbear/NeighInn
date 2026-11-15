@@ -76,6 +76,7 @@
             </view>
             <view class="proof__community-copy">
               <text class="proof__community-name">{{ selectedCommunity?.name || '请选择小区' }}</text>
+              <text class="proof__community-region">{{ selectedRegionText || '按省份/直辖市、地市、区/县、街道选择' }}</text>
               <text class="proof__community-address">{{ selectedCommunity?.address || '选择你居住的小区' }}</text>
             </view>
             <ni-icon name="chevron" :size="15" state="tertiary" />
@@ -129,6 +130,133 @@
       </template>
     </view>
 
+    <ni-sheet v-model:visible="pickerVisible" title="选择认证小区" height="80vh">
+      <view class="picker">
+        <view class="picker__head">
+          <text class="picker__title">{{ pickerLevelTitle }}</text>
+          <text class="picker__hint">{{ pickerLevelHint }}</text>
+        </view>
+
+        <view class="picker__search">
+          <ni-icon name="search" :size="15" state="tertiary" />
+          <input
+            class="picker__search-input"
+            :value="pickerKeyword"
+            placeholder="搜索小区名称或地址"
+            placeholder-class="picker__search-placeholder"
+            confirm-type="search"
+            @input="updatePickerKeyword"
+            @confirm="runPickerSearch"
+          />
+          <text v-if="pickerKeyword || pickerSearchMode" class="picker__search-clear" @click="clearPickerSearch">取消</text>
+          <text class="picker__search-action" @click="runPickerSearch">搜索</text>
+        </view>
+
+        <view v-if="pickerCrumbs.length" class="picker__crumbs">
+          <view
+            v-for="crumb in pickerCrumbs"
+            :key="crumb.level"
+            class="picker__crumb"
+            @click="jumpRegionCrumb(crumb.index)"
+          >
+            <text class="picker__crumb-text">{{ crumb.label }}</text>
+            <ni-icon name="chevron" :size="9" state="tertiary" />
+          </view>
+        </view>
+
+        <view v-if="pickerLoading || pickerSearching" class="picker__loading">
+          <ni-loading :size="20" :text="pickerSearching ? '正在搜索小区' : '正在加载区划'" />
+        </view>
+
+        <template v-else-if="pickerSearchMode || pickerLevel === 'community'">
+          <view v-if="!pickerSearchMode && pickerLevel === 'community'" class="picker__filter">
+            <view class="picker__filter-copy">
+              <text class="picker__filter-label">所在街道</text>
+              <text class="picker__filter-value">{{ pickerSelectedStreetName || '全部街道（可选）' }}</text>
+            </view>
+            <text class="picker__filter-action" @click="showStreetOptions">
+              {{ pickerSelectedStreetName ? '更换' : '按街道筛选' }}
+            </text>
+          </view>
+
+          <view v-if="regionCommunities.length" class="picker__communities">
+            <view
+              v-for="community in regionCommunities"
+              :key="community.id"
+              class="picker__community"
+              @click="chooseRegionCommunity(community)"
+            >
+              <view class="picker__community-icon">
+                <ni-icon name="home" :size="18" state="active" />
+              </view>
+              <view class="picker__community-copy">
+                <text class="picker__community-name">{{ community.name }}</text>
+                <text class="picker__community-region">{{ formatCommunityRegion(community) || '行政区划待补充' }}</text>
+                <text class="picker__community-address">{{ community.address || '小区地址待补充' }}</text>
+              </view>
+              <ni-icon name="chevron" :size="14" state="tertiary" />
+            </view>
+          </view>
+          <ni-empty
+            v-else
+            icon="pin"
+            :title="pickerEmptyTitle"
+            :desc="pickerEmptyDesc"
+          />
+        </template>
+
+        <template v-else-if="pickerLevel === 'street'">
+          <view class="picker__all-streets" @click="showAllDistrictCommunities">
+            <view class="picker__all-streets-icon">
+              <ni-icon name="home" :size="18" state="active" />
+            </view>
+            <view class="picker__all-streets-copy">
+              <text class="picker__all-streets-title">全部街道</text>
+              <text class="picker__all-streets-desc">不限定街道，查看该区县所有小区</text>
+            </view>
+            <ni-icon name="chevron" :size="14" state="tertiary" />
+          </view>
+
+          <view v-if="regionOptions.length" class="picker__options">
+            <view
+              v-for="node in regionOptions"
+              :key="node.id"
+              class="picker__option"
+              @click="chooseRegionNode(node)"
+            >
+              <text class="picker__option-name">{{ node.name }}</text>
+              <ni-icon name="chevron" :size="14" state="tertiary" />
+            </view>
+          </view>
+          <ni-empty
+            v-else
+            icon="pin"
+            :title="pickerEmptyTitle"
+            :desc="pickerEmptyDesc"
+          />
+        </template>
+
+        <view v-else-if="regionOptions.length" class="picker__options">
+          <view
+            v-for="node in regionOptions"
+            :key="node.id"
+            class="picker__option"
+            @click="chooseRegionNode(node)"
+          >
+            <text class="picker__option-name">{{ node.name }}</text>
+            <ni-icon name="chevron" :size="14" state="tertiary" />
+          </view>
+        </view>
+
+        <ni-empty
+          v-else
+          icon="pin"
+          :title="pickerEmptyTitle"
+          :desc="pickerEmptyDesc"
+        />
+      </view>
+    </ni-sheet>
+
     <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
   </scroll-view>
 </template>
@@ -141,8 +269,10 @@ import { useCommunityStore } from '../../stores/community.store'
 import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
 import { useUpload } from '../../composables/useUpload'
+import { useCommunityRegionPicker } from '../../composables/useCommunityRegionPicker'
 import { authService } from '../../services/auth.service'
 import { compressImage } from '../../utils/image'
+import { formatCommunityRegion } from '../../utils/formatter'
 import { IDENTITY_OPTIONS } from '../../config/constants'
 
 const communityStore = useCommunityStore()
@@ -159,6 +289,36 @@ const ownerCurrentStatus = ref<CertificationState>('UNVERIFIED')
 const realnameStatus = ref<CertificationState>('UNVERIFIED')
 const rejectReason = ref('')
 const identities = IDENTITY_OPTIONS
+
+const {
+  visible: pickerVisible,
+  loading: pickerLoading,
+  searching: pickerSearching,
+  level: pickerLevel,
+  options: regionOptions,
+  communities: regionCommunities,
+  keyword: pickerKeyword,
+  searchMode: pickerSearchMode,
+  selectedStreetName: pickerSelectedStreetName,
+  crumbs: pickerCrumbs,
+  levelTitle: pickerLevelTitle,
+  levelHint: pickerLevelHint,
+  emptyTitle: pickerEmptyTitle,
+  emptyDesc: pickerEmptyDesc,
+  open: openRegionPicker,
+  updateKeyword: updatePickerKeyword,
+  runSearch: runPickerSearch,
+  clearSearch: clearPickerSearch,
+  chooseRegion: chooseRegionNode,
+  chooseCommunity: chooseRegionCommunity,
+  showStreetOptions,
+  showAllDistrictCommunities,
+  jumpTo: jumpRegionCrumb,
+} = useCommunityRegionPicker((community) => {
+  selectedCommunity.value = community
+})
+
+const selectedRegionText = computed(() => formatCommunityRegion(selectedCommunity.value))
 
 const isOwnerPending = computed(() => ownerCurrentStatus.value === 'PENDING')
 const isOwnerFrozen = computed(() => ownerCurrentStatus.value === 'FROZEN')
@@ -201,17 +361,7 @@ onLoad(async () => {
 })
 
 function chooseCommunity(): void {
-  const source = [...communityStore.bindings, ...communityStore.nearby]
-  if (!source.length) {
-    showToast('暂未获取到小区列表', 'alert')
-    return
-  }
-  uni.showActionSheet({
-    itemList: source.map((item) => item.name),
-    success: (res: any) => {
-      selectedCommunity.value = source[Number(res.tapIndex)] ?? source[0]
-    },
-  })
+  openRegionPicker()
 }
 
 async function submit(): Promise<void> {
@@ -455,6 +605,11 @@ function goBack(): void {
   font-weight: 600;
   color: $ni-color-text-primary;
 }
+.proof__community-region {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-secondary;
+}
 .proof__community-address {
   margin-top: 2px;
   font-size: 7px;
@@ -519,5 +674,198 @@ function goBack(): void {
   font-size: 7px;
   line-height: 13px;
   color: #9a7c45;
+}
+.picker {
+  padding-bottom: 12px;
+}
+.picker__head {
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.picker__title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.picker__hint {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.picker__crumbs {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-top: 1px solid #f5efe9;
+  border-bottom: 1px solid #f5efe9;
+}
+.picker__crumb {
+  flex-direction: row;
+  align-items: center;
+  height: 26px;
+  margin-right: 4px;
+  margin-bottom: 2px;
+  padding-left: 9px;
+  padding-right: 7px;
+  border-radius: 13px;
+  background-color: $ni-color-primary-bg;
+}
+.picker__crumb-text {
+  margin-right: 2px;
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.picker__loading {
+  padding-top: 40px;
+  padding-bottom: 40px;
+}
+.picker__options {
+  margin-top: 4px;
+}
+.picker__option {
+  min-height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  padding-right: 8px;
+  border-bottom: 1px solid #f6f1ec;
+}
+.picker__option-name {
+  font-size: $ni-font-12;
+  color: $ni-color-text-primary;
+}
+.picker__communities {
+  margin-top: 4px;
+}
+.picker__community {
+  min-height: 68px;
+  flex-direction: row;
+  align-items: center;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f6f1ec;
+}
+.picker__community-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+  justify-content: center;
+}
+.picker__community-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.picker__community-name {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.picker__community-region {
+  margin-top: 2px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-secondary;
+}
+.picker__community-address {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.picker__search {
+  height: 40px;
+  margin-top: 2px;
+  margin-bottom: 6px;
+  padding-left: 10px;
+  padding-right: 8px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 12px;
+  background-color: $ni-color-fill-1;
+}
+.picker__search-input {
+  flex: 1;
+  height: 100%;
+  margin-left: 6px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-primary;
+}
+.picker__search-placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-11;
+}
+.picker__search-action {
+  margin-left: 8px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.picker__search-clear {
+  margin-left: 8px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-tertiary;
+}
+.picker__filter {
+  margin-top: 8px;
+  margin-bottom: 4px;
+  padding: 9px 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 12px;
+  background-color: #faf8f6;
+  border: 1px solid #f0ece8;
+}
+.picker__filter-copy {
+  flex: 1;
+}
+.picker__filter-label {
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.picker__filter-value {
+  margin-top: 2px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.picker__filter-action {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.picker__all-streets {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding: 10px 11px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 13px;
+  background-color: $ni-color-primary-bg;
+}
+.picker__all-streets-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+}
+.picker__all-streets-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.picker__all-streets-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.picker__all-streets-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
 }
 </style>

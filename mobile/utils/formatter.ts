@@ -19,6 +19,21 @@ export function formatAmount(price: number | string, decimals = 2): string {
   return safe.toFixed(decimals)
 }
 
+/** 小区行政区划展示：优先 regionPath，其次按省/市/区/街道拼接 */
+export function formatCommunityRegion(community: {
+  regionPath?: string
+  province?: string
+  city?: string
+  district?: string
+  street?: string
+} | null | undefined): string {
+  if (!community) return ''
+  if (community.regionPath) return community.regionPath
+  return [community.province, community.city, community.district, community.street]
+    .filter((name) => Boolean(name))
+    .join(' ')
+}
+
 /** 米 → 10m 级距离文案；10m 内显示“约 8m”，1km 以上保留 1 位小数 */
 export function formatDistance(meters: number): string {
   if (!Number.isFinite(meters) || meters < 0) return '距离未知'

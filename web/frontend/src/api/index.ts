@@ -40,11 +40,111 @@ export const dashboardApi = {
   activities: async (communityId?: number, limit = 4) => (await http.get<any, any>('/dashboard/activities', { params: { communityId, limit } }) as any[]).map(normalizeActivity),
 }
 
+// 区划为低频变更数据：省级节点缓存到 sessionStorage，子级缓存在内存；
+// 后端同时按父节点做 10 分钟进程内缓存，页面按需分级加载。
+const REGION_ROOTS_CACHE_KEY = 'ni_admin_region_roots_v2'
+const REGION_CHILDREN_CACHE_PREFIX = 'ni_admin_region_children_v2_'
+const REGION_CACHE_TTL_MS = 12 * 60 * 60 * 1000
+let regionRootsMemory: any[] | null = null
+const regionChildrenMemory = new Map<string, any[]>()
+
+function readCachedRegionRoots(): any[] | null {
+  try {
+    const raw = sessionStorage.getItem(REGION_ROOTS_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.at || !Array.isArray(parsed.roots) || Date.now() - parsed.at > REGION_CACHE_TTL_MS) {
+      sessionStorage.removeItem(REGION_ROOTS_CACHE_KEY)
+      return null
+    }
+    return parsed.roots
+  } catch {
+    return null
+  }
+}
+
+function writeCachedRegionRoots(roots: any[]): void {
+  try {
+    sessionStorage.setItem(REGION_ROOTS_CACHE_KEY, JSON.stringify({ at: Date.now(), roots }))
+  } catch {
+    // sessionStorage 不可用或超出配额时仅使用内存缓存
+  }
+}
+
+function readCachedRegionChildren(id: string): any[] | null {
+  try {
+    const raw = sessionStorage.getItem(`${REGION_CHILDREN_CACHE_PREFIX}${id}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.at || !Array.isArray(parsed.children) || Date.now() - parsed.at > REGION_CACHE_TTL_MS) {
+      sessionStorage.removeItem(`${REGION_CHILDREN_CACHE_PREFIX}${id}`)
+      return null
+    }
+    return parsed.children
+  } catch {
+    return null
+  }
+}
+
+function writeCachedRegionChildren(id: string, children: any[]): void {
+  try {
+    sessionStorage.setItem(`${REGION_CHILDREN_CACHE_PREFIX}${id}`,
+      JSON.stringify({ at: Date.now(), children }))
+  } catch {
+    // 配额不足时仅使用内存缓存
+  }
+}
+
 export const communityApi = {
   list: async (params: Dict = {}) => mapItems(await http.get<any, any>('/communities', { params }), normalizeCommunity),
   search: (q: string) => http.get<any, any>('/communities/search', { params: { q } }),
-  detail: (id: number) => http.get<any, any>(`/communities/${id}`),
+  detail: (id: number | string) => http.get<any, any>(`/communities/${id}`),
+  create: (payload: Dict) => http.post<any, any>('/communities', payload),
+  update: (id: number | string, payload: Dict) => http.put<any, any>(`/communities/${id}`, payload),
+  remove: (id: number | string) => http.delete<any, any>(`/communities/${id}`),
+  importRows: (payload: Dict) => http.post<any, any>('/communities/import', payload),
   regionTree: () => http.get<any, any>('/regions/tree'),
+  regionRoots: async (): Promise<any[]> => {
+    if (regionRootsMemory) return regionRootsMemory
+    const cached = readCachedRegionRoots()
+    if (cached) {
+      regionRootsMemory = cached
+      return cached
+    }
+    const roots = await http.get<any, any>('/regions/roots')
+    regionRootsMemory = roots
+    writeCachedRegionRoots(roots)
+    return roots
+  },
+  regionChildren: async (id: number | string): Promise<any[]> => {
+    const key = String(id)
+    const cached = regionChildrenMemory.get(key)
+    if (cached) return cached
+    const stored = readCachedRegionChildren(key)
+    if (stored) {
+      regionChildrenMemory.set(key, stored)
+      return stored
+    }
+    const children = await http.get<any, any>(`/regions/${id}/children`)
+    regionChildrenMemory.set(key, children)
+    writeCachedRegionChildren(key, children)
+    return children
+  },
+  clearRegionCache: (): void => {
+    regionRootsMemory = null
+    regionChildrenMemory.clear()
+    try {
+      sessionStorage.removeItem(REGION_ROOTS_CACHE_KEY)
+      const keys: string[] = []
+      for (let index = 0; index < sessionStorage.length; index += 1) {
+        const key = sessionStorage.key(index)
+        if (key?.startsWith(REGION_CHILDREN_CACHE_PREFIX)) keys.push(key)
+      }
+      keys.forEach((key) => sessionStorage.removeItem(key))
+    } catch {
+      // ignore
+    }
+  },
 }
 
 export const residentApi = {

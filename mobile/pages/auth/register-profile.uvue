@@ -48,7 +48,7 @@
           icon="home"
           icon-state="green"
           :title="selectedCommunity?.name || '选择你所在的小区'"
-          :desc="selectedCommunity?.address || '仅用于业主认证预选，认证通过后正式绑定'"
+          :desc="selectedCommunityDesc"
           right-text="选择"
           @tap="chooseCommunity"
         />
@@ -142,6 +142,7 @@ import { useToast } from '../../composables/useToast'
 import { profileService } from '../../services/profile.service'
 import { STORAGE_KEYS } from '../../config/constants'
 import { setStorage } from '../../utils/storage'
+import { formatCommunityRegion } from '../../utils/formatter'
 
 const user = useUserStore()
 const communityStore = useCommunityStore()
@@ -182,6 +183,13 @@ const showWelcome = computed(() => welcome.value || user.onboardingStatus === 'P
 const avatarPreview = computed(() =>
   avatarPreset.value ? `/static/avatars/${avatarPreset.value}.svg` : user.avatarSrc,
 )
+const selectedCommunityDesc = computed(() => {
+  const community = selectedCommunity.value
+  if (!community) return '仅用于业主认证预选，认证通过后正式绑定'
+  const region = formatCommunityRegion(community)
+  const address = community.address || '认证通过后正式绑定'
+  return region ? `${region} · ${address}` : address
+})
 
 onLoad(async () => {
   if (!user.isLoggedIn) {

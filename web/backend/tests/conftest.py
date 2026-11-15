@@ -21,6 +21,7 @@ os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["LOG_TO_FILE"] = "false"
 os.environ["ACCESS_LOG"] = "false"
 
+from src.api.admin.communities import clear_region_cache
 from src.db.base import Base, get_db
 from src.db.seed import seed_if_empty
 from src.main import app
@@ -28,6 +29,7 @@ from src.main import app
 
 @pytest.fixture()
 async def engine():
+    clear_region_cache()
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},

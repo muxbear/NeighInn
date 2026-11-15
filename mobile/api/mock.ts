@@ -20,6 +20,7 @@ import type {
   LoginResult,
   Order,
   PageResult,
+  RegionNode,
   ReviewPayload,
   ServicePost,
   UserProfile,
@@ -46,6 +47,7 @@ import {
   NEARBY_COMMUNITIES,
   NOTIFICATIONS,
   ORDERS,
+  REGION_TREE,
   SEARCH_HISTORY,
   SELLERS,
   SERVICE_POSTS,
@@ -54,6 +56,7 @@ import {
   WALLET_TRANSACTIONS,
   createAuditProgress,
 } from '../config/mock/data'
+import type { RegionTreeNode } from '../config/mock/data'
 import { env } from '../config/env'
 import { ApiError } from './errors'
 import { formatDateTime } from '../utils/formatter'
@@ -162,6 +165,21 @@ function pageResult<T>(list: T[], query: Record<string, string>): PageResult<T> 
     total: list.length,
     hasMore: start + slice.length < list.length,
   }
+}
+
+function toRegionNode(node: RegionTreeNode): RegionNode {
+  return { id: node.id, name: node.name, level: node.level, code: node.code }
+}
+
+function regionChildren(parentId: string): RegionNode[] {
+  if (!parentId) return REGION_TREE.map(toRegionNode)
+  const stack: RegionTreeNode[] = [...REGION_TREE]
+  while (stack.length) {
+    const node = stack.pop() as RegionTreeNode
+    if (node.id === parentId) return (node.children ?? []).map(toRegionNode)
+    if (node.children) stack.push(...node.children)
+  }
+  return []
 }
 
 function findItem(id: string): Item {
@@ -748,7 +766,10 @@ async function route(
     return clone(broadcast)
   }
 
-  // ---------------- 小区 ----------------
+  // ---------------- 行政区划与小区 ----------------
+  if (path === '/regions/children' && method === 'GET') {
+    return clone(regionChildren(query.parentId ?? ''))
+  }
   if (path === '/communities/mine' && method === 'GET') {
     return clone(state.communities)
   }
@@ -757,7 +778,21 @@ async function route(
   }
   if (path === '/communities/search' && method === 'GET') {
     const keyword = (query.keyword ?? '').trim()
-    const source = [...state.nearbyCommunities, ...state.communities]
+    const cityId = (query.cityId ?? '').trim()
+    const streetId = (query.streetId ?? '').trim()
+    const regionId = (query.regionId ?? '').trim()
+    const seen = new Set<string>()
+    let source = [...state.nearbyCommunities, ...state.communities].filter((item) => {
+      if (seen.has(item.id)) return false
+      seen.add(item.id)
+      return true
+    })
+    if (cityId) {
+      const districtIds = new Set(regionChildren(cityId).map((node) => node.id))
+      source = source.filter((item) => Boolean(item.regionId && districtIds.has(item.regionId)))
+    }
+    if (streetId) source = source.filter((item) => item.streetId === streetId)
+    if (regionId) source = source.filter((item) => item.regionId === regionId)
     if (!keyword) return clone(source)
     return clone(source.filter((item) => item.name.includes(keyword) || String(item.address ?? '').includes(keyword)))
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatAmount,
+  formatCommunityRegion,
   formatCount,
   formatCountdown,
   formatDays,
@@ -65,5 +66,17 @@ describe('formatter', () => {
     expect(formatDays(60)).toBe('2个月')
     expect(formatDays(730)).toBe('2年')
     expect(formatThousands(2138)).toBe('2,138')
+  })
+
+  it('formats community region path', () => {
+    expect(formatCommunityRegion({ regionPath: '浙江省 杭州市 西湖区 文新街道' }))
+      .toBe('浙江省 杭州市 西湖区 文新街道')
+    expect(formatCommunityRegion({
+      province: '浙江省',
+      city: '杭州市',
+      district: '西湖区',
+      street: '文新街道',
+    })).toBe('浙江省 杭州市 西湖区 文新街道')
+    expect(formatCommunityRegion(null)).toBe('')
   })
 })
