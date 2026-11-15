@@ -10,6 +10,7 @@ export type WsAction =
   | 'MSG_PUSH'
   | 'ORDER_EVENT'
   | 'AUDIT_EVENT'
+  | 'NOTIFY'
   | 'PONG'
 
 export type WsHandler = (action: WsAction | string, payload: any) => void

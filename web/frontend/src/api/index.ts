@@ -14,6 +14,7 @@ import {
   normalizeReport,
   normalizeResident,
   normalizeTask,
+  normalizeTodo,
   normalizeTrend,
   normalizeTxn,
   normalizeWithdrawal,
@@ -34,7 +35,8 @@ export const authApi = {
 export const dashboardApi = {
   summary: async (communityId?: number) => normalizeDashboard(await http.get<any, any>('/dashboard/summary', { params: { communityId } })),
   trend: async (days = 7, communityId?: number) => normalizeTrend(await http.get<any, any>('/dashboard/trend', { params: { days, communityId } })),
-  todos: (communityId?: number) => http.get<any, any>('/dashboard/todos', { params: { communityId } }),
+  todos: async (communityId?: number) =>
+    ((await http.get<any, any>('/dashboard/todos', { params: { communityId } })) as any[]).map(normalizeTodo),
   activities: async (communityId?: number, limit = 4) => (await http.get<any, any>('/dashboard/activities', { params: { communityId, limit } }) as any[]).map(normalizeActivity),
 }
 
@@ -147,6 +149,7 @@ export const disputesApi = {
 export const certificationsApi = {
   list: (params: Dict = {}) => http.get<any, any>('/certifications', { params })
     .then((data: any) => mapItems(data, normalizeCertification)),
+  summary: (params: Dict = {}) => http.get<any, any>('/certifications/summary', { params }),
   detail: (id: number | string) => http.get<any, any>(`/certifications/${id}`),
   approve: (id: number | string) => http.post<any, any>(`/certifications/${id}/approve`, {}),
   reject: (id: number | string, reason: string) => http.post<any, any>(`/certifications/${id}/reject`, { reason }),

@@ -72,7 +72,7 @@
         <ni-icon name="check" :size="42" state="white" />
       </view>
       <text class="regp__welcome-title">注册成功，欢迎加入邻里小栈</text>
-      <text class="regp__welcome-desc">你的邻里账号已创建。完成实名认证与业主证明后，就可以在小区里发布和交换闲置了。</text>
+      <text class="regp__welcome-desc">你的邻里账号已创建。实名认证与住户认证相互独立，完成住户认证即可在小区发布和交换闲置。</text>
 
       <view class="regp__checklist">
         <view class="regp__check-row">
@@ -86,11 +86,11 @@
         </view>
         <view class="regp__check-row">
           <view class="regp__check-icon regp__check-icon--pending">
-            <ni-icon name="clock" :size="14" state="gold" />
+            <ni-icon name="shield" :size="14" state="gold" />
           </view>
           <view class="regp__check-copy">
-            <text class="regp__check-title">实名认证</text>
-            <text class="regp__check-desc">约 1–2 分钟，身份证正反面 + 人脸核验</text>
+            <text class="regp__check-title">实名认证（选做）</text>
+            <text class="regp__check-desc">身份证正反面，可跳过；用于私信与好友</text>
           </view>
         </view>
         <view class="regp__check-row regp__check-row--last">
@@ -98,7 +98,7 @@
             <ni-icon name="home" :size="14" state="gold" />
           </view>
           <view class="regp__check-copy">
-            <text class="regp__check-title">业主证明</text>
+            <text class="regp__check-title">住户认证</text>
             <text class="regp__check-desc">审核不超过 24 小时，通过后绑定小区</text>
           </view>
         </view>
@@ -108,13 +108,16 @@
         <text class="regp__permission-title">你现在可以</text>
         <text class="regp__permission-item">· 浏览本小区与邻近小区的好物</text>
         <text class="regp__permission-item">· 收藏物品、查看浏览足迹</text>
-        <text class="regp__permission-note">完成认证后：发布物品、发起交易、互评；好友与私信需完成实名认证。</text>
+        <text class="regp__permission-note">完成住户认证后：发布物品、发起交易、互评；好友与私信需完成实名认证。</text>
       </view>
 
       <ni-button type="primary" size="xl" block icon="shield" @tap="goRealname">
         去实名认证
       </ni-button>
-      <view class="regp__skip" @click="goHome">
+      <view class="regp__skip" @click="goOwnerProof">
+        <text class="regp__skip-text">跳过实名，直接住户认证</text>
+      </view>
+      <view class="regp__skip regp__skip--secondary" @click="goHome">
         <text class="regp__skip-text">先逛逛，稍后认证</text>
       </view>
     </view>
@@ -137,6 +140,8 @@ import { useUserStore } from '../../stores/user.store'
 import { useCommunityStore } from '../../stores/community.store'
 import { useToast } from '../../composables/useToast'
 import { profileService } from '../../services/profile.service'
+import { STORAGE_KEYS } from '../../config/constants'
+import { setStorage } from '../../utils/storage'
 
 const user = useUserStore()
 const communityStore = useCommunityStore()
@@ -304,8 +309,15 @@ async function goRealname(): Promise<void> {
   uni.navigateTo({ url: '/pages/auth/realname' })
 }
 
+async function goOwnerProof(): Promise<void> {
+  await finishOnboarding()
+  setStorage(STORAGE_KEYS.certGuideDismissedAt, Date.now())
+  uni.redirectTo({ url: '/pages/auth/owner-proof' })
+}
+
 async function goHome(): Promise<void> {
   await finishOnboarding()
+  setStorage(STORAGE_KEYS.certGuideDismissedAt, Date.now())
   uni.switchTab({ url: '/pages/home/index' })
 }
 
@@ -440,6 +452,9 @@ function goBack(): void {
   justify-content: center;
   padding-top: 15px;
   padding-bottom: 8px;
+}
+.regp__skip--secondary {
+  padding-top: 6px;
 }
 .regp__skip-text {
   font-size: $ni-font-11;

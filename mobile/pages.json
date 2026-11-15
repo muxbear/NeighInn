@@ -75,6 +75,13 @@
       }
     },
     {
+      "path": "pages/auth/center",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
       "path": "pages/auth/result",
       "style": {
         "navigationStyle": "custom",

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from src.core.deps import CurrentAdmin, DbSession
+from src.core.permissions import get_permission_codes
 from src.core.responses import not_implemented, ok
 from src.db.models import (
     AuditLog,
@@ -84,14 +85,27 @@ async def summary(admin: CurrentAdmin, db: DbSession,
             "owner": owner_count, "tenant": tenant_count, "family": family_count,
             "total": owner_count + tenant_count + family_count,
         },
-        "todos": await _todos(db),
+        "todos": await _todos(db, admin),
     })
 
 
-async def _todos(db: DbSession) -> list[dict]:
-    pending_certs = int((await db.scalar(
-        select(func.count()).select_from(Certification).where(
-            Certification.status == "PENDING"))) or 0)
+async def _todos(db: DbSession, admin: CurrentAdmin) -> list[dict]:
+    """待办是业务表的实时投影（认证单等），不做单独待办表。
+
+    每个待办带 permission，铃铛与工作台只展示当前管理员有权处理的项。
+    """
+    cert_rows = list((await db.execute(
+        select(Certification.type, func.count(), func.min(Certification.submitted_at))
+        .where(Certification.status == "PENDING")
+        .group_by(Certification.type)
+    )).all())
+    cert_breakdown = {row[0]: int(row[1]) for row in cert_rows}
+    pending_certs = sum(cert_breakdown.values())
+    oldest_cert_at = min((row[2] for row in cert_rows if row[2]), default=None)
+    latest_cert_id = await db.scalar(
+        select(Certification.id).where(Certification.status == "PENDING")
+        .order_by(Certification.submitted_at.desc(), Certification.id.desc()).limit(1))
+
     pending_items = int((await db.scalar(
         select(func.count()).select_from(Item).where(
             Item.status == E.ItemStatus.PENDING_REVIEW))) or 0)
@@ -109,22 +123,47 @@ async def _todos(db: DbSession) -> list[dict]:
     open_help = int((await db.scalar(
         select(func.count()).select_from(HelpRequest).where(
             HelpRequest.status == E.HelpStatus.OPEN))) or 0)
-    return [
-        {"icon": "ClipboardCheck", "color": "blue", "title": "住户认证待审核",
-         "count": pending_certs, "route": "/governance/verification"},
-        {"icon": "ShoppingBag", "color": "orange", "title": "商品待审核",
-         "count": pending_items, "route": "/community-operations/items"},
-        {"icon": "Coffee", "color": "violet", "title": "生活内容待审核",
-         "count": pending_life, "route": "/community-operations/life"},
-        {"icon": "Flag", "color": "red", "title": "举报待处理",
-         "count": open_reports, "route": "/governance/reports"},
-        {"icon": "Gavel", "color": "orange", "title": "纠纷待调解",
-         "count": open_disputes, "route": "/governance/disputes"},
-        {"icon": "Banknote", "color": "green", "title": "提现待审核",
-         "count": pending_withdrawals, "route": "/finance/withdrawals"},
-        {"icon": "HandHeart", "color": "blue", "title": "互助待响应",
-         "count": open_help, "route": "/community-operations/help"},
+
+    cert_desc = (
+        f"实名 {cert_breakdown.get('REALNAME', 0)} 项 · "
+        f"住户认证 {cert_breakdown.get('OWNER_PROOF', 0)} 项"
+        if pending_certs else "暂无待审核认证"
+    )
+    todos = [
+        {"key": "certification", "icon": "ClipboardCheck", "color": "blue",
+         "title": "住户认证待审核", "description": cert_desc,
+         "count": pending_certs, "route": "/governance/verification",
+         "permission": "community:resident:audit",
+         "breakdown": cert_breakdown,
+         "latestCertId": str(latest_cert_id) if latest_cert_id else "",
+         "oldestPendingAt": int(oldest_cert_at.timestamp() * 1000) if oldest_cert_at else 0},
+        {"key": "item", "icon": "ShoppingBag", "color": "orange", "title": "商品待审核",
+         "description": "AI 质检后待人工复核", "count": pending_items,
+         "route": "/community-operations/items", "permission": "community:item:review",
+         "oldestPendingAt": 0},
+        {"key": "life", "icon": "Coffee", "color": "violet", "title": "生活内容待审核",
+         "description": "社区生活内容待复核", "count": pending_life,
+         "route": "/community-operations/life", "permission": "community:life:review",
+         "oldestPendingAt": 0},
+        {"key": "report", "icon": "Flag", "color": "red", "title": "举报待处理",
+         "description": "邻里举报待核实", "count": open_reports,
+         "route": "/governance/reports", "permission": "governance:report:handle",
+         "oldestPendingAt": 0},
+        {"key": "dispute", "icon": "Gavel", "color": "orange", "title": "纠纷待调解",
+         "description": "交易纠纷待介入", "count": open_disputes,
+         "route": "/governance/disputes", "permission": "governance:dispute:mediate",
+         "oldestPendingAt": 0},
+        {"key": "withdrawal", "icon": "Banknote", "color": "green", "title": "提现待审核",
+         "description": "业主提现申请待复核", "count": pending_withdrawals,
+         "route": "/finance/withdrawals", "permission": "finance:withdrawal:review",
+         "oldestPendingAt": 0},
+        {"key": "help", "icon": "HandHeart", "color": "blue", "title": "互助待响应",
+         "description": "邻里互助待撮合", "count": open_help,
+         "route": "/community-operations/help", "permission": "community:help:match",
+         "oldestPendingAt": 0},
     ]
+    codes = set(await get_permission_codes(db, admin))
+    return [todo for todo in todos if todo["permission"] in codes]
 
 
 @router.get("/dashboard/trend")
@@ -147,7 +186,7 @@ async def trend(admin: CurrentAdmin, db: DbSession, days: int = Query(default=7)
 
 @router.get("/dashboard/todos")
 async def todos(admin: CurrentAdmin, db: DbSession):
-    return ok(await _todos(db))
+    return ok(await _todos(db, admin))
 
 
 @router.get("/dashboard/activities")

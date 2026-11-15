@@ -42,6 +42,15 @@
       </view>
     </view>
 
+    <certification-guide-card
+      v-if="showCertificationGuide"
+      :realname-status="userStore.realnameStatus"
+      :owner-status="userStore.ownerStatus"
+      :auth-status="userStore.profile?.authStatus || 'LOGGED_IN_UNVERIFIED'"
+      @open="goCertificationCenter"
+      @dismiss="dismissCertificationGuide"
+    />
+
     <view v-if="!itemStore.homeFeed && itemStore.homeLoading" class="home__skeleton">
       <ni-skeleton :rows="4" :avatar="true" />
       <ni-skeleton :rows="3" :avatar="false" />
@@ -250,8 +259,10 @@ import { useItemStore } from '../../stores/item.store'
 import { useNotificationStore } from '../../stores/notification.store'
 import { useSocialStore } from '../../stores/social.store'
 import { useCommunityStore } from '../../stores/community.store'
+import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
-import { ZONE_MAP } from '../../config/constants'
+import { STORAGE_KEYS, ZONE_MAP } from '../../config/constants'
+import { getStorage, setStorage } from '../../utils/storage'
 import { formatThousands } from '../../utils/formatter'
 import { lifeService } from '../../services/life.service'
 
@@ -259,6 +270,7 @@ const itemStore = useItemStore()
 const notificationStore = useNotificationStore()
 const socialStore = useSocialStore()
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 const { toast, showToast } = useToast()
 
 const serviceKind = ref<'求助' | '提供'>('求助')
@@ -266,6 +278,13 @@ const lifeCategory = ref('全部')
 const lifeCategories = ['全部', '小区风景', '邻里日常', '个人风采']
 const broadcastIndex = ref(0)
 const homeKeyword = ref('')
+const certGuideDismissedAt = ref(Number(getStorage<number>(STORAGE_KEYS.certGuideDismissedAt, 0) || 0))
+const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+
+const showCertificationGuide = computed(() => {
+  if (!userStore.isLoggedIn || userStore.isVerifiedOwner) return false
+  return Date.now() - certGuideDismissedAt.value > SEVEN_DAYS
+})
 
 const community = computed(() => {
   if (itemStore.homeFeed) return itemStore.homeFeed.community
@@ -328,8 +347,10 @@ onLoad(() => {
 
 onShow(() => {
   if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
+  certGuideDismissedAt.value = Number(getStorage<number>(STORAGE_KEYS.certGuideDismissedAt, 0) || 0)
   socialStore.fetchConversations().catch(() => undefined)
   notificationStore.fetchUnread().catch(() => undefined)
+  userStore.refreshProfile().catch(() => undefined)
 })
 
 onPullDownRefresh(async () => {
@@ -366,6 +387,15 @@ function onBroadcastChange(event: any): void {
 
 function goCommunity(): void {
   uni.navigateTo({ url: '/pages/community/index' })
+}
+
+function goCertificationCenter(): void {
+  uni.navigateTo({ url: '/pages/auth/center' })
+}
+
+function dismissCertificationGuide(): void {
+  certGuideDismissedAt.value = Date.now()
+  setStorage(STORAGE_KEYS.certGuideDismissedAt, certGuideDismissedAt.value)
 }
 function goSearch(): void {
   uni.navigateTo({ url: '/pages/home/search' })

@@ -1,7 +1,58 @@
 import { ref } from 'vue'
 import { env } from '../config/env'
-import { presignUpload } from '../api/config.api'
+import { ApiError } from '../api/errors'
+import { secureStorage } from '../utils/storage'
+import { createIdempotencyKey } from '../utils/idempotency'
 import { chooseImages, chooseVideo, compressImage } from '../utils/image'
+
+export type UploadScene = 'REALNAME_ID' | 'OWNER_PROOF' | 'ITEM_IMAGE' | 'PUBLIC_IMAGE'
+
+function contentTypeOf(path: string): string {
+  const ext = (path.split('.').pop() ?? '').toLowerCase()
+  if (ext === 'png') return 'image/png'
+  if (ext === 'webp') return 'image/webp'
+  return 'image/jpeg'
+}
+
+function extensionOf(type: string): string {
+  if (type === 'image/png') return '.png'
+  if (type === 'image/webp') return '.webp'
+  if (type === 'application/pdf') return '.pdf'
+  return '.jpg'
+}
+
+function isH5Runtime(): boolean {
+  return typeof window !== 'undefined'
+    && typeof document !== 'undefined'
+    && typeof FormData !== 'undefined'
+    && typeof fetch === 'function'
+}
+
+function parseUploadResponse(statusCode: number, raw: any): { body: any; ok: boolean } {
+  let body: any = raw
+  if (typeof raw === 'string') {
+    try {
+      body = JSON.parse(raw)
+    } catch {
+      body = null
+    }
+  }
+  return {
+    body,
+    ok: statusCode >= 200 && statusCode < 300 && body?.code === 0,
+  }
+}
+
+function uploadError(statusCode: number, body: any): ApiError {
+  return new ApiError(
+    Number(body?.code) || 50000,
+    statusCode === 404
+      ? '上传接口未找到，请重启后端服务后重试'
+      : (body?.message || '材料上传失败'),
+    body?.traceId || '',
+    statusCode,
+  )
+}
 
 export function useUpload() {
   const uploading = ref(false)
@@ -21,27 +72,73 @@ export function useUpload() {
     return video.path
   }
 
-  async function uploadOne(path: string): Promise<string> {
-    const fileName = path.split('/').pop() ?? `image-${Date.now()}.jpg`
-    if (env.mock || /^https?:\/\//.test(path)) {
+  async function uploadOne(path: string, scene: UploadScene = 'PUBLIC_IMAGE'): Promise<string> {
+    if (env.mock) {
       progress.value = 100
-      return path
+      return `mock/certifications/${scene.toLowerCase()}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`
     }
+    if (/^https?:\/\//.test(path)) return path
+
     uploading.value = true
     progress.value = 0
     try {
-      const presign = await presignUpload({ fileName, fileType: 'image/jpeg' })
-      await new Promise<void>((resolve, reject) => {
+      const token = secureStorage.getAccessToken()
+      const uploadUrl = `${env.uploadUrl}/uploads`
+      const idempotencyKey = createIdempotencyKey('upload')
+
+      // H5 的 uni.uploadFile 对 blob: 临时地址会提交 0 字节文件，
+      // 改用 fetch + FormData 上传；App/小程序仍使用 uni.uploadFile。
+      if (isH5Runtime()) {
+        const source = await fetch(path)
+        if (!source.ok) {
+          throw new ApiError(40001, '图片读取失败，请重新选择')
+        }
+        const blob = await source.blob()
+        if (!blob.size) {
+          throw new ApiError(40001, '图片内容为空，请重新选择')
+        }
+        const fileName = `upload-${Date.now()}${extensionOf(blob.type || contentTypeOf(path))}`
+        const form = new FormData()
+        form.append('scene', scene)
+        form.append('file', blob, fileName)
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'X-Idempotency-Key': idempotencyKey,
+          },
+          body: form,
+        })
+        const { body, ok } = parseUploadResponse(response.status, await response.text())
+        if (!ok) throw uploadError(response.status, body)
+        progress.value = 100
+        return String(body?.data?.objectKey ?? '')
+      }
+
+      return await new Promise<string>((resolve, reject) => {
         const task = uni.uploadFile({
-          url: presign.uploadUrl,
+          url: uploadUrl,
           filePath: path,
           name: 'file',
-          header: presign.headers,
-          success: (res: any) => {
-            if (res.statusCode >= 200 && res.statusCode < 300) resolve()
-            else reject(new Error('上传失败'))
+          header: {
+            Authorization: `Bearer ${token}`,
+            'X-Idempotency-Key': idempotencyKey,
           },
-          fail: reject,
+          formData: {
+            scene,
+          },
+          success: (res: any) => {
+            const { body, ok } = parseUploadResponse(res.statusCode, res.data)
+            if (ok) {
+              progress.value = 100
+              resolve(String(body?.data?.objectKey ?? ''))
+              return
+            }
+            reject(uploadError(res.statusCode, body))
+          },
+          fail: (error: any) => {
+            reject(new ApiError(50000, error?.errMsg || '网络连接失败，请检查网络'))
+          },
         })
         if (task && typeof task.onProgressUpdate === 'function') {
           task.onProgressUpdate((event: any) => {
@@ -49,18 +146,17 @@ export function useUpload() {
           })
         }
       })
-      return presign.fileUrl
     } finally {
       uploading.value = false
     }
   }
 
-  async function uploadMany(paths: string[]): Promise<string[]> {
-    const urls: string[] = []
+  async function uploadMany(paths: string[], scene: UploadScene = 'PUBLIC_IMAGE'): Promise<string[]> {
+    const keys: string[] = []
     for (const path of paths) {
-      urls.push(await uploadOne(path))
+      keys.push(await uploadOne(path, scene))
     }
-    return urls
+    return keys
   }
 
   return {

@@ -26,8 +26,12 @@
         <view class="profile__user-copy">
           <view class="profile__name-row">
             <text class="profile__name">{{ displayName }}</text>
-            <view v-if="userStore.profile?.verified" class="profile__verified">
+            <view v-if="userStore.isRealnameVerified" class="profile__verified profile__verified--realname">
               <ni-icon name="shield" :size="10" state="gold" />
+              <text class="profile__verified-text profile__verified-text--realname">已实名</text>
+            </view>
+            <view v-if="userStore.isVerifiedOwner" class="profile__verified profile__verified--owner">
+              <ni-icon name="home" :size="10" state="green" />
               <text class="profile__verified-text">认证业主</text>
             </view>
           </view>
@@ -145,7 +149,7 @@
           <view class="profile__menu-icon profile__menu-icon--gold"><ni-icon name="shield" :size="17" state="gold" /></view>
           <view class="profile__menu-copy">
             <text class="profile__menu-title">认证中心</text>
-            <text class="profile__menu-desc">实名认证与业主证明</text>
+            <text class="profile__menu-desc">{{ certificationMenuDesc }}</text>
           </view>
           <ni-icon name="chevron" :size="17" state="tertiary" />
         </view>
@@ -235,6 +239,14 @@ const wallet = ref<WalletSummary>({ balance: 0, escrow: 0, withdrawable: 0 })
 
 const displayName = computed(() => userStore.profile?.nickname || '温暖的邻居')
 const communityName = computed(() => communityStore.current?.name || userStore.profile?.communityName || '阳光花园小区')
+const certificationMenuDesc = computed(() => {
+  if (userStore.isRealnameVerified && userStore.isVerifiedOwner) return '实名与住户认证均已完成'
+  if (userStore.isVerifiedOwner) return '住户认证已完成 · 实名待完成'
+  if (userStore.ownerStatus === 'PENDING' || userStore.ownerStatus === 'SUPPLEMENT') return '住户认证审核中'
+  if (userStore.realnameStatus === 'PENDING' || userStore.realnameStatus === 'SUPPLEMENT') return '实名认证审核中'
+  if (userStore.realnameStatus === 'REJECTED' || userStore.ownerStatus === 'REJECTED') return '认证未通过，查看原因'
+  return '实名认证与住户认证'
+})
 
 onShow(() => {
   if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
@@ -327,7 +339,7 @@ function goCommunity(): void {
   uni.navigateTo({ url: '/pages/community/index' })
 }
 function goAuth(): void {
-  uni.navigateTo({ url: '/pages/auth/owner-proof' })
+  uni.navigateTo({ url: '/pages/auth/center' })
 }
 function goHelp(): void {
   uni.navigateTo({ url: '/pages/settings/help' })
@@ -406,6 +418,7 @@ function goHelp(): void {
 .profile__name-row {
   flex-direction: row;
   align-items: center;
+  flex-wrap: wrap;
 }
 .profile__name {
   font-size: $ni-font-22;
@@ -417,15 +430,22 @@ function goHelp(): void {
   flex-direction: row;
   align-items: center;
   height: 20px;
+  margin-right: 4px;
   padding-left: 6px;
   padding-right: 7px;
   border-radius: 10px;
   background-color: $ni-color-credit-bg;
 }
+.profile__verified--realname {
+  background-color: $ni-color-success-bg;
+}
 .profile__verified-text {
   margin-left: 2px;
   font-size: $ni-font-10;
   color: $ni-color-credit-deep;
+}
+.profile__verified-text--realname {
+  color: $ni-color-success-deep;
 }
 .profile__user-meta {
   margin-top: 4px;

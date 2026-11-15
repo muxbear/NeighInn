@@ -1,0 +1,221 @@
+<template>
+  <view class="cert-guide">
+    <view class="cert-guide__top">
+      <view class="cert-guide__icon">
+        <ni-icon name="shield" :size="21" state="white" />
+      </view>
+      <view class="cert-guide__copy">
+        <text class="cert-guide__title">{{ title }}</text>
+        <text class="cert-guide__desc">{{ desc }}</text>
+      </view>
+      <view class="cert-guide__close" @click="emit('dismiss')">
+        <ni-icon name="plus" :size="14" state="tertiary" :rotate="45" />
+      </view>
+    </view>
+
+    <view class="cert-guide__steps">
+      <view class="cert-guide__step">
+        <view :class="['cert-guide__dot', { 'cert-guide__dot--done': realnameStatus === 'VERIFIED' }]">
+          <ni-icon :name="realnameStatus === 'VERIFIED' ? 'check' : 'shield'" :size="10" :state="realnameStatus === 'VERIFIED' ? 'white' : 'gold'" />
+        </view>
+        <text :class="['cert-guide__step-text', { 'cert-guide__step-text--done': realnameStatus === 'VERIFIED' }]">实名认证</text>
+        <text class="cert-guide__step-status">{{ realnameLabel }}</text>
+      </view>
+      <view :class="['cert-guide__line', { 'cert-guide__line--done': realnameStatus === 'VERIFIED' }]" />
+      <view class="cert-guide__step">
+        <view :class="['cert-guide__dot', { 'cert-guide__dot--done': ownerStatus === 'VERIFIED' }]">
+          <ni-icon :name="ownerStatus === 'VERIFIED' ? 'check' : 'home'" :size="10" :state="ownerStatus === 'VERIFIED' ? 'white' : 'gold'" />
+        </view>
+        <text :class="['cert-guide__step-text', { 'cert-guide__step-text--done': ownerStatus === 'VERIFIED' }]">住户认证</text>
+        <text class="cert-guide__step-status">{{ ownerLabel }}</text>
+      </view>
+    </view>
+
+    <view class="cert-guide__action" @click="emit('open')">
+      <text class="cert-guide__action-text">{{ actionText }}</text>
+      <ni-icon name="chevron" :size="13" state="active" />
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    realnameStatus?: string
+    ownerStatus?: string
+    authStatus?: string
+  }>(),
+  {
+    realnameStatus: 'UNVERIFIED',
+    ownerStatus: 'UNVERIFIED',
+    authStatus: 'LOGGED_IN_UNVERIFIED',
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'open'): void
+  (event: 'dismiss'): void
+}>()
+
+function labelOf(status: string): string {
+  if (status === 'VERIFIED') return '已完成'
+  if (status === 'PENDING') return '审核中'
+  if (status === 'SUPPLEMENT') return '待补充'
+  if (status === 'REJECTED') return '已驳回'
+  return '待认证'
+}
+
+const realnameLabel = computed(() => labelOf(props.realnameStatus))
+const ownerLabel = computed(() => labelOf(props.ownerStatus))
+
+const title = computed(() => {
+  if (props.ownerStatus === 'FROZEN') return '住户认证已冻结'
+  if (props.ownerStatus === 'REVOKED') return '住户认证已撤销'
+  if (props.ownerStatus === 'SUPPLEMENT') return '住户认证待补充材料'
+  if (props.ownerStatus === 'PENDING') return '住户认证审核中'
+  if (props.ownerStatus === 'REJECTED') return '住户认证未通过'
+  if (props.realnameStatus === 'SUPPLEMENT') return '实名认证待补充材料'
+  if (props.realnameStatus === 'PENDING') return '实名认证审核中'
+  if (props.realnameStatus === 'VERIFIED' && props.ownerStatus !== 'VERIFIED') return '实名已通过，完成住户认证'
+  if (props.realnameStatus === 'REJECTED' && props.ownerStatus !== 'VERIFIED') return '实名未通过，可先完成住户认证'
+  return '完成认证，解锁发布与交易'
+})
+
+const desc = computed(() => {
+  if (props.ownerStatus === 'FROZEN') return '因违规处理被冻结，在售物品已自动下架；如有疑问请联系客服。'
+  if (props.ownerStatus === 'REVOKED') return '认证已被撤销，查看原因后可重新提交材料。'
+  if (props.ownerStatus === 'SUPPLEMENT') return '请按审核意见补充材料后重新提交。'
+  if (props.ownerStatus === 'PENDING') {
+    return '预计 24 小时内完成审核，结果会通过通知中心告知。'
+  }
+  if (props.ownerStatus === 'REJECTED') return '查看驳回原因并重新提交材料。'
+  if (props.realnameStatus === 'SUPPLEMENT') return '请按审核意见补充身份证材料后重新提交。'
+  if (props.realnameStatus === 'PENDING') {
+    return '实名审核不影响住户认证，可同时提交。'
+  }
+  if (props.realnameStatus === 'VERIFIED') return '选择小区并上传证明材料，即可获得认证业主标识。'
+  if (props.realnameStatus === 'REJECTED') return '实名可稍后重试，住户认证通过即可发布与交易。'
+  return '实名与住户认证相互独立，可任选一项开始。'
+})
+
+const actionText = computed(() => {
+  if (props.ownerStatus === 'PENDING') return '查看审核进度'
+  if (props.ownerStatus === 'SUPPLEMENT') return '去补充材料'
+  if (props.ownerStatus === 'REJECTED') return '查看原因并重新提交'
+  if (props.ownerStatus === 'VERIFIED' || props.ownerStatus === 'FROZEN' || props.ownerStatus === 'REVOKED') {
+    return '查看认证'
+  }
+  if (props.realnameStatus === 'SUPPLEMENT') return '去补充实名材料'
+  if (props.realnameStatus === 'VERIFIED') return '去完成住户认证'
+  return '去认证中心'
+})
+</script>
+
+<style scoped lang="scss">
+.cert-guide {
+  margin: 12px 14px 0;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  border: 1px solid #ffe0cc;
+  box-shadow: $ni-shadow-card;
+}
+.cert-guide__top {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.cert-guide__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.cert-guide__copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.cert-guide__title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.cert-guide__desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-text-tertiary;
+}
+.cert-guide__close {
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+}
+.cert-guide__steps {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-fill-1;
+}
+.cert-guide__step {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+}
+.cert-guide__dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background-color: $ni-color-credit-bg;
+  align-items: center;
+  justify-content: center;
+}
+.cert-guide__dot--done {
+  background-color: $ni-color-gift;
+}
+.cert-guide__step-text {
+  margin-left: 5px;
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-text-secondary;
+}
+.cert-guide__step-text--done {
+  color: $ni-color-success-deep;
+}
+.cert-guide__step-status {
+  margin-left: 4px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.cert-guide__line {
+  width: 18px;
+  height: 1px;
+  margin-left: 4px;
+  margin-right: 4px;
+  background-color: #e4ded7;
+}
+.cert-guide__line--done {
+  background-color: $ni-color-gift;
+}
+.cert-guide__action {
+  height: 40px;
+  margin-top: 10px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-primary-bg;
+}
+.cert-guide__action-text {
+  margin-right: 3px;
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+</style>

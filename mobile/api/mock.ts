@@ -109,6 +109,10 @@ function createMockNewUser(phone: string): UserProfile {
     showBio: true,
     shareAddressAfterOrder: false,
     verified: false,
+    realnameVerified: false,
+    ownerVerified: false,
+    realnameStatus: 'UNVERIFIED',
+    ownerStatus: 'UNVERIFIED',
     creditScore: 100,
     creditLevel: '良好',
     dealCount: 0,
@@ -440,20 +444,55 @@ async function route(
     return { accessToken: `mock-access-${Date.now()}`, refreshToken: `mock-refresh-${Date.now()}` }
   }
   if (path === '/auth/status' && method === 'GET') {
+    const realnameStatus = state.user.realnameStatus ?? 'UNVERIFIED'
+    const ownerStatus = state.user.ownerStatus ?? 'UNVERIFIED'
+    const realnameVerified = realnameStatus === 'VERIFIED'
+    const ownerVerified = ownerStatus === 'VERIFIED'
     return {
-      status: state.user.authStatus,
-      realnameVerified: state.user.authStatus === 'VERIFIED_OWNER' || state.user.authStatus === 'VERIFIED_UNOWNER',
-      ownerVerified: state.user.authStatus === 'VERIFIED_OWNER',
+      status: ownerVerified
+        ? 'VERIFIED_OWNER'
+        : ownerStatus === 'PENDING' || ownerStatus === 'SUPPLEMENT'
+          ? 'PENDING_AUDIT'
+          : ownerStatus === 'REJECTED'
+            ? 'REJECTED'
+            : realnameStatus === 'PENDING' || realnameStatus === 'SUPPLEMENT'
+              ? 'VERIFYING'
+              : realnameStatus === 'REJECTED'
+                ? 'REJECTED'
+                : realnameVerified
+                  ? 'VERIFIED_UNOWNER'
+                  : 'LOGGED_IN_UNVERIFIED',
+      realname: {
+        status: realnameStatus,
+        rejectReason: '',
+        canResubmit: true,
+        submittedAt: 0,
+        certId: '',
+      },
+      owner: {
+        status: ownerStatus,
+        rejectReason: '',
+        canResubmit: true,
+        submittedAt: 0,
+        certId: '',
+        communityId: state.user.intentCommunityId ?? '',
+        communityName: state.user.intentCommunityName ?? '',
+      },
+      realnameVerified,
+      ownerVerified,
       canResubmit: true,
+      rejectType: '',
     }
   }
   if (path === '/auth/realname' && method === 'POST') {
-    state.user.authStatus = 'VERIFIED_UNOWNER'
-    return { status: 'VERIFIED_UNOWNER', message: '实名认证已通过' }
+    state.user.realnameStatus = 'PENDING'
+    state.user.authStatus = state.user.ownerStatus === 'VERIFIED' ? 'VERIFIED_OWNER' : 'VERIFYING'
+    return { status: 'PENDING', certId: `mock-cert-${Date.now()}`, message: '实名认证已提交' }
   }
   if (path === '/auth/owner-proof' && method === 'POST') {
+    state.user.ownerStatus = 'PENDING'
     state.user.authStatus = 'PENDING_AUDIT'
-    return { status: 'PENDING_AUDIT', auditHours: 24 }
+    return { status: 'PENDING', certId: `mock-cert-${Date.now()}`, auditHours: 24 }
   }
   if (path === '/auth/logout' && method === 'POST') {
     return { success: true }

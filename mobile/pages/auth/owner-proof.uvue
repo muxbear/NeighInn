@@ -6,7 +6,7 @@
         <view class="proof__nav-button" @click="goBack">
           <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
         </view>
-        <text class="proof__nav-title">业主证明</text>
+        <text class="proof__nav-title">住户认证</text>
         <view class="proof__nav-placeholder" />
       </view>
     </view>
@@ -22,72 +22,111 @@
         </view>
       </view>
 
-      <view v-if="rejected" class="proof__rejected">
-        <ni-icon name="alert" :size="16" state="danger" />
-        <view class="proof__rejected-copy">
-          <text class="proof__rejected-title">上次申请未通过</text>
-          <text class="proof__rejected-desc">{{ rejectReason }}</text>
-        </view>
+      <view class="proof__realname">
+        <ni-icon name="shield" :size="14" :state="realnameStatus === 'VERIFIED' ? 'green' : 'tertiary'" />
+        <text class="proof__realname-text">{{ realnameHint }}</text>
+        <text v-if="realnameStatus !== 'VERIFIED'" class="proof__realname-link" @click="goRealname">去实名</text>
       </view>
 
-      <view class="proof__card">
-        <text class="proof__card-title">认证小区</text>
-        <view class="proof__community" @click="chooseCommunity">
-          <view class="proof__community-icon">
-            <ni-icon name="home" :size="18" state="active" />
-          </view>
-          <view class="proof__community-copy">
-            <text class="proof__community-name">{{ selectedCommunity?.name || '请选择小区' }}</text>
-            <text class="proof__community-address">{{ selectedCommunity?.address || '选择你居住的小区' }}</text>
-          </view>
-          <ni-icon name="chevron" :size="15" state="tertiary" />
-        </view>
+      <view v-if="statusLoading" class="proof__state">
+        <ni-loading :size="20" text="正在读取认证状态" />
       </view>
 
-      <view class="proof__card">
-        <text class="proof__card-title">你的身份</text>
-        <text class="proof__card-desc">不同身份需要提交的证明材料不同</text>
-        <view class="proof__identities">
-          <view
-            v-for="identity in identities"
-            :key="identity.key"
-            class="proof__identity"
-            :class="{ 'proof__identity--active': selectedIdentity === identity.key }"
-            @click="selectedIdentity = identity.key"
-          >
-            <ni-icon
-              :name="identity.key === 'owner' ? 'home' : identity.key === 'tenant' ? 'order' : 'friend'"
-              :size="21"
-              :state="selectedIdentity === identity.key ? 'active' : 'tertiary'"
-            />
-            <text class="proof__identity-title">{{ identity.label }}</text>
-            <text class="proof__identity-desc">{{ identity.desc }}</text>
-            <view v-if="selectedIdentity === identity.key" class="proof__identity-check">
-              <ni-icon name="check" :size="10" state="white" />
+      <view v-else-if="isOwnerFrozen" class="proof__state">
+        <view class="proof__state-icon">
+          <ni-icon name="lock" :size="24" state="gold" />
+        </view>
+        <text class="proof__state-title">住户认证已冻结</text>
+        <text class="proof__state-desc">因违规处理，你的业主资格已被冻结，在售物品已自动下架。如有疑问请联系客服。</text>
+        <ni-button type="primary" size="lg" block @tap="goCenter">返回认证中心</ni-button>
+      </view>
+
+      <view v-else-if="ownerCurrentStatus === 'VERIFIED'" class="proof__state proof__state--success">
+        <view class="proof__state-icon proof__state-icon--success">
+          <ni-icon name="check" :size="24" state="white" />
+        </view>
+        <text class="proof__state-title">住户认证已完成</text>
+        <text class="proof__state-desc">你已绑定小区，个人中心会展示“认证业主”标识。</text>
+        <ni-button type="primary" size="lg" block @tap="goCenter">返回认证中心</ni-button>
+      </view>
+
+      <view v-else-if="isOwnerPending" class="proof__state">
+        <view class="proof__state-icon">
+          <ni-icon name="clock" :size="24" state="gold" />
+        </view>
+        <text class="proof__state-title">{{ ownerCurrentStatus === 'SUPPLEMENT' ? '需要补充材料' : '住户认证审核中' }}</text>
+        <text class="proof__state-desc">预计 24 小时内完成审核，结果会通过通知中心告知。</text>
+        <ni-button type="primary" size="lg" block @tap="goCenter">返回认证中心</ni-button>
+      </view>
+
+      <template v-else>
+        <view v-if="(ownerCurrentStatus === 'REJECTED' || ownerCurrentStatus === 'REVOKED' || ownerCurrentStatus === 'SUPPLEMENT') && rejectReason" class="proof__rejected">
+          <ni-icon name="alert" :size="16" state="danger" />
+          <view class="proof__rejected-copy">
+            <text class="proof__rejected-title">{{ ownerBannerTitle }}</text>
+            <text class="proof__rejected-desc">{{ rejectReason }}</text>
+          </view>
+        </view>
+
+        <view class="proof__card">
+          <text class="proof__card-title">认证小区</text>
+          <view class="proof__community" @click="chooseCommunity">
+            <view class="proof__community-icon">
+              <ni-icon name="home" :size="18" state="active" />
+            </view>
+            <view class="proof__community-copy">
+              <text class="proof__community-name">{{ selectedCommunity?.name || '请选择小区' }}</text>
+              <text class="proof__community-address">{{ selectedCommunity?.address || '选择你居住的小区' }}</text>
+            </view>
+            <ni-icon name="chevron" :size="15" state="tertiary" />
+          </view>
+        </view>
+
+        <view class="proof__card">
+          <text class="proof__card-title">你的身份</text>
+          <text class="proof__card-desc">不同身份需要提交的证明材料不同</text>
+          <view class="proof__identities">
+            <view
+              v-for="identity in identities"
+              :key="identity.key"
+              class="proof__identity"
+              :class="{ 'proof__identity--active': selectedIdentity === identity.key }"
+              @click="selectedIdentity = identity.key"
+            >
+              <ni-icon
+                :name="identity.key === 'owner' ? 'home' : identity.key === 'tenant' ? 'order' : 'friend'"
+                :size="21"
+                :state="selectedIdentity === identity.key ? 'active' : 'tertiary'"
+              />
+              <text class="proof__identity-title">{{ identity.label }}</text>
+              <text class="proof__identity-desc">{{ identity.desc }}</text>
+              <view v-if="selectedIdentity === identity.key" class="proof__identity-check">
+                <ni-icon name="check" :size="10" state="white" />
+              </view>
             </view>
           </view>
         </view>
-      </view>
 
-      <view class="proof__card">
-        <view class="proof__card-head">
-          <text class="proof__card-title">证明材料</text>
-          <text class="proof__card-count">{{ images.length }}/5</text>
+        <view class="proof__card">
+          <view class="proof__card-head">
+            <text class="proof__card-title">证明材料</text>
+            <text class="proof__card-count">{{ images.length }}/5</text>
+          </view>
+          <text class="proof__card-desc">可上传房产证、购房合同、租赁合同或近 3 个月缴费记录</text>
+          <ni-photo-uploader v-model="images" :max="5" :min="1" :columns="3" :tile-height="100" add-text="添加证明" show-count />
         </view>
-        <text class="proof__card-desc">可上传房产证、购房合同、租赁合同或近 3 个月缴费记录</text>
-        <ni-photo-uploader v-model="images" :max="5" :min="1" :columns="3" :tile-height="100" add-text="添加证明" show-count />
-      </view>
 
-      <view class="proof__tips">
-        <text class="proof__tips-title">审核说明</text>
-        <text class="proof__tips-item">· 审核时效不超过 24 小时，结果会通过通知中心告知</text>
-        <text class="proof__tips-item">· 累计 3 次未通过将转人工复核，请确保材料真实清晰</text>
-        <text class="proof__tips-item">· 认证通过后可在该小区发布与参与闲置交易</text>
-      </view>
+        <view class="proof__tips">
+          <text class="proof__tips-title">审核说明</text>
+          <text class="proof__tips-item">· 审核时效不超过 24 小时，结果会通过通知中心告知</text>
+          <text class="proof__tips-item">· 实名与住户认证相互独立，未实名也可提交本次申请</text>
+          <text class="proof__tips-item">· 累计 3 次未通过将转人工复核，请确保材料真实清晰</text>
+        </view>
 
-      <ni-button type="primary" size="lg" block :loading="submitting" :disabled="!canSubmit" @tap="submit">
-        {{ canSubmit ? '提交业主认证' : '请选择小区并上传证明材料' }}
-      </ni-button>
+        <ni-button type="primary" size="lg" block :loading="submitting || uploading" :disabled="!canSubmit" @tap="submit">
+          {{ canSubmit ? '提交住户认证' : '请选择小区并上传证明材料' }}
+        </ni-button>
+      </template>
     </view>
 
     <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
@@ -97,28 +136,59 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import type { CommunityBinding } from '../../models'
+import type { CertificationState, CommunityBinding } from '../../models'
 import { useCommunityStore } from '../../stores/community.store'
 import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
+import { useUpload } from '../../composables/useUpload'
 import { authService } from '../../services/auth.service'
+import { compressImage } from '../../utils/image'
 import { IDENTITY_OPTIONS } from '../../config/constants'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const { toast, showToast } = useToast()
+const { uploading, uploadMany } = useUpload()
 
 const selectedCommunity = ref<CommunityBinding | null>(null)
 const selectedIdentity = ref<'owner' | 'tenant' | 'family'>('owner')
 const images = ref<string[]>([])
 const submitting = ref(false)
-const rejected = ref(false)
-const rejectReason = ref('房产证照片反光，无法核验业主姓名与房号。')
+const statusLoading = ref(true)
+const ownerCurrentStatus = ref<CertificationState>('UNVERIFIED')
+const realnameStatus = ref<CertificationState>('UNVERIFIED')
+const rejectReason = ref('')
 const identities = IDENTITY_OPTIONS
 
+const isOwnerPending = computed(() => ownerCurrentStatus.value === 'PENDING')
+const isOwnerFrozen = computed(() => ownerCurrentStatus.value === 'FROZEN')
+const ownerBannerTitle = computed(
+  () => (ownerCurrentStatus.value === 'SUPPLEMENT' ? '需要补充材料' : '上次申请未通过'),
+)
+const realnameHint = computed(() => {
+  if (realnameStatus.value === 'VERIFIED') return '已实名认证'
+  if (realnameStatus.value === 'PENDING' || realnameStatus.value === 'SUPPLEMENT') {
+    return '实名认证审核中，不影响本次住户认证'
+  }
+  return '实名认证未完成，可稍后补充，不影响本次住户认证审核'
+})
 const canSubmit = computed(() => Boolean(selectedCommunity.value && images.value.length))
 
+function isImagePath(path: string): boolean {
+  return /\.(jpe?g|png|webp)(\?|$)/i.test(path)
+}
+
 onLoad(async () => {
+  try {
+    const status = await authService.getStatus()
+    ownerCurrentStatus.value = status.owner?.status ?? 'UNVERIFIED'
+    realnameStatus.value = status.realname?.status ?? 'UNVERIFIED'
+    rejectReason.value = status.owner?.rejectReason ?? ''
+  } catch {
+    // 状态读取失败时仍允许用户选择小区并重新提交
+  } finally {
+    statusLoading.value = false
+  }
   await communityStore.fetchMine().catch(() => undefined)
   if (!communityStore.current && communityStore.bindings.length === 0) {
     await communityStore.fetchNearby().catch(() => undefined)
@@ -148,12 +218,19 @@ async function submit(): Promise<void> {
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
   try {
+    showToast('正在上传证明材料')
+    const compressed: string[] = []
+    for (const path of images.value) {
+      compressed.push(isImagePath(path) ? await compressImage(path, 82) : path)
+    }
+    const keys = await uploadMany(compressed, 'OWNER_PROOF')
     await authService.submitOwnerProof({
       communityId: selectedCommunity.value!.id,
       identity: selectedIdentity.value,
-      images: images.value,
+      images: keys,
     })
-    showToast('业主认证已提交')
+    await userStore.refreshProfile().catch(() => undefined)
+    showToast('住户认证已提交')
     setTimeout(() => {
       uni.redirectTo({ url: '/pages/auth/result?type=owner' })
     }, 500)
@@ -162,6 +239,14 @@ async function submit(): Promise<void> {
   } finally {
     submitting.value = false
   }
+}
+
+function goCenter(): void {
+  uni.redirectTo({ url: '/pages/auth/center' })
+}
+
+function goRealname(): void {
+  uni.navigateTo({ url: '/pages/auth/realname' })
 }
 
 function goBack(): void {
@@ -236,6 +321,64 @@ function goBack(): void {
   font-size: $ni-font-9;
   line-height: 15px;
   color: #9a7c45;
+}
+.proof__realname {
+  margin-top: 10px;
+  padding: 10px 12px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-fill-1;
+}
+.proof__realname-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-text-secondary;
+}
+.proof__realname-link {
+  margin-left: 8px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.proof__state {
+  margin-top: 10px;
+  padding: 22px 16px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+  align-items: center;
+}
+.proof__state--success {
+  background-color: $ni-color-success-bg;
+}
+.proof__state-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 26px;
+  background-color: $ni-color-credit-bg;
+  align-items: center;
+  justify-content: center;
+}
+.proof__state-icon--success {
+  background-color: $ni-color-gift;
+}
+.proof__state-title {
+  margin-top: 10px;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  text-align: center;
+}
+.proof__state-desc {
+  margin-top: 6px;
+  margin-bottom: 16px;
+  font-size: $ni-font-10;
+  line-height: 16px;
+  color: $ni-color-text-secondary;
+  text-align: center;
 }
 .proof__rejected {
   margin-top: 10px;

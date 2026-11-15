@@ -164,7 +164,7 @@
           <text class="apply__privacy-text">证明材料仅用于业主身份核验，加密存储，审核完成后按隐私政策处理。</text>
         </view>
 
-        <ni-button type="primary" size="lg" block :loading="submitting" @tap="submitApply">
+        <ni-button type="primary" size="lg" block :loading="submitting || uploading" @tap="submitApply">
           提交认证申请
         </ni-button>
       </view>
@@ -180,14 +180,24 @@ import { onLoad } from '@dcloudio/uni-app'
 import type { CommunityBinding } from '../../models'
 import { useAppStore } from '../../stores/app.store'
 import { useCommunityStore } from '../../stores/community.store'
+import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
 import { useLocation } from '../../composables/useLocation'
+import { useUpload } from '../../composables/useUpload'
+import { authService } from '../../services/auth.service'
+import { compressImage } from '../../utils/image'
 import { IDENTITY_OPTIONS } from '../../config/constants'
 
 const appStore = useAppStore()
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 const { toast, showToast } = useToast()
 const { locating, getLocation } = useLocation()
+const { uploading, uploadMany } = useUpload()
+
+function isImagePath(path: string): boolean {
+  return /\.(jpe?g|png|webp)(\?|$)/i.test(path)
+}
 
 const keyword = ref('')
 const searching = ref(false)
@@ -271,13 +281,23 @@ async function submitApply(): Promise<void> {
   }
   submitting.value = true
   try {
-    await communityStore.apply(selectedCommunity.value.id, {
+    showToast('正在上传证明材料')
+    const compressed: string[] = []
+    for (const path of proofImages.value) {
+      compressed.push(isImagePath(path) ? await compressImage(path, 82) : path)
+    }
+    const keys = await uploadMany(compressed, 'OWNER_PROOF')
+    await authService.submitOwnerProof({
       communityId: selectedCommunity.value.id,
       identity: selectedIdentity.value,
-      images: proofImages.value,
+      images: keys,
     })
+    await Promise.all([
+      communityStore.fetchMine().catch(() => undefined),
+      userStore.refreshProfile().catch(() => undefined),
+    ])
     applyVisible.value = false
-    showToast('认证申请已提交，审核不超过 24 小时')
+    showToast('住户认证申请已提交，审核不超过 24 小时')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '提交失败', 'alert')
   } finally {

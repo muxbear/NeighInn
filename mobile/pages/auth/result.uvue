@@ -21,7 +21,7 @@
       <view class="auth-result__card">
         <view class="auth-result__row">
           <text class="auth-result__row-label">认证类型</text>
-          <text class="auth-result__row-value">{{ isOwner ? '业主证明' : '实名认证' }}</text>
+          <text class="auth-result__row-value">{{ isOwner ? '住户认证' : '实名认证' }}</text>
         </view>
         <view class="auth-result__row">
           <text class="auth-result__row-label">提交时间</text>
@@ -64,7 +64,11 @@
       </view>
 
       <view class="auth-result__actions">
-        <ni-button type="primary" size="lg" block @tap="goProfile">返回个人中心</ni-button>
+        <ni-button v-if="isOwner" type="primary" size="lg" block @tap="goCenter">返回认证中心</ni-button>
+        <ni-button v-else type="primary" size="lg" block @tap="goOwnerProof">继续住户认证</ni-button>
+        <view class="auth-result__secondary" @click="isOwner ? goHome() : goCenter()">
+          <text class="auth-result__secondary-text">{{ isOwner ? '返回首页' : '返回认证中心' }}</text>
+        </view>
         <view class="auth-result__secondary" @click="goNotifications">
           <text class="auth-result__secondary-text">查看通知</text>
         </view>
@@ -87,11 +91,11 @@ const type = ref<'realname' | 'owner'>('owner')
 const submitTime = ref(formatDateTime(Date.now()))
 
 const isOwner = computed(() => type.value === 'owner')
-const title = computed(() => (isOwner.value ? '业主认证已提交' : '实名认证已提交'))
+const title = computed(() => (isOwner.value ? '住户认证已提交' : '实名认证已提交'))
 const desc = computed(() =>
   isOwner.value
     ? '我们已收到你的证明材料，审核通过后即可在该小区发布闲置与参与交易。'
-    : '我们已收到你的实名材料，审核通过后即可继续申请业主认证，解锁本小区交易。',
+    : '我们已收到你的实名材料，审核通过后会展示“已实名”标识；你也可以现在继续提交住户认证。',
 )
 
 onLoad((options: any) => {
@@ -103,8 +107,14 @@ function goBack(): void {
   if (pages.length > 1) uni.navigateBack({ delta: 1 })
   else uni.switchTab({ url: '/pages/profile/index' })
 }
-function goProfile(): void {
-  uni.switchTab({ url: '/pages/profile/index' })
+function goOwnerProof(): void {
+  uni.redirectTo({ url: '/pages/auth/owner-proof' })
+}
+function goCenter(): void {
+  uni.redirectTo({ url: '/pages/auth/center' })
+}
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
 }
 function goNotifications(): void {
   uni.navigateTo({ url: '/pages/notifications/index' })

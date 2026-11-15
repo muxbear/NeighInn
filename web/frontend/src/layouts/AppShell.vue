@@ -1,20 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, ChevronDown, ChevronRight, Command, Home, Menu, Search, X } from 'lucide-vue-next'
 import { figmaNavGroups, type NavItem } from '@/config/nav'
+import { fmtRelative } from '@/api/compat'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import { useTodoStore } from '@/stores/todos'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const app = useAppStore()
+const todos = useTodoStore()
 const noticeOpen = ref(false)
 const communityOpen = ref(false)
 const commandOpen = ref(false)
 const commandQuery = ref('')
 const avatarOpen = ref(false)
+
+const visibleTodos = computed(() =>
+  todos.items.filter((item) => item.count > 0 && (!item.permission || auth.hasPermission(item.permission))),
+)
+const todoTotal = computed(() => visibleTodos.value.reduce((sum, item) => sum + item.count, 0))
 
 const visibleGroups = computed(() =>
   figmaNavGroups
@@ -50,6 +58,26 @@ function openCommand() {
   commandQuery.value = ''
 }
 
+function openTodo(item: any) {
+  noticeOpen.value = false
+  if (item.key === 'certification') {
+    router.push({
+      path: item.route || '/governance/verification',
+      query: {
+        status: 'PENDING',
+        ...(item.latestCertId ? { certId: item.latestCertId } : {}),
+      },
+    })
+    return
+  }
+  router.push(item.route || '/dashboard')
+}
+
+function openDashboard() {
+  noticeOpen.value = false
+  router.push('/dashboard')
+}
+
 async function logout() {
   await auth.logout()
   router.push('/login')
@@ -57,6 +85,7 @@ async function logout() {
 
 onMounted(() => {
   app.loadCommunities().catch(() => undefined)
+  todos.startPolling()
   window.addEventListener('keydown', (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault()
@@ -69,6 +98,14 @@ onMounted(() => {
       avatarOpen.value = false
     }
   })
+})
+
+onUnmounted(() => {
+  todos.stopPolling()
+})
+
+watch(() => route.path, () => {
+  noticeOpen.value = false
 })
 </script>
 
@@ -141,32 +178,36 @@ onMounted(() => {
             <span>搜索功能或数据</span>
             <kbd>⌘ K</kbd>
           </button>
-          <button class="icon-button" aria-label="通知" @click="noticeOpen = !noticeOpen">
+          <button class="icon-button" :aria-label="`待办提醒，共 ${todoTotal} 项`" @click="noticeOpen = !noticeOpen">
             <Bell :size="19" />
-            <i />
+            <span v-if="todoTotal > 0" class="todo-count-badge">{{ todoTotal > 99 ? '99+' : todoTotal }}</span>
           </button>
           <button class="top-avatar" @click="avatarOpen = !avatarOpen">{{ auth.admin?.avatarText || '夏' }}</button>
         </div>
         <div v-if="noticeOpen" class="notification-popover">
           <div class="popover-title">
             <strong>待办提醒</strong>
-            <button @click="noticeOpen = false">全部已读</button>
+            <button :disabled="todos.loading" @click="todos.refresh()">{{ todos.loading ? '刷新中' : '刷新' }}</button>
           </div>
-          <div class="notice-item">
-            <span class="notice-dot orange" />
-            <div><strong>6 个报修工单即将超时</strong><p>请及时指派处理人员</p></div>
-            <time>5 分钟前</time>
+          <div
+            v-for="item in visibleTodos.slice(0, 5)"
+            :key="item.key"
+            class="notice-item notice-item--button"
+            @click="openTodo(item)"
+          >
+            <span :class="['notice-dot', item.color || 'blue']" />
+            <div>
+              <strong>{{ item.title }}</strong>
+              <p>{{ item.description || '待处理事项' }}</p>
+            </div>
+            <time>{{ item.oldestPendingAt ? fmtRelative(item.oldestPendingAt) : '' }}</time>
+            <em>{{ item.count }}</em>
           </div>
-          <div class="notice-item">
-            <span class="notice-dot blue" />
-            <div><strong>9 个住户认证待审核</strong><p>最新申请来自沈嘉禾</p></div>
-            <time>12 分钟前</time>
+          <div v-if="!visibleTodos.length" class="notice-empty">
+            <span>暂无待办</span>
+            <p>当前没有需要处理的认证或运营事项</p>
           </div>
-          <div class="notice-item">
-            <span class="notice-dot green" />
-            <div><strong>活动报名人数已达 80%</strong><p>春分邻里市集</p></div>
-            <time>1 小时前</time>
-          </div>
+          <button v-else class="notice-footer" @click="openDashboard">查看全部待办</button>
         </div>
         <div v-if="avatarOpen" class="notification-popover" style="right: 20px; width: 180px; padding: 6px">
           <div style="padding: 9px 10px; color: #777381; font-size: var(--font-size-body)">{{ auth.admin?.realName }} · {{ auth.admin?.roles?.[0]?.name }}</div>

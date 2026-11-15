@@ -199,6 +199,8 @@ async function openNotification(notification: AppNotification): Promise<void> {
     uni.navigateTo({ url: `/pages/zone/index?zone=${route.zone}` })
   } else if (route.type === 'order') {
     uni.navigateTo({ url: `/pages/orders/detail?id=${route.id}` })
+  } else if (route.type === 'certification') {
+    uni.navigateTo({ url: '/pages/auth/center' })
   } else {
     uni.switchTab({ url: '/pages/messages/index' })
   }

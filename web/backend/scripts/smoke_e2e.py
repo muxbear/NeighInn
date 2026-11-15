@@ -3,8 +3,8 @@
 用法：先启动服务（uv run python run.py 或 DEBUG=false ... uvicorn），再执行
     uv run python scripts/smoke_e2e.py
 
-覆盖：注册登录 → 实名提交 → 管理端登录（Cookie+CSRF）→ 审核通过 → 业主证明 →
-审核通过 → 绑定查询 → 首页聚合。全链路断言统一响应信封与状态机。
+覆盖：注册登录 → 材料上传 → 实名提交 → 管理端登录（Cookie+CSRF）→ 审核通过 →
+住户认证提交 → 审核通过 → 绑定查询 → 首页聚合。全链路断言统一响应信封与状态机。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import urllib.request
+import uuid
 
 BASE = "http://127.0.0.1:5193"
 
@@ -36,6 +37,32 @@ def call(method: str, path: str, body: dict | None = None, token: str | None = N
     )
     with opener.open(request) as response:
         return json.loads(response.read())
+
+
+def upload_material(token: str, scene: str, filename: str) -> str:
+    """multipart 直传认证材料（smoke 使用最小 JPEG 字节，真实环境需 MinIO）。"""
+    boundary = f"----NeighInnSmoke{uuid.uuid4().hex}"
+    content = b"\xff\xd8\xff\xe0" + b"0" * 32
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="scene"\r\n\r\n{scene}\r\n'
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: image/jpeg\r\n\r\n"
+    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    request = urllib.request.Request(
+        BASE + "/api/v1/uploads",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    with opener.open(request) as response:
+        payload = json.loads(response.read())
+    assert payload["code"] == 0, payload
+    return payload["data"]["objectKey"]
 
 
 def main() -> None:
@@ -74,8 +101,10 @@ def main() -> None:
     print("✓ 注册新人引导（资料完善）")
 
     # 实名认证提交
+    front_key = upload_material(access, "REALNAME_ID", "id-front.jpg")
+    back_key = upload_material(access, "REALNAME_ID", "id-back.jpg")
     realname = call("POST", "/api/v1/auth/realname",
-                    {"frontImage": "certs/f.jpg", "backImage": "certs/b.jpg", "faceToken": "ft"},
+                    {"frontImage": front_key, "backImage": back_key, "faceToken": "ft"},
                     token=access)["data"]
     assert realname["status"] == "PENDING"
     print("✓ 实名认证提交 → PENDING")
@@ -97,9 +126,10 @@ def main() -> None:
     assert status["status"] == "VERIFIED_UNOWNER"
     print("✓ 实名审核通过 → VERIFIED_UNOWNER")
 
-    # 业主证明 → 审核 → 绑定
+    # 住户认证 → 审核 → 绑定
+    proof_key = upload_material(access, "OWNER_PROOF", "proof.jpg")
     proof = call("POST", "/api/v1/auth/owner-proof",
-                 {"communityId": 1, "identity": "owner", "images": ["certs/p1.jpg"]},
+                 {"communityId": 1, "identity": "owner", "images": [proof_key]},
                  token=access)["data"]
     assert proof["status"] == "PENDING"
     queue = call("GET", "/api/v1/admin/certifications?status=PENDING&type=OWNER_PROOF")["data"]

@@ -45,6 +45,13 @@ onLaunch(() => {
       if (orders.currentOrder && orders.currentOrder.id === payload.orderId) {
         orders.fetchDetail(payload.orderId).catch(() => undefined)
       }
+      return
+    }
+    if (action === 'NOTIFY' && payload) {
+      useNotificationStore().fetchUnread().catch(() => undefined)
+      if (payload.tag === '认证') {
+        user.refreshProfile().catch(() => undefined)
+      }
     }
   })
 })

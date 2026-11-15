@@ -9,6 +9,25 @@ export type AuthStatus =
   | 'VERIFIED_OWNER'
   | 'FROZEN'
 
+export type CertificationState =
+  | 'UNVERIFIED'
+  | 'PENDING'
+  | 'VERIFIED'
+  | 'REJECTED'
+  | 'SUPPLEMENT'
+  | 'FROZEN'
+  | 'REVOKED'
+
+export interface CertificationStatus {
+  status: CertificationState
+  rejectReason: string
+  canResubmit: boolean
+  submittedAt: number
+  certId: string
+  communityId?: string
+  communityName?: string
+}
+
 /** 注册新人引导状态：NEW → PROFILE_COMPLETED → COMPLETED。 */
 export type OnboardingStatus = 'NEW' | 'PROFILE_COMPLETED' | 'COMPLETED'
 
@@ -26,6 +45,10 @@ export interface UserProfile {
   showBio: boolean
   shareAddressAfterOrder: boolean
   verified: boolean
+  realnameVerified?: boolean
+  ownerVerified?: boolean
+  realnameStatus?: CertificationState
+  ownerStatus?: CertificationState
   creditScore: number
   creditLevel: string
   dealCount: number
@@ -69,9 +92,12 @@ export interface RegisterCompletePayload {
 
 export interface AuthStatusResult {
   status: AuthStatus
+  realname?: CertificationStatus
+  owner?: CertificationStatus
   realnameVerified: boolean
   ownerVerified: boolean
   rejectReason?: string
+  rejectType?: 'REALNAME' | 'OWNER_PROOF' | ''
   canResubmit?: boolean
 }
 

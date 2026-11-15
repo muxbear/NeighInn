@@ -17,7 +17,8 @@
         <view class="settings__account-copy">
           <view class="settings__account-row">
             <text class="settings__account-name">{{ userStore.profile?.nickname || '温暖的邻居' }}</text>
-            <ni-tag v-if="userStore.profile?.verified" type="verified" size="xs">认证业主</ni-tag>
+            <ni-tag v-if="userStore.isRealnameVerified" type="verified" size="xs">已实名</ni-tag>
+            <ni-tag v-if="userStore.isVerifiedOwner" type="verified" size="xs">认证业主</ni-tag>
           </view>
           <text class="settings__account-phone">{{ userStore.displayPhone }}</text>
           <text class="settings__account-community">{{ communityName }}</text>
@@ -118,9 +119,7 @@ const { toast, showToast } = useToast()
 
 const version = APP_INFO.version
 const wechatBound = ref(true)
-const realnameVerified = computed(
-  () => userStore.profile?.authStatus === 'VERIFIED_OWNER' || userStore.profile?.authStatus === 'VERIFIED_UNOWNER',
-)
+const realnameVerified = computed(() => userStore.isRealnameVerified)
 const realnameText = computed(() => (realnameVerified.value ? '已实名认证' : '未完成实名认证'))
 const communityName = computed(() => communityStore.current?.name || userStore.profile?.communityName || '阳光花园小区')
 const cacheText = ref('约 2.4MB')

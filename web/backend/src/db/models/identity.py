@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -51,6 +51,16 @@ class Certification(Entity):
     驳回必须给出原因（M01-04），累计驳回 3 次转人工专线（M01-05）。"""
 
     __tablename__ = "certifications"
+    # 同一用户同一认证类型只能有一条待审/待补充单，避免并发提交产生重复待办。
+    __table_args__ = (
+        Index(
+            "uq_certifications_pending_user_type",
+            "user_id", "type",
+            unique=True,
+            postgresql_where=text("status IN ('PENDING', 'SUPPLEMENT')"),
+            sqlite_where=text("status IN ('PENDING', 'SUPPLEMENT')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)

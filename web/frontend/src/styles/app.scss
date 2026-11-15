@@ -95,6 +95,11 @@ kbd {
   border: 1px solid #e6e3eb; border-radius: 9px; color: #656171; background: #fff;
 }
 .icon-button i { position: absolute; top: 7px; right: 8px; width: 6px; height: 6px; border: 1.5px solid #fff; border-radius: 50%; background: #f06767; }
+.todo-count-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px;
+  display: grid; place-items: center; border: 1.5px solid #fff; border-radius: 9px;
+  color: #fff; background: #f06767; font-size: 9px; font-weight: 700; line-height: 1;
+}
 .top-avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #534393; background: #e7e0ff; font-size: var(--font-size-body); font-weight: 700; }
 .notification-popover {
   position: absolute; top: 59px; right: 70px; width: 360px; padding: 8px; border: 1px solid #ebe8f0;
@@ -108,6 +113,19 @@ kbd {
 .notice-dot.orange { background: #efa955; } .notice-dot.blue { background: #568fe8; } .notice-dot.green { background: #50b58b; }
 .notice-item div { flex: 1; } .notice-item strong { display: block; font-size: var(--font-size-body); }
 .notice-item p, .notice-item time { color: #9995a4; font-size: var(--font-size-caption); } .notice-item p { margin: 3px 0 0; }
+.notice-item--button { cursor: pointer; border-radius: 8px; transition: background .16s ease; }
+.notice-item--button:hover { background: #faf9fc; }
+.notice-item em { min-width: 22px; height: 22px; display: grid; place-items: center; border-radius: 11px; color: #6852c5; background: #f1edfc; font-size: var(--font-size-caption); font-style: normal; font-weight: 700; }
+.notice-empty { padding: 28px 12px; display: grid; justify-items: center; gap: 4px; color: #8c8796; }
+.notice-empty span { font-size: var(--font-size-body); font-weight: 600; }
+.notice-empty p { margin: 0; color: #aaa6b2; font-size: var(--font-size-caption); }
+.notice-footer { width: 100%; padding: 11px 10px 5px; color: #715bd2; font-size: var(--font-size-body); text-align: center; }
+.material-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.material-card { display: flex; align-items: center; gap: 7px; padding: 8px; border: 1px solid #e9e6ed; border-radius: 8px; color: #554761; background: #fff; font-size: var(--font-size-body); text-decoration: none; }
+.material-card:hover { border-color: #cfc5ef; background: #fbfaff; }
+.material-card--disabled { cursor: not-allowed; opacity: .6; }
+.material-thumb { width: 54px; height: 40px; border-radius: 6px; object-fit: cover; background: #f4f2f7; flex: 0 0 auto; }
+.material-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .content { max-width: 1500px; margin: 0 auto; padding: 29px 30px 42px; }
 
 /* Head + buttons */

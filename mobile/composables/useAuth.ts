@@ -6,6 +6,7 @@ export function useAuth() {
   const user = useUserStore()
 
   const isLoggedIn = computed(() => user.isLoggedIn)
+  const isRealnameVerified = computed(() => user.isRealnameVerified)
   const isVerifiedOwner = computed(() => user.isVerifiedOwner)
   const profile = computed(() => user.profile)
 
@@ -18,7 +19,16 @@ export function useAuth() {
   function requireVerified(): boolean {
     if (!requireLogin()) return false
     if (!user.isVerifiedOwner) {
-      uni.navigateTo({ url: '/pages/auth/owner-proof' })
+      uni.navigateTo({ url: '/pages/auth/center' })
+      return false
+    }
+    return true
+  }
+
+  function requireRealname(): boolean {
+    if (!requireLogin()) return false
+    if (!user.isRealnameVerified) {
+      uni.navigateTo({ url: '/pages/auth/center' })
       return false
     }
     return true
@@ -34,10 +44,12 @@ export function useAuth() {
     user,
     profile,
     isLoggedIn,
+    isRealnameVerified,
     isVerifiedOwner,
     oneClickAvailable,
     requireLogin,
     requireVerified,
+    requireRealname,
     goLogin,
   }
 }

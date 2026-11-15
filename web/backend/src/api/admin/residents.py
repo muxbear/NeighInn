@@ -17,7 +17,7 @@ from src.core.responses import (
     ok,
     paginated,
 )
-from src.core.security import decrypt_field, mask_phone
+from src.core.security import decrypt_field, hmac_index, mask_phone
 from src.core.storage import presign_download
 from src.db.models import Certification, Community, Item, Resident, User
 from src.db.models.common import utcnow
@@ -30,6 +30,7 @@ router = APIRouter(tags=["admin:residents"])
 AuditPerm = Depends(require_permission("community:resident:audit"))
 
 IDENTITY_MAP = {"owner": "业主", "tenant": "租户", "family": "家属", "business": "商务人员"}
+TYPE_LABEL = {"REALNAME": "实名认证", "OWNER_PROOF": "住户认证"}
 
 
 # ---------------------------------------------------------------- 序列化
@@ -41,7 +42,9 @@ async def _cert_row(db: DbSession, cert: Certification) -> dict:
     return {
         "id": str(cert.id),
         "type": cert.type,
+        "typeLabel": TYPE_LABEL.get(cert.type, cert.type),
         "identity": cert.identity,
+        "identityLabel": IDENTITY_MAP.get(cert.identity, cert.identity),
         "status": cert.status,
         "rejectCount": cert.reject_count,
         "rejectReason": cert.reject_reason,
@@ -53,6 +56,7 @@ async def _cert_row(db: DbSession, cert: Certification) -> dict:
             "id": str(cert.user_id),
             "nickname": user.nickname if user else "",
             "phone": mask_phone(phone),
+            "realnameStatus": user.realname_status if user else "UNVERIFIED",
         },
         "community": {"id": str(cert.community_id), "name": community.name if community else ""},
     }
@@ -61,8 +65,17 @@ async def _cert_row(db: DbSession, cert: Certification) -> dict:
 async def _cert_detail(db: DbSession, cert: Certification) -> dict:
     row = await _cert_row(db, cert)
     # 材料：对象键 + 10 分钟签名 URL（MinIO 不可用时仅返回键，W02-02 查看原图另行授权审计）
+    if cert.type == "REALNAME":
+        labels = ["身份证人像面", "身份证国徽面"]
+    else:
+        labels = [f"证明材料 {index + 1}" for index in range(len(cert.materials or []))]
     row["materials"] = [
-        {"objectKey": key, "signedUrl": presign_download(key)} for key in (cert.materials or [])
+        {
+            "objectKey": key,
+            "signedUrl": presign_download(key),
+            "label": labels[index] if index < len(labels) else f"补充材料 {index + 1}",
+        }
+        for index, key in enumerate(cert.materials or [])
     ]
     row["autoResult"] = cert.auto_result or {}
     return row
@@ -143,12 +156,13 @@ async def resident_detail(resident_id: int, admin: CurrentAdmin, db: DbSession):
 
 # ---------------------------------------------------------------- 认证审核队列（W02）
 
-@router.get("/certifications")
+@router.get("/certifications", dependencies=[AuditPerm])
 async def list_certifications(
     admin: CurrentAdmin, db: DbSession,
     type: str | None = Query(default=None),
     status: str | None = Query(default="PENDING"),
     communityId: int | None = Query(default=None),
+    keyword: str | None = Query(default=None),
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
     stmt = select(Certification)
@@ -158,11 +172,61 @@ async def list_certifications(
         stmt = stmt.where(Certification.status == status)
     if communityId:
         stmt = stmt.where(Certification.community_id == communityId)
-    rows, total = await paginate(db, stmt.order_by(Certification.id), page, pageSize)
+    keyword = (keyword or "").strip()
+    if keyword:
+        stmt = stmt.join(User, User.id == Certification.user_id)
+        if keyword.isdigit() and len(keyword) == 11:
+            stmt = stmt.where(User.phone_hash == hmac_index(keyword))
+        else:
+            stmt = stmt.where(or_(
+                User.nickname.ilike(f"%{keyword}%"),
+                Certification.trace_id.ilike(f"%{keyword}%"),
+            ))
+    rows, total = await paginate(
+        db,
+        stmt.order_by(Certification.submitted_at.desc(), Certification.id.desc()),
+        page, pageSize,
+    )
     return paginated([await _cert_row(db, row) for row in rows], page, pageSize, total)
 
 
-@router.get("/certifications/{certification_id}")
+@router.get("/certifications/summary", dependencies=[AuditPerm])
+async def certification_summary(
+    admin: CurrentAdmin, db: DbSession,
+    communityId: int | None = Query(default=None),
+):
+    base_conditions = []
+    if communityId:
+        base_conditions.append(Certification.community_id == communityId)
+
+    async def _count(*conditions) -> int:
+        return int((await db.scalar(
+            select(func.count()).select_from(Certification).where(*conditions))) or 0)
+
+    pending = await _count(Certification.status == "PENDING", *base_conditions)
+    pending_realname = await _count(
+        Certification.status == "PENDING", Certification.type == "REALNAME", *base_conditions)
+    pending_owner = await _count(
+        Certification.status == "PENDING", Certification.type == "OWNER_PROOF", *base_conditions)
+    supplement = await _count(Certification.status == "SUPPLEMENT", *base_conditions)
+    today_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_reviewed = int((await db.scalar(
+        select(func.count()).select_from(Certification).where(
+            Certification.reviewed_at >= today_start, *base_conditions))) or 0)
+    oldest = await db.scalar(
+        select(func.min(Certification.submitted_at)).where(
+            Certification.status == "PENDING", *base_conditions))
+    return ok({
+        "pending": pending,
+        "pendingRealname": pending_realname,
+        "pendingOwner": pending_owner,
+        "supplement": supplement,
+        "todayReviewed": today_reviewed,
+        "oldestPendingAt": int(oldest.timestamp() * 1000) if oldest else 0,
+    })
+
+
+@router.get("/certifications/{certification_id}", dependencies=[AuditPerm])
 async def certification_detail(certification_id: int, admin: CurrentAdmin, db: DbSession):
     cert = await db.get(Certification, certification_id)
     if not cert:
@@ -224,8 +288,8 @@ async def approve_certification(
 
     await notify_user(
         db, cert.user_id, category="COMMUNITY", title="认证审核通过",
-        description="实名认证已通过" if cert.type == "REALNAME" else "业主证明已通过，已绑定小区",
-        icon="shield", tag="认证",
+        description="实名认证已通过" if cert.type == "REALNAME" else "住户认证已通过，已绑定小区",
+        icon="shield", tag="认证", route={"type": "certification"},
     )
     await write_audit(
         db, request, actor=admin, action=f"certification.{cert.type.lower()}.approve",
@@ -268,6 +332,7 @@ async def reject_certification(
     await notify_user(
         db, cert.user_id, category="COMMUNITY", title="认证审核被驳回",
         description=reason, icon="shield-alert", tag="认证",
+        route={"type": "certification"},
     )
     await write_audit(
         db, request, actor=admin, action=f"certification.{cert.type.lower()}.reject",
@@ -297,6 +362,7 @@ async def request_materials(
     await notify_user(
         db, cert.user_id, category="COMMUNITY", title="认证材料需补充",
         description=payload.note or "请按要求补充证明材料后重新提交", icon="file", tag="认证",
+        route={"type": "certification"},
     )
     await write_audit(db, request, actor=admin, action="certification.request-materials",
                       resource_type="certification", resource_id=cert.id,
@@ -372,7 +438,7 @@ async def freeze_resident(resident_id: int, request: Request,
         await notify_user(
             db, resident.user_id, category="COMMUNITY", title="业主资格已被冻结",
             description="因违规处理，您的业主资格已被冻结，在售物品已自动下架。如有疑问请联系客服。",
-            icon="lock", tag="认证",
+            icon="lock", tag="认证", route={"type": "certification"},
         )
     await write_audit(db, request, actor=admin, action="resident.freeze",
                       resource_type="resident", resource_id=resident.id,
@@ -399,7 +465,7 @@ async def unfreeze_resident(resident_id: int, request: Request,
         await notify_user(
             db, resident.user_id, category="COMMUNITY", title="业主资格已恢复",
             description="您的业主资格已解冻，下架物品需手动重新上架。",
-            icon="unlock", tag="认证",
+            icon="unlock", tag="认证", route={"type": "certification"},
         )
     await write_audit(db, request, actor=admin, action="resident.unfreeze",
                       resource_type="resident", resource_id=resident.id,
@@ -427,7 +493,7 @@ async def revoke_certification(resident_id: int, request: Request,
         await notify_user(
             db, resident.user_id, category="COMMUNITY", title="业主认证已被撤销",
             description="经核实，您的业主认证已被撤销，如需继续发布请重新提交认证材料。",
-            icon="shield-off", tag="认证",
+            icon="shield-off", tag="认证", route={"type": "certification"},
         )
     await write_audit(db, request, actor=admin, action="resident.revoke",
                       resource_type="resident", resource_id=resident.id,

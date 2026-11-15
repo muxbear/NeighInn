@@ -18,9 +18,11 @@ import {
 } from 'lucide-vue-next'
 import { dashboardApi } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useTodoStore } from '@/stores/todos'
 
 const router = useRouter()
 const app = useAppStore()
+const todoStore = useTodoStore()
 const summary = ref<any>(null)
 const trend = ref<any>({ labels: [], active: [], interaction: [] })
 const activities = ref<any[]>([])
@@ -31,7 +33,7 @@ const metrics = computed(() => {
   return [
     { label: '社区用户', value: Number(m.users || 12680).toLocaleString(), change: m.usersChange || '+8.2%', detail: m.usersDetail || '本月新增 326', icon: Users, tone: 'violet' },
     { label: '今日活跃', value: Number(m.active || 3428).toLocaleString(), change: m.activeChange || '+12.4%', detail: m.activeDetail || '活跃率 27.0%', icon: Activity, tone: 'blue' },
-    { label: '待办事项', value: String(m.todos || 43), change: m.todoChange || '需关注', detail: m.todoDetail || '6 项即将超时', icon: ClipboardCheck, tone: 'orange' },
+    { label: '待办事项', value: String(m.todos ?? 0), change: m.todoChange || '需关注', detail: m.todoDetail || '认证与运营待办', icon: ClipboardCheck, tone: 'orange' },
     { label: '服务满意度', value: `${Number(m.satisfaction || 96.8).toFixed(1)}%`, change: m.satisfactionChange || '+1.6%', detail: m.satisfactionDetail || '基于 1,284 份评价', icon: TrendingUp, tone: 'green' },
   ]
 })
@@ -40,8 +42,25 @@ const donutStyle = computed(() => {
   const d = distribution.value
   return { background: `conic-gradient(#7460d3 0 ${d.ownerPct}, #9f91df ${d.ownerPct} 89%, #d8d1f2 89% 100%)` }
 })
-const todos = computed(() => summary.value?.todos || [])
+const todos = computed(() => {
+  const source = todoStore.items.length ? todoStore.items : (summary.value?.todos || [])
+  return source.filter((item: any) => Number(item.count || 0) > 0)
+})
 const todoIcon = (name: string) => ({ Wrench, ClipboardCheck, Flag, MessageCircleMore, ShoppingBag }[name] || ClipboardCheck)
+
+function openTodo(item: any) {
+  if (item.key === 'certification') {
+    router.push({
+      path: item.route || '/governance/verification',
+      query: {
+        status: 'PENDING',
+        ...(item.latestCertId ? { certId: item.latestCertId } : {}),
+      },
+    })
+    return
+  }
+  router.push(item.route || '/dashboard')
+}
 const todayText = (() => {
   const now = new Date()
   const weekday = new Intl.DateTimeFormat('zh-CN', { weekday: 'long' }).format(now)
@@ -64,6 +83,7 @@ async function load() {
     summary.value = summaryData
     trend.value = trendData
     activities.value = activityData
+    todoStore.refresh()
   } catch (exc: any) {
     app.showToast(exc?.message || '工作台数据加载失败')
   } finally {
@@ -80,7 +100,7 @@ watch(() => app.currentCommunityId, load)
     <div>
       <p>{{ todayText }}</p>
       <h1>{{ greeting }}，{{ '夏木' }}</h1>
-      <span>社区运行平稳，今天有 {{ summary?.metrics?.todos || 43 }} 项事务等待处理。</span>
+      <span>社区运行平稳，今天有 {{ summary?.metrics?.todos ?? 0 }} 项事务等待处理。</span>
     </div>
     <div class="heading-actions">
       <button class="secondary-button" @click="app.showToast('运营简报已生成')"><FileText :size="17" />生成简报</button>
@@ -120,9 +140,9 @@ watch(() => app.currentCommunityId, load)
         <div><h2>待办事项</h2><p>按优先级聚合的运营任务</p></div>
         <button @click="router.push('/governance/repair-orders')">查看全部<ChevronRight :size="14" /></button>
       </div>
-      <button v-for="item in todos.slice(0, 4)" :key="item.title" class="todo-item" @click="router.push(item.route)">
+      <button v-for="item in todos.slice(0, 4)" :key="item.key || item.title" class="todo-item" @click="openTodo(item)">
         <span :class="['todo-icon', item.color]"><component :is="todoIcon(item.icon)" :size="18" /></span>
-        <div><strong>{{ item.title }}</strong><p>{{ item.sub }}</p></div>
+        <div><strong>{{ item.title }}</strong><p>{{ item.description || item.sub }}</p></div>
         <em>{{ item.count }}</em>
         <ChevronRight :size="16" />
       </button>

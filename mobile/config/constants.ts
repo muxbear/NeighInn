@@ -170,6 +170,7 @@ export const STORAGE_KEYS = {
   conversations: 'ni_im_conversations',
   trackQueue: 'ni_track_queue',
   mockSession: 'ni_mock_session',
+  certGuideDismissedAt: 'ni_cert_guide_dismissed_at',
 } as const
 
 export const ERROR_MESSAGES: Record<number, string> = {

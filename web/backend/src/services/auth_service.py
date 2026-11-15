@@ -336,49 +336,99 @@ async def bound_resident(db: AsyncSession, user_id: int) -> Resident | None:
     )
 
 
+def _cert_payload(cert: Certification | None) -> dict:
+    if cert is None:
+        return {
+            "status": "UNVERIFIED",
+            "rejectReason": "",
+            "canResubmit": True,
+            "submittedAt": 0,
+            "certId": "",
+        }
+    reject_reason = ""
+    if cert.status == "REJECTED":
+        reject_reason = cert.reject_reason
+    elif cert.status == "SUPPLEMENT":
+        reject_reason = cert.review_note or "请按要求补充认证材料后重新提交"
+    return {
+        "status": cert.status,
+        "rejectReason": reject_reason,
+        "canResubmit": cert.reject_count < 3,
+        "submittedAt": int(cert.submitted_at.timestamp() * 1000) if cert.submitted_at else 0,
+        "certId": str(cert.id),
+    }
+
+
 async def compute_auth_status(db: AsyncSession, user: User) -> dict:
-    """移动端 AuthStatusResult（mobile/models/user.model.ts）。
+    """移动端认证状态：实名与住户认证相互独立。
 
-    NOT_LOGIN → LOGGED_IN_UNVERIFIED → VERIFYING → VERIFIED_UNOWNER
-      → SUBMITTING_PROOF → PENDING_AUDIT → VERIFIED_OWNER；REJECTED 可重提；FROZEN 冻结。
+    整体 status 保留给旧页面做流程判断；realname/owner 两个子状态供认证中心与
+    标识展示使用。住户认证通过即可成为认证业主，不要求先完成实名。
     """
-    if user.status == "FROZEN":
-        return {"status": "FROZEN", "realnameVerified": True, "ownerVerified": True,
-                "canResubmit": False}
-
     realname = await latest_certification(db, user.id, "REALNAME")
-    realname_verified = bool(realname and realname.status == "VERIFIED")
     owner = await latest_certification(db, user.id, "OWNER_PROOF")
+    realname_verified = bool(realname and realname.status == "VERIFIED")
     owner_verified = bool(owner and owner.status == "VERIFIED")
 
-    if realname is None:
-        status = "LOGGED_IN_UNVERIFIED"
-    elif realname.status == "PENDING" or realname.status == "SUPPLEMENT":
-        status = "VERIFYING"
-    elif realname.status == "REJECTED":
-        return {
-            "status": "REJECTED", "realnameVerified": False, "ownerVerified": False,
-            "rejectReason": realname.reject_reason, "canResubmit": realname.reject_count < 3,
-        }
-    elif owner is None:
-        status = "VERIFIED_UNOWNER"
-    elif owner.status in ("PENDING", "SUPPLEMENT"):
-        status = "PENDING_AUDIT"
-    elif owner.status == "REJECTED":
-        return {
-            "status": "REJECTED", "realnameVerified": True, "ownerVerified": False,
-            "rejectReason": owner.reject_reason, "canResubmit": owner.reject_count < 3,
-        }
-    elif owner.status == "FROZEN":
-        status = "FROZEN"
+    realname_payload = _cert_payload(realname)
+    owner_payload = _cert_payload(owner)
+    if owner is not None and owner.status == "REVOKED":
+        owner_payload["rejectReason"] = "住户认证已被撤销，请重新提交认证材料"
+    if owner is not None and owner.community_id:
+        community = await db.get(Community, owner.community_id)
+        owner_payload["communityId"] = str(owner.community_id)
+        owner_payload["communityName"] = community.name if community else ""
     else:
+        owner_payload["communityId"] = ""
+        owner_payload["communityName"] = ""
+
+    if user.status == "FROZEN":
+        status = "FROZEN"
+        reject_type = ""
+    elif owner_verified:
         status = "VERIFIED_OWNER"
+        reject_type = ""
+    elif owner is not None and owner.status in ("PENDING", "SUPPLEMENT"):
+        status = "PENDING_AUDIT"
+        reject_type = ""
+    elif owner is not None and owner.status == "FROZEN":
+        status = "FROZEN"
+        reject_type = ""
+    elif owner is not None and owner.status in ("REJECTED", "REVOKED"):
+        status = "REJECTED"
+        reject_type = "OWNER_PROOF"
+    elif realname is not None and realname.status in ("PENDING", "SUPPLEMENT"):
+        status = "VERIFYING"
+        reject_type = ""
+    elif realname is not None and realname.status == "REJECTED":
+        status = "REJECTED"
+        reject_type = "REALNAME"
+    elif realname_verified:
+        status = "VERIFIED_UNOWNER"
+        reject_type = ""
+    else:
+        status = "LOGGED_IN_UNVERIFIED"
+        reject_type = ""
+
+    if reject_type == "OWNER_PROOF":
+        can_resubmit = owner_payload["canResubmit"]
+        reject_reason = owner_payload["rejectReason"]
+    elif reject_type == "REALNAME":
+        can_resubmit = realname_payload["canResubmit"]
+        reject_reason = realname_payload["rejectReason"]
+    else:
+        can_resubmit = True
+        reject_reason = ""
 
     return {
         "status": status,
+        "realname": realname_payload,
+        "owner": owner_payload,
         "realnameVerified": realname_verified,
         "ownerVerified": owner_verified,
-        "canResubmit": True,
+        "canResubmit": can_resubmit,
+        "rejectReason": reject_reason,
+        "rejectType": reject_type,
     }
 
 
@@ -411,6 +461,10 @@ async def serialize_profile(db: AsyncSession, user: User) -> dict:
         "showBio": True,
         "shareAddressAfterOrder": False,
         "verified": bool(auth.get("ownerVerified")),
+        "realnameVerified": bool(auth.get("realnameVerified")),
+        "ownerVerified": bool(auth.get("ownerVerified")),
+        "realnameStatus": auth["realname"]["status"],
+        "ownerStatus": auth["owner"]["status"],
         "creditScore": user.credit_score,
         "creditLevel": user.credit_level,
         "dealCount": 0,
@@ -430,5 +484,5 @@ def validate_phone(phone: str) -> None:
 
 async def assert_no_pending_certification(db: AsyncSession, user_id: int, cert_type: str) -> None:
     existing = await latest_certification(db, user_id, cert_type)
-    if existing and existing.status in ("PENDING", "SUPPLEMENT"):
+    if existing and existing.status == "PENDING":
         raise ApiError(ERR_CONFLICT, "已有审核中的申请，请耐心等待审核结果", 409)

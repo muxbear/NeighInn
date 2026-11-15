@@ -71,7 +71,7 @@ npm run icons        # 重新生成图标与内置头像资源
 
 ```
 App.uvue / main.ts / pages.json / manifest.json / uni.scss
-pages/                  38 个页面（主包 + trade/social/pay 等分包）
+pages/                  39 个页面（主包 + trade/social/pay 等分包）
 components/             40 个 ni-* 基础组件与业务组件
 composables/            useAuth / useIM / usePay / useUpload / useAudit / useToast ...
 services/               业务服务层（含 ws.service 长连接封装）
@@ -100,7 +100,7 @@ docs/                   详细设计方案
 - 订单（免费/互换/货币）、收银台、预约、验货、评价、纠纷、钱包
 - 我的、个人信息/头像库、设置、小区管理、收藏足迹、信用中心、帮助与举报
 - 统一响应/错误码/Token/幂等键/Mock、WebSocket 心跳重连与事件分发
-- 设计 Token、40 个组件、多状态 SVG 图标、内置头像库
+- 设计 Token、41 个组件、多状态 SVG 图标、内置头像库
 
 ## Figma 对齐补全（2026-11-14）
 

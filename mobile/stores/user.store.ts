@@ -24,7 +24,17 @@ export const useUserStore = defineStore('user', () => {
   const hydrated = ref(false)
 
   const isLoggedIn = computed(() => Boolean(accessToken.value))
-  const isVerifiedOwner = computed(() => profile.value?.authStatus === 'VERIFIED_OWNER')
+  const isRealnameVerified = computed(
+    () => profile.value?.realnameVerified === true
+      || profile.value?.authStatus === 'VERIFIED_UNOWNER'
+      || profile.value?.authStatus === 'VERIFIED_OWNER',
+  )
+  const isVerifiedOwner = computed(
+    () => profile.value?.ownerVerified === true
+      || profile.value?.authStatus === 'VERIFIED_OWNER',
+  )
+  const realnameStatus = computed(() => profile.value?.realnameStatus ?? 'UNVERIFIED')
+  const ownerStatus = computed(() => profile.value?.ownerStatus ?? 'UNVERIFIED')
   const avatarSrc = computed(() => {
     if (!profile.value) return ''
     if (profile.value.avatarDataUrl) return profile.value.avatarDataUrl
@@ -162,7 +172,10 @@ export const useUserStore = defineStore('user', () => {
     profile,
     loading,
     isLoggedIn,
+    isRealnameVerified,
     isVerifiedOwner,
+    realnameStatus,
+    ownerStatus,
     avatarSrc,
     displayPhone,
     authStatus,

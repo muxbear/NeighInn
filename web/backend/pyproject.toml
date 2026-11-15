@@ -16,6 +16,7 @@ dependencies = [
     "pyjwt>=2.10.0",
     "redis>=5.2.1",
     "minio>=7.2.10",
+    "python-multipart>=0.0.20",
     "python-dateutil>=2.9.0",
 ]
 
@@ -40,3 +41,6 @@ target-version = "py311"
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "cert_materials: 使用真实认证材料归属校验（跳过存量测试夹具）",
+]

@@ -6,6 +6,8 @@ from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
@@ -19,7 +21,10 @@ from src.core.responses import (
     ok,
 )
 from src.core.security import decode_token, issue_access_token, issue_refresh_token, mask_phone
-from src.db.models import Certification
+from src.db.models import Certification, FileObject
+from src.db.models.common import utcnow
+from src.domain import enums as E
+from src.domain.state import certification_sm
 from src.services import auth_service as svc
 from src.services.auth_service import sms_code_store
 
@@ -64,6 +69,36 @@ class OwnerProofIn(BaseModel):
     communityId: int
     identity: str = "owner"  # owner / tenant / family（M01-03）
     images: list[str] = []
+
+
+async def _assert_uploaded_materials(
+    db: DbSession,
+    user_id: int,
+    keys: list[str],
+    *,
+    allow_pdf: bool = False,
+) -> None:
+    """认证材料必须是当前用户上传到对象存储的私有文件，禁止伪造对象键。"""
+    clean = [key for key in keys if key]
+    unique = list(dict.fromkeys(clean))
+    if not unique:
+        raise ApiError(ERR_PARAM, "请上传认证材料", 400)
+    if len(unique) != len(clean):
+        raise ApiError(ERR_PARAM, "认证材料不能重复", 400)
+    rows = list((await db.execute(
+        select(FileObject).where(
+            FileObject.object_key.in_(unique),
+            FileObject.uploaded_by == user_id,
+            FileObject.visibility == "private",
+        )
+    )).scalars().all())
+    if len(rows) != len(unique):
+        raise ApiError(ERR_PARAM, "认证材料不存在或不属于当前用户，请重新上传", 400)
+    allowed = {"image/jpeg", "image/png", "image/webp"}
+    if allow_pdf:
+        allowed.add("application/pdf")
+    if any(row.content_type not in allowed for row in rows):
+        raise ApiError(ERR_PARAM, "认证材料格式不支持", 400)
 
 
 @router.post("/auth/sms-code")
@@ -188,17 +223,46 @@ async def submit_realname(payload: RealnameIn, user: CurrentUser, db: DbSession)
     if not payload.frontImage or not payload.backImage:
         raise ApiError(ERR_PARAM, "请上传身份证正反面照片", 400)
     await svc.assert_no_pending_certification(db, user.id, "REALNAME")
-    cert = Certification(
-        user_id=user.id,
-        type="REALNAME",
-        materials=[payload.frontImage, payload.backImage],
-        auto_result={"faceToken": bool(payload.faceToken)},
-        status="PENDING",
-        trace_id=uuid.uuid4().hex[:16],
+    await _assert_uploaded_materials(
+        db, user.id, [payload.frontImage, payload.backImage],
     )
-    db.add(cert)
-    await db.commit()
-    return ok({"status": "PENDING", "message": "实名认证已提交，预计 24 小时内完成审核"})
+    existing = await svc.latest_certification(db, user.id, "REALNAME")
+    if existing and existing.status == "SUPPLEMENT":
+        # 待补充可复用原审核单重新进入队列，避免重复待办。
+        cert = existing
+        cert.materials = [payload.frontImage, payload.backImage]
+        cert.auto_result = {"faceToken": bool(payload.faceToken)}
+        cert.reviewer_id = None
+        cert.reviewed_at = None
+        cert.review_note = ""
+        cert.reject_reason = ""
+        cert.submitted_at = utcnow()
+        cert.trace_id = uuid.uuid4().hex[:16]
+        cert.status = certification_sm.fire(
+            cert.status, E.CertificationStatus.PENDING)
+    else:
+        cert = Certification(
+            user_id=user.id,
+            type="REALNAME",
+            materials=[payload.frontImage, payload.backImage],
+            auto_result={"faceToken": bool(payload.faceToken)},
+            status=E.CertificationStatus.UNVERIFIED,
+            trace_id=uuid.uuid4().hex[:16],
+        )
+        cert.status = certification_sm.fire(
+            cert.status, E.CertificationStatus.PENDING)
+        db.add(cert)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ApiError(ERR_CONFLICT, "已有审核中的实名认证申请，请耐心等待审核结果", 409) from exc
+    return ok({
+        "status": cert.status,
+        "certId": str(cert.id),
+        "submittedAt": int(cert.submitted_at.timestamp() * 1000),
+        "message": "实名认证已提交，预计 24 小时内完成审核",
+    })
 
 
 @router.post("/auth/owner-proof")
@@ -209,26 +273,52 @@ async def submit_owner_proof(payload: OwnerProofIn, user: CurrentUser, db: DbSes
 
     if not payload.images:
         raise ApiError(ERR_PARAM, "请上传至少 1 份证明材料", 400)
-    # SRS 4.1 流程顺序：实名认证 → 业主证明（服务端强校验）
-    realname = await svc.latest_certification(db, user.id, "REALNAME")
-    if not realname or realname.status != "VERIFIED":
-        raise ApiError(40302, "请先完成实名认证后再提交业主证明", 403)
     community = await db.get(Community, payload.communityId)
     if not community or community.status != "OPERATING":
         raise ApiError(ERR_PARAM, "所选小区不存在或已停用", 400)
     await svc.assert_no_pending_certification(db, user.id, "OWNER_PROOF")
-    cert = Certification(
-        user_id=user.id,
-        type="OWNER_PROOF",
-        community_id=payload.communityId,
-        identity=payload.identity,
-        materials=payload.images[:5],
-        status="PENDING",
-        trace_id=uuid.uuid4().hex[:16],
+    await _assert_uploaded_materials(
+        db, user.id, payload.images[:5], allow_pdf=True,
     )
-    db.add(cert)
-    await db.commit()
-    return ok({"status": "PENDING", "auditHours": 24})
+    # 实名与住户认证相互独立：住户认证通过即可绑定小区、获得业主标识。
+    existing = await svc.latest_certification(db, user.id, "OWNER_PROOF")
+    if existing and existing.status == "SUPPLEMENT":
+        cert = existing
+        cert.community_id = payload.communityId
+        cert.identity = payload.identity
+        cert.materials = payload.images[:5]
+        cert.reviewer_id = None
+        cert.reviewed_at = None
+        cert.review_note = ""
+        cert.reject_reason = ""
+        cert.submitted_at = utcnow()
+        cert.trace_id = uuid.uuid4().hex[:16]
+        cert.status = certification_sm.fire(
+            cert.status, E.CertificationStatus.PENDING)
+    else:
+        cert = Certification(
+            user_id=user.id,
+            type="OWNER_PROOF",
+            community_id=payload.communityId,
+            identity=payload.identity,
+            materials=payload.images[:5],
+            status=E.CertificationStatus.UNVERIFIED,
+            trace_id=uuid.uuid4().hex[:16],
+        )
+        cert.status = certification_sm.fire(
+            cert.status, E.CertificationStatus.PENDING)
+        db.add(cert)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ApiError(ERR_CONFLICT, "已有审核中的住户认证申请，请耐心等待审核结果", 409) from exc
+    return ok({
+        "status": cert.status,
+        "certId": str(cert.id),
+        "submittedAt": int(cert.submitted_at.timestamp() * 1000),
+        "auditHours": 24,
+    })
 
 
 @router.post("/auth/appeal")

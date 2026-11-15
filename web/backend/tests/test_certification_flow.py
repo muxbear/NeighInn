@@ -86,14 +86,50 @@ async def test_auth_status_transitions(client):
 
 
 @pytest.mark.asyncio
-async def test_owner_proof_requires_realname_first(client):
-    """SRS 4.1 流程顺序：未完成实名认证不得提交业主证明（40302）。"""
+async def test_owner_proof_allowed_without_realname(client):
+    """实名与住户认证相互独立：未实名也可提交住户认证。"""
     result = await register_user(client)
     resp = await client.post(f"{C_BASE}/auth/owner-proof",
                              json={"communityId": 1, "identity": "owner",
                                    "images": ["a.jpg"]}, headers=bearer(result["token"]))
-    assert resp.status_code == 403
-    assert resp.json()["code"] == 40302
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["status"] == "PENDING"
+
+    status = (await client.get(f"{C_BASE}/auth/status",
+                               headers=bearer(result["token"]))).json()["data"]
+    assert status["realname"]["status"] == "UNVERIFIED"
+    assert status["owner"]["status"] == "PENDING"
+    assert status["status"] == "PENDING_AUDIT"
+    assert status["realnameVerified"] is False
+    assert status["ownerVerified"] is False
+
+
+@pytest.mark.asyncio
+async def test_owner_only_approval_grants_owner_badge(client):
+    """住户认证可独立审核通过；实名状态仍保持未认证。"""
+    result = await register_user(client)
+    await client.post(f"{C_BASE}/auth/owner-proof",
+                      json={"communityId": 1, "identity": "owner",
+                            "images": ["a.jpg"]}, headers=bearer(result["token"]))
+    csrf = await admin_login(client)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    resp = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+    assert resp.status_code == 200, resp.text
+
+    status = (await client.get(f"{C_BASE}/auth/status",
+                               headers=bearer(result["token"]))).json()["data"]
+    assert status["status"] == "VERIFIED_OWNER"
+    assert status["ownerVerified"] is True
+    assert status["realnameVerified"] is False
+    assert status["owner"]["communityName"] == "阳光花园小区"
+
+    profile = (await client.get(f"{C_BASE}/users/me",
+                                headers=bearer(result["token"]))).json()["data"]
+    assert profile["ownerVerified"] is True
+    assert profile["realnameVerified"] is False
+    assert profile["realnameStatus"] == "UNVERIFIED"
+    assert profile["ownerStatus"] == "VERIFIED"
 
 
 @pytest.mark.asyncio
@@ -225,6 +261,45 @@ async def test_reject_requires_reason_and_notifies(client, db_session):
         .where(AppNotification.user_id == int(result["profile"]["id"]))
         .order_by(AppNotification.id.desc()))
     assert note is not None and "驳回" in note.title and reason in note.description
+
+
+@pytest.mark.asyncio
+async def test_supplement_resubmit_reuses_pending_cert(client):
+    """要求补充材料后，用户重新提交应复用原审核单，不产生第二条待办。"""
+    result = await register_user(client)
+    headers = bearer(result["token"])
+    first = await client.post(
+        f"{C_BASE}/auth/realname",
+        json={"frontImage": "certs/f.jpg", "backImage": "certs/b.jpg"},
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    first_id = first.json()["data"]["certId"]
+
+    csrf = await admin_login(client)
+    cert = await first_pending_cert(client, csrf, "REALNAME")
+    resp = await client.post(
+        f"{ADMIN_BASE}/certifications/{cert['id']}/request-materials",
+        json={"note": "请补充身份证国徽面清晰照片"}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["realname"]["status"] == "SUPPLEMENT"
+    assert "补充" in status["realname"]["rejectReason"]
+
+    again = await client.post(
+        f"{C_BASE}/auth/realname",
+        json={"frontImage": "certs/f2.jpg", "backImage": "certs/b2.jpg"},
+        headers=headers,
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["data"]["certId"] == first_id
+
+    queue = (await client.get(
+        f"{ADMIN_BASE}/certifications",
+        params={"status": "PENDING", "type": "REALNAME"}, headers=csrf,
+    )).json()["data"]
+    assert queue["total"] == 1
+    assert queue["items"][0]["id"] == first_id
 
 
 @pytest.mark.asyncio

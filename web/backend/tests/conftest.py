@@ -52,6 +52,18 @@ async def db_session(session_maker):
         yield session
 
 
+@pytest.fixture(autouse=True)
+def bypass_material_validation(request, monkeypatch):
+    """存量认证测试使用夹具对象键；标注 cert_materials 的用例走真实归属校验。"""
+    if request.node.get_closest_marker("cert_materials"):
+        return
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("src.api.c_end.auth._assert_uploaded_materials", _noop)
+
+
 @pytest.fixture()
 async def client(session_maker, db_session):
     async def override_get_db():
@@ -159,7 +171,7 @@ async def submit_owner_proof(client: AsyncClient, token: str, community_id: int 
 
 
 async def verify_realname(client: AsyncClient, csrf_headers: dict, token: str) -> None:
-    """实名提交 + 后台审核通过（业主证明的前置条件，SRS 4.1）。"""
+    """实名提交 + 后台审核通过（与住户认证相互独立）。"""
     resp = await client.post(
         f"{C_BASE}/auth/realname",
         json={"frontImage": "certs/id-front.jpg", "backImage": "certs/id-back.jpg",

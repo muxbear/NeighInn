@@ -22,16 +22,47 @@
         </view>
       </view>
 
-      <view class="realname__progress">
-        <view class="realname__progress-head">
-          <text class="realname__progress-title">认证进度</text>
-          <text class="realname__progress-value">{{ progressPercent }}%</text>
-        </view>
-        <ni-progress :percent="progressPercent" :height="6" color="#6BB88A" />
-        <text class="realname__progress-text">{{ progressText }}</text>
+      <view v-if="statusLoading" class="realname__state">
+        <ni-loading :size="20" text="正在读取认证状态" />
       </view>
 
-      <view class="realname__card">
+      <view v-else-if="isVerified" class="realname__state realname__state--success">
+        <view class="realname__state-icon realname__state-icon--success">
+          <ni-icon name="check" :size="24" state="white" />
+        </view>
+        <text class="realname__state-title">实名认证已完成</text>
+        <text class="realname__state-desc">你的身份信息已通过核验，个人中心会展示“已实名”标识。</text>
+        <ni-button type="primary" size="lg" block @tap="goCenter">返回认证中心</ni-button>
+      </view>
+
+      <view v-else-if="isPending" class="realname__state">
+        <view class="realname__state-icon">
+          <ni-icon name="clock" :size="24" state="gold" />
+        </view>
+        <text class="realname__state-title">{{ currentStatus === 'SUPPLEMENT' ? '需要补充材料' : '实名认证审核中' }}</text>
+        <text class="realname__state-desc">预计 24 小时内完成审核，结果会通过通知中心告知；住户认证可同时提交。</text>
+        <ni-button type="primary" size="lg" block @tap="goCenter">返回认证中心</ni-button>
+      </view>
+
+      <template v-else>
+        <view v-if="(currentStatus === 'REJECTED' || currentStatus === 'SUPPLEMENT') && rejectReason" class="realname__rejected">
+          <ni-icon name="alert" :size="16" state="danger" />
+          <view class="realname__rejected-copy">
+            <text class="realname__rejected-title">{{ bannerTitle }}</text>
+            <text class="realname__rejected-desc">{{ rejectReason }}</text>
+          </view>
+        </view>
+
+        <view class="realname__progress">
+          <view class="realname__progress-head">
+            <text class="realname__progress-title">认证进度</text>
+            <text class="realname__progress-value">{{ progressPercent }}%</text>
+          </view>
+          <ni-progress :percent="progressPercent" :height="6" color="#6BB88A" />
+          <text class="realname__progress-text">{{ progressText }}</text>
+        </view>
+
+        <view class="realname__card">
         <text class="realname__card-title">上传身份证</text>
         <text class="realname__card-desc">请确保四角完整、文字清晰、无反光</text>
         <view class="realname__uploads">
@@ -60,37 +91,42 @@
         </view>
       </view>
 
-      <view class="realname__card">
-        <text class="realname__card-title">人脸识别</text>
-        <text class="realname__card-desc">由第三方安全 SDK 完成活体检测，平台不保存人脸照片</text>
-        <view v-if="faceToken" class="realname__face-done">
-          <view class="realname__face-done-icon">
-            <ni-icon name="check" :size="22" state="white" />
+        <view class="realname__card">
+          <text class="realname__card-title">人脸识别（可选）</text>
+          <text class="realname__card-desc">由第三方安全 SDK 完成活体检测，平台不保存人脸照片；未接入 SDK 时不影响提交</text>
+          <view v-if="faceToken" class="realname__face-done">
+            <view class="realname__face-done-icon">
+              <ni-icon name="check" :size="22" state="white" />
+            </view>
+            <text class="realname__face-done-text">人脸识别已完成</text>
           </view>
-          <text class="realname__face-done-text">人脸识别已完成</text>
+          <ni-button v-else type="secondary" size="xl" block icon="camera" @tap="verifyFace">
+            开始人脸识别
+          </ni-button>
         </view>
-        <ni-button v-else type="primary" size="xl" block icon="camera" @tap="verifyFace">
-          开始人脸识别
+
+        <view class="realname__tips">
+          <text class="realname__tips-title">认证说明</text>
+          <text class="realname__tips-item">· 实名认证与住户认证相互独立，可先跳过实名、直接提交住户认证</text>
+          <text class="realname__tips-item">· 实名通过后，个人中心会展示“已实名”标识</text>
+          <text class="realname__tips-item">· 身份证号与姓名加密存储，页面仅展示脱敏信息</text>
+        </view>
+
+        <ni-button
+          type="primary"
+          size="lg"
+          block
+          :loading="submitting || uploading"
+          :disabled="!canSubmit"
+          @tap="submit"
+        >
+          {{ canSubmit ? '提交实名认证' : '请上传身份证正反面' }}
         </ni-button>
-      </view>
 
-      <view class="realname__tips">
-        <text class="realname__tips-title">认证说明</text>
-        <text class="realname__tips-item">· 实名认证通过后才能发布物品与发起交易</text>
-        <text class="realname__tips-item">· 身份证号与姓名加密存储，页面仅展示脱敏信息</text>
-        <text class="realname__tips-item">· 如多次认证失败，请联系在线客服人工核验</text>
-      </view>
-
-      <ni-button
-        type="primary"
-        size="lg"
-        block
-        :loading="submitting"
-        :disabled="!canSubmit"
-        @tap="submit"
-      >
-        {{ canSubmit ? '提交实名认证' : '请完成证件与人脸识别' }}
-      </ni-button>
+        <view class="realname__skip" @click="skipRealname">
+          <text class="realname__skip-text">暂时跳过，先进行住户认证</text>
+        </view>
+      </template>
     </view>
 
     <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
@@ -99,61 +135,93 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { CertificationState } from '../../models'
 import { useToast } from '../../composables/useToast'
+import { useUpload } from '../../composables/useUpload'
+import { useUserStore } from '../../stores/user.store'
 import { authService } from '../../services/auth.service'
-import { chooseImages } from '../../utils/image'
+import { chooseImages, compressImage } from '../../utils/image'
 
 const { toast, showToast } = useToast()
+const userStore = useUserStore()
+const { uploading, uploadOne } = useUpload()
 
 const frontImage = ref('')
 const backImage = ref('')
+const frontKey = ref('')
+const backKey = ref('')
 const faceToken = ref('')
 const submitting = ref(false)
+const statusLoading = ref(true)
+const currentStatus = ref<CertificationState>('UNVERIFIED')
+const ownerStatus = ref<CertificationState>('UNVERIFIED')
+const rejectReason = ref('')
+
+const isPending = computed(() => currentStatus.value === 'PENDING')
+const isVerified = computed(() => currentStatus.value === 'VERIFIED')
+const bannerTitle = computed(
+  () => (currentStatus.value === 'SUPPLEMENT' ? '需要补充材料' : '上次申请未通过'),
+)
 
 const progressPercent = computed(() => {
   let value = 0
-  if (frontImage.value) value += 30
-  if (backImage.value) value += 30
-  if (faceToken.value) value += 25
+  if (frontKey.value) value += 45
+  if (backKey.value) value += 45
+  if (faceToken.value) value += 10
   return Math.min(100, value)
 })
 
 const progressText = computed(() => {
-  if (!frontImage.value) return '请先上传身份证人像面'
-  if (!backImage.value) return '请上传身份证国徽面'
-  if (!faceToken.value) return '请完成人脸识别'
+  if (!frontKey.value) return '请先上传身份证人像面'
+  if (!backKey.value) return '请上传身份证国徽面'
+  if (!faceToken.value) return '证件已齐全，可直接提交（人脸识别可选）'
   return '资料已齐全，可以提交认证'
 })
 
-const canSubmit = computed(() => Boolean(frontImage.value && backImage.value && faceToken.value))
+const canSubmit = computed(() => Boolean(frontKey.value && backKey.value))
 
-async function uploadFront(): Promise<void> {
+onLoad(async () => {
+  try {
+    const status = await authService.getStatus()
+    currentStatus.value = status.realname?.status ?? 'UNVERIFIED'
+    ownerStatus.value = status.owner?.status ?? 'UNVERIFIED'
+    rejectReason.value = status.realname?.rejectReason ?? ''
+  } catch {
+    // 状态读取失败时仍允许重新提交
+  } finally {
+    statusLoading.value = false
+  }
+})
+
+async function pickAndUpload(target: 'front' | 'back'): Promise<void> {
   try {
     const paths = await chooseImages({ count: 1 })
-    if (paths.length) {
-      frontImage.value = paths[0]
-      showToast('身份证人像面已上传')
-    }
-  } catch {
-    // 用户取消
+    if (!paths.length) return
+    const compressed = await compressImage(paths[0], 82)
+    if (target === 'front') frontImage.value = compressed
+    else backImage.value = compressed
+    showToast('正在上传，请稍候')
+    const key = await uploadOne(compressed, 'REALNAME_ID')
+    if (target === 'front') frontKey.value = key
+    else backKey.value = key
+    showToast(target === 'front' ? '身份证人像面已上传' : '身份证国徽面已上传')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '上传失败', 'alert')
   }
 }
 
-async function uploadBack(): Promise<void> {
-  try {
-    const paths = await chooseImages({ count: 1 })
-    if (paths.length) {
-      backImage.value = paths[0]
-      showToast('身份证国徽面已上传')
-    }
-  } catch {
-    // 用户取消
-  }
+function uploadFront(): void {
+  pickAndUpload('front')
+}
+
+function uploadBack(): void {
+  pickAndUpload('back')
 }
 
 function verifyFace(): void {
   uni.showModal({
-    title: '人脸识别',
+    title: '人脸识别（可选）',
     content: '即将调用第三方活体检测 SDK。演示环境将模拟识别成功。',
     confirmText: '开始识别',
     success: (res) => {
@@ -169,10 +237,11 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     await authService.submitRealname({
-      frontImage: frontImage.value,
-      backImage: backImage.value,
+      frontImage: frontKey.value,
+      backImage: backKey.value,
       faceToken: faceToken.value,
     })
+    await userStore.refreshProfile().catch(() => undefined)
     showToast('实名认证已提交')
     setTimeout(() => {
       uni.redirectTo({ url: '/pages/auth/result?type=realname' })
@@ -182,6 +251,27 @@ async function submit(): Promise<void> {
   } finally {
     submitting.value = false
   }
+}
+
+function goCenter(): void {
+  uni.redirectTo({ url: '/pages/auth/center' })
+}
+
+function skipRealname(): void {
+  uni.showModal({
+    title: '跳过实名认证？',
+    content: '实名认证与住户认证相互独立。先完成住户认证即可发布与交易，实名可稍后补充。',
+    confirmText: '继续住户认证',
+    cancelText: '再想想',
+    success: (res) => {
+      if (!res.confirm) return
+      if (ownerStatus.value === 'VERIFIED' || ownerStatus.value === 'PENDING' || ownerStatus.value === 'SUPPLEMENT') {
+        uni.redirectTo({ url: '/pages/auth/center' })
+      } else {
+        uni.redirectTo({ url: '/pages/auth/owner-proof' })
+      }
+    },
+  })
 }
 
 function goBack(): void {
@@ -256,6 +346,75 @@ function goBack(): void {
   font-size: $ni-font-9;
   line-height: 15px;
   color: #6f8c7d;
+}
+.realname__state {
+  margin-top: 10px;
+  padding: 22px 16px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+  align-items: center;
+}
+.realname__state--success {
+  background-color: $ni-color-success-bg;
+}
+.realname__state-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 26px;
+  background-color: $ni-color-credit-bg;
+  align-items: center;
+  justify-content: center;
+}
+.realname__state-icon--success {
+  background-color: $ni-color-gift;
+}
+.realname__state-title {
+  margin-top: 10px;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  text-align: center;
+}
+.realname__state-desc {
+  margin-top: 6px;
+  margin-bottom: 16px;
+  font-size: $ni-font-10;
+  line-height: 16px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+}
+.realname__rejected {
+  margin-top: 10px;
+  padding: 11px;
+  flex-direction: row;
+  align-items: flex-start;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-danger-bg;
+}
+.realname__rejected-copy {
+  flex: 1;
+  margin-left: 6px;
+}
+.realname__rejected-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-danger-deep;
+}
+.realname__rejected-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #9a6a55;
+}
+.realname__skip {
+  align-items: center;
+  padding-top: 15px;
+  padding-bottom: 8px;
+}
+.realname__skip-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-tertiary;
 }
 .realname__progress {
   margin-top: 10px;

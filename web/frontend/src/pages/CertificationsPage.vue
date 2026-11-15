@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ChevronDown, ClipboardCheck, FileImage, Filter, Search, ShieldCheck } from 'lucide-vue-next'
 import { certificationsApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useTodoStore } from '@/stores/todos'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
 
+const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
+const todos = useTodoStore()
 const rows = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -20,6 +24,14 @@ const selected = ref<any>(null)
 const drawerOpen = ref(false)
 const rejectReason = ref('')
 const loading = ref(false)
+const summaryData = ref({
+  pending: 0,
+  pendingRealname: 0,
+  pendingOwner: 0,
+  supplement: 0,
+  todayReviewed: 0,
+  oldestPendingAt: 0,
+})
 
 const tabs = [
   { key: 'PENDING', label: '待审核' },
@@ -29,10 +41,19 @@ const tabs = [
   { key: '', label: '全部' },
 ]
 
-const summary = computed(() => ({
-  pending: rows.value.filter((row) => row.statusCode === 'PENDING').length,
-  total: total.value,
-}))
+const typeFilterLabel = computed(() => {
+  if (typeFilter.value === 'REALNAME') return '仅实名'
+  if (typeFilter.value === 'OWNER_PROOF') return '仅住户认证'
+  return '全部类型'
+})
+
+async function loadSummary() {
+  try {
+    summaryData.value = await certificationsApi.summary()
+  } catch {
+    // 统计失败不阻塞列表，页面仍可审核。
+  }
+}
 
 async function load() {
   loading.value = true
@@ -51,9 +72,11 @@ async function load() {
   }
 }
 
-async function open(row: any) {
+async function open(rowOrId: any) {
+  const id = typeof rowOrId === 'object' ? rowOrId.id : rowOrId
+  if (!id) return
   try {
-    selected.value = await certificationsApi.detail(row.id)
+    selected.value = await certificationsApi.detail(id)
     rejectReason.value = ''
     drawerOpen.value = true
   } catch (exc: any) {
@@ -61,13 +84,39 @@ async function open(row: any) {
   }
 }
 
+function cycleTypeFilter() {
+  const order = ['', 'REALNAME', 'OWNER_PROOF']
+  const index = order.indexOf(typeFilter.value)
+  typeFilter.value = order[(index + 1) % order.length]
+  page.value = 1
+  load()
+}
+
+function materialLabel(index: number): string {
+  const material = selected.value?.materials?.[index]
+  if (material?.label) return material.label
+  if (selected.value?.type === 'REALNAME') {
+    return index === 0 ? '身份证人像面' : '身份证国徽面'
+  }
+  return `证明材料 ${index + 1}`
+}
+
+function isImageMaterial(objectKey: string): boolean {
+  return /\.(jpe?g|png|webp)(\?|$)/i.test(objectKey || '')
+}
+
+async function refreshAfterAction() {
+  drawerOpen.value = false
+  await Promise.all([load(), loadSummary()])
+  todos.refresh()
+}
+
 async function approve() {
   if (!window.confirm('确认通过该认证申请？通过后账号将与小区强绑定。')) return
   try {
     await certificationsApi.approve(selected.value.id)
     app.showToast('已通过并通知申请人')
-    drawerOpen.value = false
-    await load()
+    await refreshAfterAction()
   } catch (exc: any) {
     app.showToast(exc?.message || '操作失败')
   }
@@ -81,8 +130,7 @@ async function reject() {
   try {
     await certificationsApi.reject(selected.value.id, rejectReason.value.trim())
     app.showToast('已驳回并通知申请人')
-    drawerOpen.value = false
-    await load()
+    await refreshAfterAction()
   } catch (exc: any) {
     app.showToast(exc?.message || '操作失败')
   }
@@ -94,27 +142,31 @@ async function requestMaterials() {
   try {
     await certificationsApi.requestMaterials(selected.value.id, note)
     app.showToast('已要求补充材料')
-    drawerOpen.value = false
-    await load()
+    await refreshAfterAction()
   } catch (exc: any) {
     app.showToast(exc?.message || '操作失败')
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  if (route.query.status) activeTab.value = String(route.query.status)
+  if (route.query.type) typeFilter.value = String(route.query.type)
+  await Promise.all([loadSummary(), load()])
+  if (route.query.certId) await open(route.query.certId)
+})
 </script>
 
 <template>
   <section class="page-heading list-heading">
-    <div><p>社区管理 / 住户认证</p><h1>住户认证审核</h1><span>实名认证与业主证明审核队列；通过后账号与小区强绑定（BR-02）</span></div>
+    <div><p>社区管理 / 住户认证</p><h1>住户认证审核</h1><span>实名认证与住户认证审核队列；通过后账号与小区强绑定（BR-02）</span></div>
     <button class="primary-button" @click="load"><ClipboardCheck :size="17" />刷新队列</button>
   </section>
 
   <section class="summary-row">
-    <div><span>待审核</span><strong>{{ summary.pending }}</strong><em class="warn">目标 SLA ≤ 24h</em></div>
-    <div><span>当前页总数</span><strong>{{ summary.total }}</strong><em>队列规模</em></div>
-    <div><span>实名认证</span><strong>{{ rows.filter((row) => row.type === 'REALNAME').length }}</strong><em>本页</em></div>
-    <div><span>业主证明</span><strong>{{ rows.filter((row) => row.type === 'OWNER_PROOF').length }}</strong><em>本页</em></div>
+    <div><span>待审核</span><strong>{{ summaryData.pending }}</strong><em class="warn">目标 SLA ≤ 24h</em></div>
+    <div><span>实名认证待审</span><strong>{{ summaryData.pendingRealname }}</strong><em>独立审核</em></div>
+    <div><span>住户认证待审</span><strong>{{ summaryData.pendingOwner }}</strong><em>通过后绑定小区</em></div>
+    <div><span>待补充</span><strong>{{ summaryData.supplement }}</strong><em>等待申请人补齐</em></div>
   </section>
 
   <section class="table-panel">
@@ -123,10 +175,10 @@ onMounted(load)
         <button v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }"
           @click="activeTab = tab.key; page = 1; load()">{{ tab.label }}</button>
       </div>
-      <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索申请人或追踪号…" @keyup.enter="load" /></div>
+      <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索申请人或追踪号…" @keyup.enter="page = 1; load()" /></div>
       <div class="toolbar-actions">
-        <button @click="typeFilter = typeFilter ? '' : 'REALNAME'; page = 1; load()">
-          <Filter :size="16" />{{ typeFilter === 'REALNAME' ? '仅实名' : '全部类型' }}<ChevronDown :size="14" />
+        <button @click="cycleTypeFilter">
+          <Filter :size="16" />{{ typeFilterLabel }}<ChevronDown :size="14" />
         </button>
       </div>
     </div>
@@ -169,13 +221,30 @@ onMounted(load)
         <label><span>追踪号</span><input :value="selected.traceId" disabled /></label>
       </div>
       <h4 class="section-title" style="margin-top: 20px">材料（私有桶签名 URL，10 分钟时效）</h4>
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px">
-        <a v-for="material in selected.materials || []" :key="material.objectKey"
-          :href="material.signedUrl || undefined" target="_blank"
-          style="display: flex; align-items: center; gap: 6px; padding: 9px 10px; border: 1px solid #e9e6ed; border-radius: 8px; color: #554761; font-size: var(--font-size-body)">
-          <FileImage :size="15" />{{ material.objectKey.split('/').pop() }}
+      <div class="material-grid">
+        <a v-for="(material, index) in selected.materials || []" :key="material.objectKey"
+          :href="material.signedUrl || undefined" target="_blank" rel="noopener"
+          class="material-card" :class="{ 'material-card--disabled': !material.signedUrl }">
+          <img v-if="material.signedUrl && isImageMaterial(material.objectKey)" class="material-thumb"
+            :src="material.signedUrl" :alt="materialLabel(index)" />
+          <FileImage v-else :size="15" />
+          <span>{{ materialLabel(index) }}</span>
         </a>
         <p v-if="!(selected.materials || []).length" style="color: #988da2; font-size: var(--font-size-body)">无材料</p>
+      </div>
+      <p v-if="(selected.materials || []).some((material: any) => !material.signedUrl)"
+        style="margin-top: 8px; color: #c08a35; font-size: var(--font-size-caption)">
+        部分材料签名 URL 生成失败，请确认 MinIO 已启动且对象存在。
+      </p>
+      <div v-if="selected.type === 'OWNER_PROOF'" class="community-selector-card"
+        style="min-height: 52px; padding: 9px 12px; margin-top: 12px; margin-bottom: 0">
+        <ShieldCheck :size="18" style="color: #6852c5" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">申请人实名状态</span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">
+            {{ selected.realnameStatus === 'VERIFIED' ? '已实名认证' : '尚未完成实名认证（不影响本次住户认证审批）' }}
+          </strong>
+        </div>
       </div>
       <h4 class="section-title" style="margin-top: 20px">审核操作</h4>
       <label class="full" style="display: block"><span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">驳回原因（驳回必填，≥10 字，将通知申请人）</span>

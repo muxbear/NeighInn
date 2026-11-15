@@ -1,0 +1,424 @@
+<template>
+  <scroll-view class="cert-center" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="cert-center__header">
+      <ni-status-bar />
+      <view class="cert-center__nav">
+        <view class="cert-center__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="cert-center__nav-title">认证中心</text>
+        <view class="cert-center__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="cert-center__hero">
+      <view class="cert-center__hero-icon">
+        <ni-icon name="shield" :size="30" state="white" />
+      </view>
+      <text class="cert-center__hero-title">{{ heroTitle }}</text>
+      <text class="cert-center__hero-desc">{{ heroDesc }}</text>
+      <view class="cert-center__progress">
+        <view class="cert-center__progress-head">
+          <text class="cert-center__progress-label">认证进度</text>
+          <text class="cert-center__progress-value">{{ completedCount }} / 2</text>
+        </view>
+        <ni-progress :percent="progressPercent" :height="6" color="#6BB88A" />
+      </view>
+    </view>
+
+    <view class="cert-center__content">
+      <view v-if="loading && !status" class="cert-center__loading">
+        <ni-loading :size="20" text="正在读取认证状态" />
+      </view>
+
+      <view class="cert-center__card">
+        <view class="cert-center__card-head">
+          <view class="cert-center__card-icon cert-center__card-icon--realname">
+            <ni-icon name="shield" :size="20" state="gold" />
+          </view>
+          <view class="cert-center__card-copy">
+            <text class="cert-center__card-title">实名认证</text>
+            <text class="cert-center__card-desc">身份证正反面 · 选做，可跳过</text>
+          </view>
+          <view :class="['cert-center__status', statusClass(realnameStatus)]">
+            <text :class="['cert-center__status-text', statusTextClass(realnameStatus)]">{{ statusLabel(realnameStatus) }}</text>
+          </view>
+        </view>
+        <text v-if="realnameStatus === 'REJECTED' && realnameReject" class="cert-center__reject">驳回原因：{{ realnameReject }}</text>
+        <text v-if="realnameStatus === 'VERIFIED'" class="cert-center__done">已实名认证，个人中心会展示“已实名”标识。</text>
+        <text v-else class="cert-center__hint">实名认证用于私信、好友等社交能力；不影响住户认证提交。</text>
+        <ni-button type="primary" size="lg" block @tap="openRealname">{{ realnameAction }}</ni-button>
+      </view>
+
+      <view class="cert-center__card">
+        <view class="cert-center__card-head">
+          <view class="cert-center__card-icon cert-center__card-icon--owner">
+            <ni-icon name="home" :size="20" state="green" />
+          </view>
+          <view class="cert-center__card-copy">
+            <text class="cert-center__card-title">住户认证</text>
+            <text class="cert-center__card-desc">选择小区 + 证明材料</text>
+          </view>
+          <view :class="['cert-center__status', statusClass(ownerStatus)]">
+            <text :class="['cert-center__status-text', statusTextClass(ownerStatus)]">{{ statusLabel(ownerStatus) }}</text>
+          </view>
+        </view>
+        <text v-if="ownerStatus === 'REJECTED' && ownerReject" class="cert-center__reject">驳回原因：{{ ownerReject }}</text>
+        <text v-if="ownerStatus === 'VERIFIED'" class="cert-center__done">
+          已绑定{{ ownerCommunityName || '认证小区' }}，可发布与参与交易。
+        </text>
+        <text v-else class="cert-center__hint">审核通过后绑定小区，获得“认证业主”标识并解锁发布与交易。</text>
+        <ni-button type="primary" size="lg" block @tap="openOwner">{{ ownerAction }}</ni-button>
+      </view>
+
+      <view class="cert-center__tip">
+        <ni-icon name="lock" :size="14" state="tertiary" />
+        <text class="cert-center__tip-text">实名与住户认证相互独立；身份证与证明材料仅用于身份核验，展示时自动脱敏。</text>
+      </view>
+
+      <view v-if="completedCount === 2" class="cert-center__home" @click="goHome">
+        <text class="cert-center__home-text">认证已完成，返回首页</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import type { AuthStatusResult, CertificationState } from '../../models'
+import { useUserStore } from '../../stores/user.store'
+import { useToast } from '../../composables/useToast'
+import { authService } from '../../services/auth.service'
+
+const user = useUserStore()
+const { toast, showToast } = useToast()
+const status = ref<AuthStatusResult | null>(null)
+const loading = ref(false)
+
+const realnameStatus = computed<CertificationState>(
+  () => status.value?.realname?.status ?? user.profile?.realnameStatus ?? 'UNVERIFIED',
+)
+const ownerStatus = computed<CertificationState>(
+  () => status.value?.owner?.status ?? user.profile?.ownerStatus ?? 'UNVERIFIED',
+)
+const realnameReject = computed(() => status.value?.realname?.rejectReason ?? '')
+const ownerReject = computed(() => status.value?.owner?.rejectReason ?? '')
+const ownerCommunityName = computed(
+  () => status.value?.owner?.communityName ?? user.profile?.communityName ?? '',
+)
+const completedCount = computed(() => {
+  let count = 0
+  if (realnameStatus.value === 'VERIFIED') count += 1
+  if (ownerStatus.value === 'VERIFIED') count += 1
+  return count
+})
+const progressPercent = computed(() => completedCount.value * 50)
+const heroTitle = computed(() => {
+  if (completedCount.value === 2) return '认证已完成'
+  if (ownerStatus.value === 'FROZEN') return '住户认证已冻结'
+  if (completedCount.value === 1) return '继续完善认证'
+  return '完成认证，解锁邻里交易'
+})
+const heroDesc = computed(() => {
+  if (completedCount.value === 2) return '你是邻里小栈的认证业主，可以放心发布和交换闲置。'
+  if (ownerStatus.value === 'FROZEN') return '住户认证已冻结，如有疑问请联系客服。'
+  if (ownerStatus.value === 'PENDING' || ownerStatus.value === 'SUPPLEMENT') {
+    return '住户认证审核中，预计 24 小时内完成。'
+  }
+  if (realnameStatus.value === 'PENDING' || realnameStatus.value === 'SUPPLEMENT') {
+    return '实名认证审核中；住户认证可同时提交，无需等待。'
+  }
+  if (completedCount.value === 1) return '再完成一项认证，即可解锁完整邻里体验。'
+  return '实名与住户认证相互独立，可任选一项开始。'
+})
+const realnameAction = computed(() => {
+  if (realnameStatus.value === 'VERIFIED') return '查看认证'
+  if (realnameStatus.value === 'PENDING') return '查看进度'
+  if (realnameStatus.value === 'SUPPLEMENT') return '补充材料'
+  if (realnameStatus.value === 'REJECTED') return '重新提交'
+  return '去实名认证'
+})
+const ownerAction = computed(() => {
+  if (ownerStatus.value === 'VERIFIED' || ownerStatus.value === 'FROZEN') return '查看认证'
+  if (ownerStatus.value === 'PENDING') return '查看进度'
+  if (ownerStatus.value === 'SUPPLEMENT') return '补充材料'
+  if (ownerStatus.value === 'REJECTED' || ownerStatus.value === 'REVOKED') return '重新提交'
+  return '去住户认证'
+})
+
+onShow(async () => {
+  if (!user.isLoggedIn) {
+    uni.redirectTo({ url: '/pages/auth/login' })
+    return
+  }
+  loading.value = true
+  await user.refreshProfile().catch(() => undefined)
+  try {
+    status.value = await authService.getStatus()
+  } catch {
+    showToast('认证状态加载失败，请稍后重试', 'alert')
+  } finally {
+    loading.value = false
+  }
+})
+
+function statusLabel(value: CertificationState): string {
+  const labels: Record<CertificationState, string> = {
+    UNVERIFIED: '未认证',
+    PENDING: '审核中',
+    VERIFIED: '已通过',
+    REJECTED: '已驳回',
+    SUPPLEMENT: '待补充',
+    FROZEN: '已冻结',
+    REVOKED: '已撤销',
+  }
+  return labels[value] ?? '未认证'
+}
+
+function statusClass(value: CertificationState): string {
+  if (value === 'VERIFIED') return 'cert-center__status--success'
+  if (value === 'PENDING' || value === 'SUPPLEMENT') return 'cert-center__status--pending'
+  if (value === 'REJECTED' || value === 'FROZEN' || value === 'REVOKED') {
+    return 'cert-center__status--danger'
+  }
+  return ''
+}
+
+function statusTextClass(value: CertificationState): string {
+  if (value === 'VERIFIED') return 'cert-center__status-text--success'
+  if (value === 'PENDING' || value === 'SUPPLEMENT') return 'cert-center__status-text--pending'
+  if (value === 'REJECTED' || value === 'FROZEN' || value === 'REVOKED') {
+    return 'cert-center__status-text--danger'
+  }
+  return ''
+}
+
+function openRealname(): void {
+  uni.navigateTo({ url: '/pages/auth/realname' })
+}
+
+function openOwner(): void {
+  uni.navigateTo({ url: '/pages/auth/owner-proof' })
+}
+
+function goHome(): void {
+  uni.switchTab({ url: '/pages/home/index' })
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.cert-center {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.cert-center__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.cert-center__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.cert-center__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.cert-center__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.cert-center__nav-placeholder {
+  width: 42px;
+}
+.cert-center__hero {
+  padding: 24px 17px 20px;
+  background-image: $ni-gradient-profile;
+  align-items: center;
+}
+.cert-center__hero-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 24px;
+  background-color: rgba(255, 255, 255, 0.22);
+  align-items: center;
+  justify-content: center;
+}
+.cert-center__hero-title {
+  margin-top: 12px;
+  font-size: $ni-font-22;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  text-align: center;
+}
+.cert-center__hero-desc {
+  margin-top: 6px;
+  font-size: $ni-font-10;
+  line-height: 17px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.cert-center__progress {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: $ni-radius-14;
+  background-color: rgba(255, 255, 255, 0.78);
+}
+.cert-center__progress-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cert-center__progress-label {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-text-primary;
+}
+.cert-center__progress-value {
+  font-size: $ni-font-10;
+  font-weight: 700;
+  color: $ni-color-gift;
+}
+.cert-center__content {
+  padding: 12px 14px;
+}
+.cert-center__loading {
+  padding: 12px;
+  align-items: center;
+}
+.cert-center__card {
+  margin-bottom: 10px;
+  padding: 15px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.cert-center__card-head {
+  flex-direction: row;
+  align-items: center;
+}
+.cert-center__card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+}
+.cert-center__card-icon--realname {
+  background-color: $ni-color-credit-bg;
+}
+.cert-center__card-icon--owner {
+  background-color: $ni-color-success-bg;
+}
+.cert-center__card-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.cert-center__card-title {
+  font-size: $ni-font-14;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.cert-center__card-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.cert-center__status {
+  height: 22px;
+  padding-left: 7px;
+  padding-right: 7px;
+  border-radius: 11px;
+  background-color: $ni-color-fill-1;
+  align-items: center;
+  justify-content: center;
+}
+.cert-center__status--success {
+  background-color: $ni-color-success-bg;
+}
+.cert-center__status--pending {
+  background-color: $ni-color-credit-bg;
+}
+.cert-center__status--danger {
+  background-color: $ni-color-danger-bg;
+}
+.cert-center__status-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.cert-center__status-text--success {
+  color: $ni-color-success-deep;
+}
+.cert-center__status-text--pending {
+  color: $ni-color-credit-deep;
+}
+.cert-center__status-text--danger {
+  color: $ni-color-danger-deep;
+}
+.cert-center__reject {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: $ni-radius-10;
+  background-color: $ni-color-danger-bg;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-danger-deep;
+}
+.cert-center__done {
+  margin-top: 10px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-success-deep;
+}
+.cert-center__hint {
+  margin-top: 10px;
+  margin-bottom: 12px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-text-tertiary;
+}
+.cert-center__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 4px;
+  padding: 11px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-fill-1;
+}
+.cert-center__tip-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: 7px;
+  line-height: 13px;
+  color: $ni-color-text-tertiary;
+}
+.cert-center__home {
+  align-items: center;
+  padding-top: 16px;
+}
+.cert-center__home-text {
+  font-size: $ni-font-11;
+  color: $ni-color-primary-dark;
+}
+</style>

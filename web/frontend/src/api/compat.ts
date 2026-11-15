@@ -220,10 +220,27 @@ export function normalizeCertification(row: any): any {
     status: mapStatus(row.status),
     statusCode: row.status,
     submittedAt: fmtRelative(row.submittedAt),
-    typeLabel: row.type === 'REALNAME' ? '实名认证' : '业主证明',
+    typeLabel: row.typeLabel ?? (row.type === 'REALNAME' ? '实名认证' : '住户认证'),
     userName: row.user?.nickname ?? '—',
     userPhone: row.user?.phone ?? '—',
+    realnameStatus: row.user?.realnameStatus ?? '',
     communityName: row.community?.name ?? '—',
+  }
+}
+
+export function normalizeTodo(row: any): any {
+  return {
+    key: row.key ?? row.id ?? row.title,
+    title: row.title ?? '待办事项',
+    description: row.description ?? row.sub ?? '',
+    count: Number(row.count || 0),
+    route: row.route ?? '/dashboard',
+    permission: row.permission ?? '',
+    icon: row.icon ?? 'ClipboardCheck',
+    color: row.color ?? 'blue',
+    oldestPendingAt: Number(row.oldestPendingAt || 0),
+    latestCertId: row.latestCertId ?? '',
+    breakdown: row.breakdown ?? {},
   }
 }
 
@@ -264,7 +281,7 @@ export function normalizeDashboard(data: any): any {
       todoDetail: '各业务待办合计',
       satisfactionDetail: '待接入评价口径',
     },
-    todos: (data?.todos || []).map((todo: any) => ({ sub: '', ...todo })),
+    todos: (data?.todos || []).map(normalizeTodo),
   }
 }
 
