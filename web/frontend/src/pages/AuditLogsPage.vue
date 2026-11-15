@@ -72,7 +72,7 @@ onMounted(load)
         <label><span>结果</span><input :value="selected.result" disabled /></label>
       </div>
       <h4 class="section-title" style="margin-top: 20px">前后快照</h4>
-      <pre style="padding: 12px; border: 1px solid #e9e6ed; border-radius: 8px; background: #faf9fb; color: #5d5864; font-size: 9px; white-space: pre-wrap">{{ JSON.stringify({ before: selected.beforeSnapshot, after: selected.afterSnapshot }, null, 2) }}</pre>
+      <pre style="padding: 12px; border: 1px solid #e9e6ed; border-radius: 8px; background: #faf9fb; color: #5d5864; font-size: var(--font-size-caption); white-space: pre-wrap">{{ JSON.stringify({ before: selected.beforeSnapshot, after: selected.afterSnapshot }, null, 2) }}</pre>
     </template>
   </NiDrawer>
 </template>

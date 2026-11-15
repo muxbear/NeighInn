@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from src.core.config import settings
@@ -14,16 +12,16 @@ class Base(DeclarativeBase):
 
 engine = create_async_engine(
     settings.database_url,
-    echo=False,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    echo=settings.debug and settings.app_env == "dev",
 )
 
-SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def get_db() -> AsyncIterator[AsyncSession]:
+async def get_db():
     async with SessionLocal() as session:
         try:
             yield session
@@ -33,7 +31,9 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 
 
 async def init_db() -> None:
-    # Import models before create_all so all metadata is registered.
+    """仅开发环境兜底建表；生产一律走 Alembic 迁移（见 alembic/versions）。"""
+    if settings.app_env != "dev":
+        return
     from src.db import models  # noqa: F401
 
     async with engine.begin() as conn:

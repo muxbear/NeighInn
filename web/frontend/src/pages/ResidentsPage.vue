@@ -120,8 +120,8 @@ watch(() => app.currentCommunityId, () => { page.value = 1; load() })
     <div class="community-selector-meta"><span>所在街道</span><strong>文新街道</strong></div>
     <div class="community-selector-meta"><span>社区编码</span><strong>{{ community?.code || 'SQ3301060012' }}</strong></div>
     <div v-if="communityOpen" class="notification-popover" style="top: 78px; left: 17px; right: 17px; width: auto; padding: 8px; z-index: 60">
-      <div style="display: flex; justify-content: space-between; padding: 8px 10px; color: #403b47; font-size: 12px; font-weight: 600">选择社区<button @click="communityOpen = false"><X :size="16" /></button></div>
-      <button v-for="item in app.communities" :key="item.id" style="width: 100%; padding: 10px; display: flex; justify-content: space-between; border-radius: 8px; text-align: left; font-size: 10px" :style="{ background: Number(item.id) === app.currentCommunityId ? '#f1edfc' : 'transparent' }" @click="switchCommunity(Number(item.id))">
+      <div style="display: flex; justify-content: space-between; padding: 8px 10px; color: #403b47; font-size: var(--font-size-body); font-weight: 600">选择社区<button @click="communityOpen = false"><X :size="16" /></button></div>
+      <button v-for="item in app.communities" :key="item.id" style="width: 100%; padding: 10px; display: flex; justify-content: space-between; border-radius: 8px; text-align: left; font-size: var(--font-size-body)" :style="{ background: Number(item.id) === app.currentCommunityId ? '#f1edfc' : 'transparent' }" @click="switchCommunity(Number(item.id))">
         <span>{{ item.name }}</span><span style="color: #9995a1">{{ item.code }}</span>
       </button>
     </div>
@@ -171,8 +171,8 @@ watch(() => app.currentCommunityId, () => { page.value = 1; load() })
   <NiDrawer :open="drawerOpen" :title="editing ? form.name : '新增社区人员'" :eyebrow="editing ? '维护档案' : '新建档案'" @close="drawerOpen = false">
     <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 18px">
       <Building2 :size="17" style="color: #6852c5" />
-      <div style="flex: 1"><span style="display: block; color: #958b9f; font-size: 8px">所属社区</span><strong style="display: block; color: #554761; font-size: 10px">{{ community?.name }}</strong></div>
-      <em style="color: #988da2; font-size: 8px">{{ editing?.id || '新建' }}</em>
+      <div style="flex: 1"><span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">所属社区</span><strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ community?.name }}</strong></div>
+      <em style="color: #988da2; font-size: var(--font-size-caption)">{{ editing?.id || '新建' }}</em>
     </div>
     <h4 class="section-title">基本信息</h4>
     <div class="form-grid">

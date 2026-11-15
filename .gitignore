@@ -10,6 +10,7 @@ coverage/
 Thumbs.db
 *.log
 
+# claude
 # 含密钥的本地 Claude 配置，禁止提交
 .claude/settings.local.json
 .claude/settings.local.json.*

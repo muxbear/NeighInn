@@ -3,7 +3,7 @@
  * 当前无后端联调环境，默认开启 Mock；接入真实网关时把 mock 改为 false，并替换 baseUrl / wsUrl。
  */
 export interface EnvConfig {
-  name: 'dev' | 'test' | 'staging' | 'prod'
+  name: 'dev' | 'local' | 'test' | 'staging' | 'prod'
   baseUrl: string
   wsUrl: string
   uploadUrl: string
@@ -20,6 +20,15 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
     uploadUrl: 'https://upload-dev.neighinn.example.com',
     mock: true,
     mockLatency: 220,
+    requestTimeout: 15000,
+  },
+  local: {
+    name: 'local',
+    baseUrl: 'http://127.0.0.1:5194/api/v1',
+    wsUrl: 'ws://127.0.0.1:5194/api/v1/ws',
+    uploadUrl: 'http://127.0.0.1:5194/api/v1',
+    mock: false,
+    mockLatency: 0,
     requestTimeout: 15000,
   },
   test: {
@@ -51,8 +60,9 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
   },
 }
 
-/** 切换环境：改这里即可；HBuilderX 发版前务必确认为 staging / prod。 */
-export const CURRENT_ENV: EnvConfig['name'] = 'dev'
+/** 切换环境：改这里即可；HBuilderX 发版前务必确认为 staging / prod。
+ * dev = 本地 Mock（离线演示）；local = 联调 web/backend 统一服务端（http://127.0.0.1:5194）。 */
+export const CURRENT_ENV: EnvConfig['name'] = 'local'
 
 export const env: EnvConfig = ENVS[CURRENT_ENV]
 

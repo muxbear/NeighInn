@@ -27,11 +27,20 @@ NeighInn‌/                          # 根目录名末尾含 U+200C
 │   ├── docs/邻家小栈移动端详细设计方案.md
 │   ├── package.json                # 仅用于测试与静态检查
 │   └── README.md
-└── web/                            # Web 管理端（前后端分离）
-    ├── backend/                    # FastAPI + PostgreSQL + Redis + MinIO + RabbitMQ
-    ├── frontend/                   # Vue 3 + TypeScript + Pinia + Vite
-    ├── docs/邻里小栈后台管理系统详细设计说明书.md
-    └── README.md
+├── web/                            # Web 管理端（前后端分离）
+│   ├── backend/                    # 统一服务端（C 端 + 管理端共享领域模型）
+│   │   ├── src/api/c_end/          # 移动端契约 /api/v1（JWT）
+│   │   ├── src/api/admin/          # 管理端契约 /api/v1/admin（Cookie+CSRF）
+│   │   ├── src/db/models/          # 46+ 张表（生产 PG / 测试 SQLite 类型变体）
+│   │   ├── src/domain/             # 业务枚举 + 8 个状态机
+│   │   ├── src/services/           # 认证/物品/AI 质检/订单/资金/参数/IM
+│   │   ├── alembic/                # 数据库迁移
+│   │   ├── tests/                  # 78 个测试
+│   │   └── scripts/smoke_e2e.py    # 真实 HTTP 端到端冒烟
+│   ├── frontend/                   # Vue 3 + TypeScript + Pinia + Vite
+│   ├── docs/邻里小栈后台管理系统详细设计说明书.md
+│   └── README.md
+└── docs/                           # 需求、设计与评估文档
 ```
 
 > **根目录名末尾含不可见字符 U+200C（ZERO WIDTH NON-JOINER）**：`NeighInn‌/`。不要手敲根目录路径，否则可能报“目录不存在”；在 shell 中使用通配符（如 `NeighInn*`）或直接复制已有路径。**子目录 `mobile/`、`web/` 已改为普通名称，不含不可见字符。**
@@ -96,10 +105,10 @@ utils/ config/ styles/ static/ tests/ scripts/
 ### 技术栈与端口
 
 - 前端：Vue 3 + TypeScript + Pinia + Vue Router + Vite + SCSS + Lucide；端口 **5192**。
-- 后端：Python 3.11+ + FastAPI + SQLAlchemy 2.0 async + Pydantic 2 + PostgreSQL（psycopg）；端口 **5193**。
-- 中间件：Redis（当前开发实例未提供密码，自动降级内存会话）、RabbitMQ（未配置时进程内降级）、MinIO（`ni-public` / `ni-private` / `ni-system`）。
-- 开发数据库：`neighinn_dev`；开发账号 `admin / Admin@2025`（仅本地）。
-- 前端 API 代理：`/api` → `http://127.0.0.1:5193`。
+- 后端：Python 3.11+ + FastAPI + SQLAlchemy 2.0 async + Pydantic 2 + PostgreSQL（psycopg）；端口 **5194**。
+- 中间件：Redis（会话/缓存，需配置有效认证信息）、RabbitMQ（未配置时进程内降级）、MinIO（`ni-public` / `ni-private` / `ni-system`）。
+- 开发数据库：由 `web/backend/.env` 的 `DATABASE_URL` 指定；开发账号 `admin / Admin@2025`（仅本地）。
+- 前端 API 代理：`/api` → `http://127.0.0.1:5194`。
 
 ### Web 目录与分层
 
@@ -141,8 +150,9 @@ npm run dev
 ```
 
 - Web：`http://127.0.0.1:5192`
-- API：`http://127.0.0.1:5193/api/v1/admin`
-- Swagger：`http://127.0.0.1:5193/docs`
+- 管理端 API：`http://127.0.0.1:5194/api/v1/admin`
+- 移动端 API：`http://127.0.0.1:5194/api/v1`
+- Swagger：`http://127.0.0.1:5194/docs`
 
 > **注意**：Windows 上不要直接 `uvicorn src.main:app`，否则 psycopg 异步驱动会因 ProactorEventLoop 启动失败；`run.py` 已处理 SelectorEventLoop。
 
@@ -155,6 +165,18 @@ npm run dev
 - 主色 `#6F59D4`；侧边栏 `#211D38`；页面背景 `#F7F7FA`；卡片边框 `#EBE9EF`；字体 `DM Sans, Noto Sans SC`。
 - 侧边栏 248px、顶栏 68px、内容区最大 1500px；8–11px 小字号按 Figma 原值保留，可读性风险见详细设计 R-01。
 - **不要用移动端品牌橙 `#FF7A3D` 替换 Web 主色**；后台 Figma 是独立紫色视觉体系。
+
+## 统一服务端（双端共享，Phase 0–2 已交付）
+
+评估结论与改造方案见 `docs/邻里小栈双端业务闭环评估报告与优化改造方案.md`。`web/backend` 是移动端与 Web 后台的**共享服务端**，原独立演示后台已由统一服务端替换。
+
+- **技术栈**：FastAPI + SQLAlchemy 2.0 async + PostgreSQL（测试 SQLite）+ Redis + MinIO + RabbitMQ（Outbox）。
+- **端口 5194**：C 端 `/api/v1`（JWT Bearer）；管理端 `/api/v1/admin`（Cookie + CSRF 双提交）；WebSocket `/api/v1/ws`。
+- **已实现**：46+ 张表与 Alembic 迁移；8 个状态机；认证（实名/业主证明/审核/冻结联动下架）；物品（发布校验/AI 质检 Mock 适配器/人工复核/快车道）；订单（三种交易方式/BR-08 一物一卖/验货双向确认）；资金（复式账本/托管/放款/退款/提现双人复核/纠纷资金处置）；内容（生活/喇叭/互助/评论审核）；社交（好友/私信 client_msg_id 幂等/内容安全）；通知（公告下发/任务投递/已读）；参数（发布即生效下发 AppConfig）；管理面（社区 CRUD/用户处置/角色权限/管理员账号/审计/导出/举报工作台）；WebSocket 推送。
+- **铁律**：状态变更只经 `src/domain/state.py`；金额一律整数分；余额只由 `ledger_entries` 推导；管理端路由默认 `require_permission`；写操作走幂等键；跨端一致性靠事件+缓存失效，不做双写。
+- **测试**：`cd web/backend && uv run pytest -q`（78 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
+- **双端接线**：移动端 `config/env.ts` → `CURRENT_ENV='local'` 指向 5194；Web 前端 Vite 代理 `/api` → 5194，页面通过 `src/api/compat.ts` 适配统一服务端契约。
+- **端到端冒烟**：`PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py`（对运行中的 5194 执行 AC-01 全链路）。
 
 ## 构建与测试
 
@@ -190,7 +212,7 @@ npm run icons        # 重新生成多状态 SVG 图标与内置头像
 
 ```bash
 cd web/backend
-uv run ruff check app
+uv run ruff check src tests run.py scripts
 uv run pytest -q
 
 cd ../frontend
@@ -227,13 +249,14 @@ npm run build
 - 设计原则：温暖、可信、高效、节制；低认知成本（50 岁以上可用、核心路径 ≤ 3 步）；信息渐进式披露。
 - 界面文案一律简体中文；金额、距离（10m 级）、耗时（步行/骑行/驾车）的展示格式遵循规范。
 - 移动端 6–9px 字号为 Figma 原值，存在可读性风险（详细设计 R-01）；长辈模式已预留开关，全局字号放大尚未实现。
-- Web 管理端 8–11px 小字号按 Figma 原值保留，界面缩放与可读性风险见 Web 详细设计 R-01。
 
 ## 当前实现状态与待办
 
 **移动端已完成**：登录/认证、首页、附近、搜索、四个专属区、物品详情、生活频道/详情、喇叭站、发布物品/生活、AI 质检进度与报告、消息/IM/好友、通知中心、订单（免费/互换/货币）与收银台/预约/验货/评价/纠纷、钱包、我的/资料/头像库/设置、小区管理、收藏足迹、信用中心、帮助与举报；设计 Token、40 个组件、多状态 SVG 图标、Mock 全流程与 Vitest。**HBuilderX 5.34 已验证 Web 与微信小程序编译通过**（Android 待连接设备验证）。
 
 **Web 管理端已完成第一版**：FastAPI + Vue 3 前后端可运行；登录/会话/CSRF、工作台、社区运营四页、公告、通知任务、社区运维、社区业主、用户、角色权限、资源管理、参数配置、审计日志、资金看板/流水/提现/对账/订单、纠纷调解、报事报修、投诉建议；PostgreSQL 种子数据、MinIO 预签名、本地构建与 API 冒烟测试通过。**Redis 认证、RabbitMQ、真实支付/短信/Push/AI、2FA 界面、Alembic 迁移与部分新增/编辑抽屉仍待补齐。**
+
+**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82 路径 + 管理端 148 路径）、认证/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、78 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5194 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
 
 **Git 现状**：
 

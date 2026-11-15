@@ -1,71 +1,90 @@
 from __future__ import annotations
 
-import json
 import logging
-from datetime import UTC, datetime
-from typing import Any
+import time
+from typing import Protocol
 
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class SessionStore:
-    """Redis-backed sessions with an in-memory fallback for local development.
+class SessionStore(Protocol):
+    async def init(self) -> None: ...
+    async def close(self) -> None: ...
+    async def set(self, token: str, data: dict, ttl: int) -> None: ...
+    async def get(self, token: str | None) -> dict | None: ...
+    async def delete(self, token: str | None) -> None: ...
 
-    The provided dev Redis instance requires authentication which is not part of the
-    supplied configuration, so the API starts with the memory store instead of
-    blocking startup. The interface is identical when Redis is available.
-    """
+
+class MemorySessionStore:
+    """进程内会话（开发降级）。生产必须配置 REDIS_URL。"""
 
     def __init__(self) -> None:
-        self._memory: dict[str, tuple[dict[str, Any], float]] = {}
-        self._redis = None
+        self._data: dict[str, tuple[float, dict]] = {}
 
-    async def init(self) -> None:
-        if not settings.redis_url:
-            return
-        try:
-            from redis.asyncio import Redis
+    async def init(self) -> None: ...
+    async def close(self) -> None: ...
 
-            client = Redis.from_url(settings.redis_url, decode_responses=True)
-            await client.ping()
-            self._redis = client
-            logger.info("Redis session store connected")
-        except Exception as exc:  # noqa: BLE001  # pragma: no cover - optional dependency
-            logger.warning("Redis unavailable, using in-memory sessions: %s", exc)
+    async def set(self, token: str, data: dict, ttl: int) -> None:
+        self._data[token] = (time.time() + ttl, data)
 
-    async def set(self, token: str, payload: dict[str, Any], ttl_seconds: int) -> None:
-        if self._redis is not None:
-            await self._redis.setex(f"ni:admin:session:{token}", ttl_seconds, json.dumps(payload))
-            return
-        self._memory[token] = (payload, datetime.now(UTC).timestamp() + ttl_seconds)
-
-    async def get(self, token: str | None) -> dict[str, Any] | None:
+    async def get(self, token: str | None) -> dict | None:
         if not token:
             return None
-        if self._redis is not None:
-            raw = await self._redis.get(f"ni:admin:session:{token}")
-            return json.loads(raw) if raw else None
-        item = self._memory.get(token)
-        if not item:
+        row = self._data.get(token)
+        if not row:
             return None
-        payload, expires_at = item
-        if expires_at < datetime.now(UTC).timestamp():
-            self._memory.pop(token, None)
+        expires_at, data = row
+        if expires_at < time.time():
+            self._data.pop(token, None)
             return None
-        return payload
+        return data
 
     async def delete(self, token: str | None) -> None:
-        if not token:
-            return
-        if self._redis is not None:
-            await self._redis.delete(f"ni:admin:session:{token}")
-        self._memory.pop(token, None)
+        if token:
+            self._data.pop(token, None)
+
+
+class RedisSessionStore:
+    def __init__(self, url: str) -> None:
+        import redis.asyncio as aioredis
+
+        self._client = aioredis.from_url(url, decode_responses=True)
+
+    async def init(self) -> None:
+        await self._client.ping()
 
     async def close(self) -> None:
-        if self._redis is not None:
-            await self._redis.aclose()
+        await self._client.aclose()
+
+    async def set(self, token: str, data: dict, ttl: int) -> None:
+        import json
+
+        await self._client.set(f"ni:admin:session:{token}", json.dumps(data), ex=ttl)
+
+    async def get(self, token: str | None) -> dict | None:
+        import json
+
+        if not token:
+            return None
+        raw = await self._client.get(f"ni:admin:session:{token}")
+        return json.loads(raw) if raw else None
+
+    async def delete(self, token: str | None) -> None:
+        if token:
+            await self._client.delete(f"ni:admin:session:{token}")
 
 
-session_store = SessionStore()
+def build_session_store() -> SessionStore:
+    if settings.redis_url:
+        try:
+            return RedisSessionStore(settings.redis_url)
+        except ImportError:  # pragma: no cover
+            logger.warning("redis 依赖不可用，管理端会话降级为进程内内存（重启失效）")
+    else:
+        logger.warning("未配置 REDIS_URL，管理端会话使用进程内内存（重启失效）")
+    return MemorySessionStore()
+
+
+session_store: SessionStore = build_session_store()

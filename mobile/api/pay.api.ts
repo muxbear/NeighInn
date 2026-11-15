@@ -25,5 +25,6 @@ export function getWalletTransactions(page = 1, pageSize = 20): Promise<PageResu
 }
 
 export function requestWithdraw(amount: number): Promise<{ success: boolean; status: string }> {
-  return post('/wallet/withdrawals', { amount }, { loading: true })
+  // 服务端金额一律整数分（SRS 9.2 红线）；端侧入参为元
+  return post('/wallet/withdrawals', { amountCents: Math.round(amount * 100) }, { loading: true })
 }

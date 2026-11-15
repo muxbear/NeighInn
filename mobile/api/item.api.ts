@@ -34,7 +34,33 @@ export function getItemDetail(id: string): Promise<Item> {
 }
 
 export function createItem(draft: ItemDraft): Promise<CreateItemResult> {
-  return post<CreateItemResult>('/items', draft as unknown as Record<string, any>, { loading: true })
+  return post<CreateItemResult>('/items', toItemPayload(draft), { loading: true })
+}
+
+/**
+ * 移动端表单 → 统一服务端契约映射：
+ * 交易方式中文标签 → 枚举码；价格（元，字符串，支持「面议」）→ priceCents（分）。
+ */
+function toItemPayload(draft: Partial<ItemDraft>): Record<string, any> {
+  const tradeTypeMap: Record<string, string> = { 出售: 'MONETARY', 免费: 'FREE_GIFT', 互换: 'BARTER' }
+  const tradeType = tradeTypeMap[String(draft.tradeType ?? '')] ?? draft.tradeType
+  const rawPrice = String(draft.price ?? '').trim()
+  const priceYuan = rawPrice === '面议' || rawPrice === '' ? 0 : Number.parseFloat(rawPrice)
+  const priceCents = Number.isFinite(priceYuan) ? Math.round(priceYuan * 100) : 0
+  return {
+    title: draft.title,
+    tradeType,
+    priceCents,
+    barterExpect: draft.barterExpect ?? '',
+    condition: draft.condition,
+    category: draft.category,
+    qualityDesc: draft.qualityDesc,
+    description: draft.qualityDesc,
+    images: draft.images ?? [],
+    videoUrl: draft.videoUrl ?? '',
+    invoices: draft.invoices ?? [],
+    expectTime: draft.expectTime ?? '',
+  }
 }
 
 export function submitItem(id: string): Promise<AuditSubmitResult> {
@@ -46,7 +72,7 @@ export function getAuditProgress(id: string): Promise<AuditProgress> {
 }
 
 export function updateItem(id: string, draft: Partial<ItemDraft>): Promise<Item> {
-  return put<Item>(`/items/${id}`, draft as Record<string, any>, { loading: true })
+  return put<Item>(`/items/${id}`, toItemPayload(draft as ItemDraft), { loading: true })
 }
 
 export function renewItem(id: string): Promise<{ success: boolean }> {

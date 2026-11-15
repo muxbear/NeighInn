@@ -21,8 +21,9 @@ uv sync --dev
 uv run python run.py
 ```
 
-- API：<http://127.0.0.1:5193/api/v1/admin>
-- Swagger：<http://127.0.0.1:5193/docs>
+- API：<http://127.0.0.1:5194/api/v1/admin>
+- 移动端 API：<http://127.0.0.1:5194/api/v1>
+- Swagger：<http://127.0.0.1:5194/docs>
 - 首次启动自动建表并写入种子数据。
 - 开发账号：`admin / Admin@2025`。
 
@@ -37,7 +38,7 @@ npm run dev
 ```
 
 - 页面：<http://127.0.0.1:5192>
-- Vite 将 `/api` 代理到 `http://127.0.0.1:5193`。
+- Vite 将 `/api` 代理到 `http://127.0.0.1:5194`。
 
 ## 配置
 
@@ -54,6 +55,6 @@ npm run dev
 ## 质量门槛
 
 ```bash
-cd backend && uv run ruff check app
+cd backend && uv run ruff check src tests run.py scripts
 cd frontend && npm run typecheck && npm run build
 ```

@@ -29,12 +29,27 @@ function open(row: any) {
   drawerOpen.value = true
 }
 
+const mediateNote = ref('')
+const resolveForm = ref({ conclusionType: 'CONTINUE', conclusion: '', amountYuan: '' })
+
+const conclusionTypes = [
+  { key: 'CONTINUE', label: '继续履约（解冻资金，订单恢复）' },
+  { key: 'CANCEL_REFUND', label: '取消订单并全额退款' },
+  { key: 'FORCE_RELEASE', label: '强制放款给卖家' },
+  { key: 'PARTIAL_REFUND', label: '部分退款（需填金额）' },
+  { key: 'CREDIT', label: '信用处理（记入违规）' },
+  { key: 'ACCOUNT_FREEZE', label: '冻结被申请人账号' },
+]
+
 async function mediate() {
-  const note = window.prompt('请输入调解记录')
-  if (!note) return
+  if (!mediateNote.value.trim()) {
+    app.showToast('请填写调解记录')
+    return
+  }
   try {
-    await disputesApi.mediate(selected.value.id, note)
+    await disputesApi.mediate(selected.value.id, mediateNote.value.trim())
     app.showToast('调解记录已保存')
+    mediateNote.value = ''
     drawerOpen.value = false
     await load()
   } catch (exc: any) {
@@ -43,11 +58,25 @@ async function mediate() {
 }
 
 async function resolve() {
-  const conclusion = window.prompt('请输入处理结论（继续履约/退款/强制放款/部分退款等）')
-  if (!conclusion) return
+  const form = resolveForm.value
+  if (form.conclusion.trim().length < 5) {
+    app.showToast('处理结论必填（不少于 5 个字）')
+    return
+  }
+  const payload: any = { conclusionType: form.conclusionType, conclusion: form.conclusion.trim() }
+  if (form.conclusionType === 'PARTIAL_REFUND') {
+    const cents = Math.round(Number.parseFloat(form.amountYuan || '0') * 100)
+    if (!cents) {
+      app.showToast('部分退款必须填写金额')
+      return
+    }
+    payload.amountCents = cents
+  }
+  if (['CANCEL_REFUND', 'FORCE_RELEASE', 'PARTIAL_REFUND'].includes(form.conclusionType)
+    && !window.confirm('资金类结论将进入双人复核（由另一位管理员执行），确认提交？')) return
   try {
-    await disputesApi.resolve(selected.value.id, conclusion)
-    app.showToast('纠纷已解决')
+    await disputesApi.resolve(selected.value.id, payload)
+    app.showToast('处理结论已提交')
     drawerOpen.value = false
     await load()
   } catch (exc: any) {
@@ -60,7 +89,7 @@ async function freeze() {
   if (!reason) return
   try {
     await disputesApi.freeze(selected.value.id, reason)
-    app.showToast('资金冻结申请已记录')
+    app.showToast('托管资金已冻结')
     drawerOpen.value = false
     await load()
   } catch (exc: any) {
@@ -102,7 +131,7 @@ onMounted(load)
     <template v-if="selected">
       <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
         <Gavel :size="18" style="color: #6852c5" />
-        <div style="flex: 1"><span style="display: block; color: #958b9f; font-size: 8px">关联订单</span><strong style="display: block; color: #554761; font-size: 10px">{{ selected.orderNo }}</strong></div>
+        <div style="flex: 1"><span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">关联订单</span><strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ selected.orderNo }}</strong></div>
         <StatusBadge :value="selected.status" />
       </div>
       <h4 class="section-title">双方信息</h4>
@@ -113,9 +142,25 @@ onMounted(load)
         <label><span>调解人</span><input :value="selected.mediator || '待分配'" disabled /></label>
       </div>
       <h4 class="section-title" style="margin-top: 20px">双方陈述</h4>
-      <div style="padding: 12px; border: 1px solid #e9e6ed; border-radius: 8px; color: #716d79; font-size: 10px; line-height: 1.7">{{ selected.statement || '暂无陈述' }}</div>
+      <div style="padding: 12px; border: 1px solid #e9e6ed; border-radius: 8px; color: #716d79; font-size: var(--font-size-body); line-height: 1.7">{{ selected.statement || '暂无陈述' }}</div>
+      <h4 class="section-title" style="margin-top: 20px">调解记录</h4>
+      <label style="display: block"><span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">内部调解备注（不直接发给用户）</span>
+        <textarea v-model="mediateNote" placeholder="记录沟通要点与建议方向" style="width: 100%; min-height: 56px" /></label>
       <h4 class="section-title" style="margin-top: 20px">处理结论</h4>
-      <div style="padding: 12px; border: 1px solid #e9e6ed; border-radius: 8px; color: #716d79; font-size: 10px; line-height: 1.7">{{ selected.conclusion || '尚未出具结论' }}</div>
+      <div style="padding: 12px; border: 1px solid #e9e6ed; border-radius: 8px; color: #716d79; font-size: var(--font-size-body); line-height: 1.7; margin-bottom: 10px">{{ selected.conclusion || '尚未出具结论' }}</div>
+      <div class="form-grid">
+        <label class="full"><span>结论类型</span>
+          <select v-model="resolveForm.conclusionType">
+            <option v-for="item in conclusionTypes" :key="item.key" :value="item.key">{{ item.label }}</option>
+          </select>
+        </label>
+        <label v-if="resolveForm.conclusionType === 'PARTIAL_REFUND'" class="full"><span>部分退款金额（元）</span>
+          <input v-model="resolveForm.amountYuan" placeholder="例如：64.00" />
+        </label>
+        <label class="full"><span>处理结论（≥5 字；资金类结论进入双人复核）</span>
+          <textarea v-model="resolveForm.conclusion" placeholder="例如：核实物品确有问题，取消订单并全额退款" />
+        </label>
+      </div>
     </template>
     <template #footer>
       <button @click="freeze">冻结资金</button>

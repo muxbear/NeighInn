@@ -1,0 +1,328 @@
+"""C 端认证域集成测试（M01 + W02 联动，对应 AC-01）。
+
+覆盖：注册登录 → 实名/业主证明提交 → 后台审核 → 小区绑定 → 状态机全链路。
+"""
+
+import pytest
+from sqlalchemy import func, select
+
+from src.db.models import AppNotification, AuditLog, Resident
+from tests.conftest import (
+    ADMIN_BASE,
+    C_BASE,
+    TEST_PHONE,
+    admin_login,
+    bearer,
+    first_pending_cert,
+    register_user,
+    submit_owner_proof,
+    verify_realname,
+)
+
+
+@pytest.mark.asyncio
+async def test_sms_register_login_and_profile(client):
+    result = await register_user(client)
+    assert result["isNewUser"] is True
+    assert result["profile"]["phone"] == "139****1111"  # 全链路脱敏（SRS 9.2）
+    assert result["profile"]["authStatus"] == "LOGGED_IN_UNVERIFIED"
+
+    # 再次登录：同一手机号唯一账号（M01-01）
+    again = await register_user(client)
+    assert again["isNewUser"] is False
+    assert again["profile"]["id"] == result["profile"]["id"]
+
+    me = await client.get(f"{C_BASE}/users/me", headers=bearer(result["token"]))
+    assert me.status_code == 200
+    assert me.json()["data"]["id"] == result["profile"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_wrong_sms_code_rejected(client):
+    await client.post(f"{C_BASE}/auth/sms-code", json={"phone": TEST_PHONE})
+    resp = await client.post(f"{C_BASE}/auth/login/sms",
+                             json={"phone": TEST_PHONE, "code": "000000"})
+    assert resp.status_code == 401
+    assert resp.json()["code"] == 40101
+
+
+@pytest.mark.asyncio
+async def test_auth_status_transitions(client):
+    result = await register_user(client)
+    headers = bearer(result["token"])
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "LOGGED_IN_UNVERIFIED"
+    assert status["realnameVerified"] is False
+
+    # 提交实名认证
+    resp = await client.post(f"{C_BASE}/auth/realname",
+                             json={"frontImage": "certs/id-front.jpg",
+                                   "backImage": "certs/id-back.jpg", "faceToken": "ft"},
+                             headers=headers)
+    assert resp.status_code == 200, resp.text
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "VERIFYING"
+
+    # 重复提交被阻止（40901）
+    dup = await client.post(f"{C_BASE}/auth/realname",
+                            json={"frontImage": "a.jpg", "backImage": "b.jpg"},
+                            headers=headers)
+    assert dup.status_code == 409
+    assert dup.json()["code"] == 40901
+
+
+@pytest.mark.asyncio
+async def test_owner_proof_requires_realname_first(client):
+    """SRS 4.1 流程顺序：未完成实名认证不得提交业主证明（40302）。"""
+    result = await register_user(client)
+    resp = await client.post(f"{C_BASE}/auth/owner-proof",
+                             json={"communityId": 1, "identity": "owner",
+                                   "images": ["a.jpg"]}, headers=bearer(result["token"]))
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40302
+
+
+@pytest.mark.asyncio
+async def test_owner_proof_submit_and_pending_status(client):
+    result = await register_user(client)
+    headers = bearer(result["token"])
+    await client.post(f"{C_BASE}/auth/realname",
+                      json={"frontImage": "certs/f.jpg", "backImage": "certs/b.jpg",
+                            "faceToken": "ft"}, headers=headers)
+    csrf = await admin_login(client)
+    realname = await first_pending_cert(client, csrf, "REALNAME")
+    await client.post(f"{ADMIN_BASE}/certifications/{realname['id']}/approve", headers=csrf)
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "VERIFIED_UNOWNER"
+
+    data = await submit_owner_proof(client, result["token"], community_id=1)
+    assert data["status"] == "PENDING"
+    assert data["auditHours"] == 24
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "PENDING_AUDIT"
+
+    # 不存在的小区被拒绝
+    bad = await client.post(f"{C_BASE}/auth/owner-proof",
+                            json={"communityId": 9999, "identity": "owner",
+                                  "images": ["a.jpg"]}, headers=headers)
+    assert bad.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_full_certification_flow_to_binding(client, db_session):
+    """AC-01：注册 → 实名 → 业主证明 → 后台审核 → 绑定小区 全流程无阻断。"""
+    result = await register_user(client)
+    headers = bearer(result["token"])
+
+    await client.post(f"{C_BASE}/auth/realname",
+                      json={"frontImage": "certs/f.jpg", "backImage": "certs/b.jpg",
+                            "faceToken": "ft"}, headers=headers)
+
+    csrf = await admin_login(client)
+
+    # 后台审核队列（W02）先审实名
+    realname = await first_pending_cert(client, csrf, "REALNAME")
+    assert realname["user"]["phone"] == "139****1111"  # 审核队列脱敏（W02-01）
+    resp = await client.post(
+        f"{ADMIN_BASE}/certifications/{realname['id']}/approve", headers=csrf)
+    assert resp.status_code == 200, resp.text
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "VERIFIED_UNOWNER"
+
+    # 实名通过后才能提交业主证明（SRS 4.1 顺序）
+    await submit_owner_proof(client, result["token"], community_id=1)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    assert proof["community"]["name"] == "阳光花园小区"  # 与移动端 Mock 夹具对齐
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "PENDING_AUDIT"  # 实名已过，业主证明待审
+
+    # 后台审核通过业主证明 → 账号与小区强绑定（BR-02/W02-02）
+    resp = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+    assert resp.status_code == 200, resp.text
+
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "VERIFIED_OWNER"
+    assert status["realnameVerified"] and status["ownerVerified"]
+
+    profile = (await client.get(f"{C_BASE}/users/me", headers=headers)).json()["data"]
+    assert profile["communityName"] == "阳光花园小区"
+    assert profile["verified"] is True
+
+    mine = (await client.get(f"{C_BASE}/communities/mine", headers=headers)).json()["data"]
+    assert len(mine) == 1
+    assert mine[0]["name"] == "阳光花园小区"
+    assert mine[0]["status"] == "已认证"
+
+    # 审核结果通知（M01-04：站内信）
+    notifications = (await db_session.execute(
+        select(func.count()).select_from(AppNotification)
+        .where(AppNotification.user_id == int(result["profile"]["id"]))
+    )).scalar()
+    assert notifications == 2
+
+    # 审核动作全部留痕（W01-03/AC-08）
+    audits = (await db_session.execute(
+        select(func.count()).select_from(AuditLog)
+        .where(AuditLog.resource_type == "certification")
+    )).scalar()
+    assert audits == 2
+
+
+@pytest.mark.asyncio
+async def test_reject_requires_reason_and_notifies(client, db_session):
+    result = await register_user(client)
+    headers = bearer(result["token"])
+    await client.post(f"{C_BASE}/auth/realname",
+                      json={"frontImage": "certs/f.jpg", "backImage": "certs/b.jpg",
+                            "faceToken": "ft"}, headers=headers)
+    csrf = await admin_login(client)
+    realname = await first_pending_cert(client, csrf, "REALNAME")
+    await client.post(f"{ADMIN_BASE}/certifications/{realname['id']}/approve", headers=csrf)
+    await submit_owner_proof(client, result["token"], community_id=2)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+
+    # 原因过短被拒绝（守卫：≥10 字）
+    short = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/reject",
+        json={"reason": "不清楚"}, headers=csrf)
+    assert short.status_code == 400
+    assert short.json()["code"] == 40001
+
+    reason = "房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄"
+    resp = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/reject",
+        json={"reason": reason}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["rejectCount"] == 1
+
+    # 驳回原因可读且可重提（M01-04/M01-05）
+    status = (await client.get(f"{C_BASE}/auth/status", headers=headers)).json()["data"]
+    assert status["status"] == "REJECTED"
+    assert status["rejectReason"] == reason
+    assert status["canResubmit"] is True
+
+    note = await db_session.scalar(
+        select(AppNotification)
+        .where(AppNotification.user_id == int(result["profile"]["id"]))
+        .order_by(AppNotification.id.desc()))
+    assert note is not None and "驳回" in note.title and reason in note.description
+
+
+@pytest.mark.asyncio
+async def test_idempotent_approve_returns_cached_result(client, db_session):
+    result = await register_user(client)
+    csrf = await admin_login(client)
+    await verify_realname(client, csrf, result["token"])
+    await submit_owner_proof(client, result["token"], community_id=1)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+
+    idem_headers = {**csrf, "X-Idempotency-Key": "test-approve-0001"}
+    first = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=idem_headers)
+    assert first.status_code == 200, first.text
+
+    second = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=idem_headers)
+    assert second.status_code == 200, second.text
+    assert second.json()["data"]["id"] == first.json()["data"]["id"]
+
+    # 幂等重放不产生重复审计（SRS 8.3 幂等语义）
+    audits = (await db_session.execute(
+        select(func.count()).select_from(AuditLog)
+        .where(AuditLog.action == "certification.owner_proof.approve")
+    )).scalar()
+    assert audits == 1
+
+    # 无幂等键的重复审核：状态机拒绝非法迁移（40904）
+    third = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+    assert third.status_code == 409
+    assert third.json()["code"] == 40904
+
+
+@pytest.mark.asyncio
+async def test_freeze_auto_off_shelves_items(client, db_session):
+    """W02-04：冻结后该用户所有在售物品自动下架。"""
+    from src.db.models import Item
+
+    result = await register_user(client)
+    csrf = await admin_login(client)
+    await verify_realname(client, csrf, result["token"])
+    await submit_owner_proof(client, result["token"], community_id=1)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    await client.post(f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+
+    user_id = int(result["profile"]["id"])
+    db_session.add(Item(community_id=1, seller_id=user_id, title="九成新儿童平衡车",
+                        trade_type="MONETARY", price_cents=12800, status="ON_SALE"))
+    db_session.add(Item(community_id=1, seller_id=user_id, title="露营折叠椅两把",
+                        trade_type="FREE_GIFT", price_cents=0, status="ON_SALE"))
+    db_session.add(Item(community_id=1, seller_id=user_id, title="草稿箱物品",
+                        trade_type="BARTER", price_cents=0, status="DRAFT"))
+    await db_session.commit()
+
+    resident = await db_session.scalar(
+        select(Resident).where(Resident.user_id == user_id))
+    resp = await client.post(f"{ADMIN_BASE}/residents/{resident.id}/freeze", headers=csrf)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["itemsOffShelves"] == 2  # 草稿不受影响
+
+    items = (await db_session.execute(
+        select(Item).where(Item.seller_id == user_id))).scalars().all()
+    by_title = {item.title: item.status for item in items}
+    assert by_title["九成新儿童平衡车"] == "OFF_SHELF"
+    assert by_title["露营折叠椅两把"] == "OFF_SHELF"
+    assert by_title["草稿箱物品"] == "DRAFT"
+
+    # 解冻恢复认证（物品需手动重新上架）
+    resp = await client.post(f"{ADMIN_BASE}/residents/{resident.id}/unfreeze", headers=csrf)
+    assert resp.status_code == 200, resp.text
+    await db_session.refresh(resident)
+    assert resident.certification_status == "VERIFIED"
+
+
+@pytest.mark.asyncio
+async def test_revoke_certification(client, db_session):
+    result = await register_user(client)
+    csrf = await admin_login(client)
+    await verify_realname(client, csrf, result["token"])
+    await submit_owner_proof(client, result["token"], community_id=1)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    await client.post(f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+
+    resident = await db_session.scalar(
+        select(Resident).where(Resident.user_id == int(result["profile"]["id"])))
+    resp = await client.post(f"{ADMIN_BASE}/residents/{resident.id}/revoke", headers=csrf)
+    assert resp.status_code == 200, resp.text
+    await db_session.refresh(resident)
+    assert resident.certification_status == "REVOKED"
+    assert resident.certification_no == ""
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoints_require_auth(client):
+    resp = await client.get(f"{ADMIN_BASE}/certifications")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == 40101
+
+
+@pytest.mark.asyncio
+async def test_admin_write_requires_csrf(client):
+    csrf = await admin_login(client)
+    result = await register_user(client, "13900002222")
+    await verify_realname(client, csrf, result["token"])
+    await submit_owner_proof(client, result["token"], community_id=1)
+    resp = await client.get(f"{ADMIN_BASE}/certifications",
+                            params={"status": "PENDING", "type": "OWNER_PROOF"})
+    cert_id = resp.json()["data"]["items"][0]["id"]
+    # 缺 CSRF 头的写操作被拒绝
+    resp = await client.post(f"{ADMIN_BASE}/certifications/{cert_id}/approve")
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40301

@@ -125,7 +125,7 @@ onMounted(load)
       <div class="parameter-panel-heading"><div><strong>参数键</strong><span>{{ tree.length }} 个根节点</span></div><button @click="creatingRoot = true"><Plus :size="16" /></button></div>
       <div class="parameter-tree-search"><Search :size="15" /><input v-model="treeQuery" placeholder="搜索参数键" /></div>
       <div v-if="creatingRoot" class="create-root-form" style="margin: 0 12px 8px; padding: 5px; display: flex; align-items: center; gap: 4px; border: 1px solid #cfc6ec; border-radius: 8px">
-        <input v-model="rootName" placeholder="输入根节点名称" style="flex: 1; height: 25px; border: 0; font-size: 10px" @keyup.enter="addRoot" />
+        <input v-model="rootName" placeholder="输入根节点名称" style="flex: 1; height: 25px; border: 0; font-size: var(--font-size-body)" @keyup.enter="addRoot" />
         <button style="width: 25px; height: 25px; color: #fff; background: #7059d2; border-radius: 6px" @click="addRoot"><Check :size="14" /></button>
         <button style="width: 25px; height: 25px" @click="creatingRoot = false"><X :size="14" /></button>
       </div>
@@ -153,7 +153,7 @@ onMounted(load)
       <div class="parameter-detail-meta"><div><span>参数项</span><strong>{{ items.length }}</strong></div><div><span>启用项</span><strong>{{ items.filter((item) => item.status === '启用').length }}</strong></div><div><span>最后更新</span><strong>{{ items[0]?.updatedAt || '—' }}</strong></div></div>
       <div class="parameter-table-toolbar">
         <div class="table-search"><Search :size="17" /><input v-model="itemQuery" placeholder="搜索参数项名称或值…" /></div>
-        <div style="display: flex; gap: 7px"><button style="height: 34px; padding: 0 10px; border: 1px solid #e2dfe6; border-radius: 8px; color: #6e6976; background: #fff; font-size: 10px"><Filter :size="16" />状态筛选</button><button style="height: 34px; padding: 0 10px; border: 1px solid #e2dfe6; border-radius: 8px; color: #6e6976; background: #fff; font-size: 10px"><Settings2 :size="16" />列设置</button></div>
+        <div style="display: flex; gap: 7px"><button style="height: 34px; padding: 0 10px; border: 1px solid #e2dfe6; border-radius: 8px; color: #6e6976; background: #fff; font-size: var(--font-size-body)"><Filter :size="16" />状态筛选</button><button style="height: 34px; padding: 0 10px; border: 1px solid #e2dfe6; border-radius: 8px; color: #6e6976; background: #fff; font-size: var(--font-size-body)"><Settings2 :size="16" />列设置</button></div>
       </div>
       <div class="table-wrap parameter-table-wrap">
         <table class="parameter-items-table">

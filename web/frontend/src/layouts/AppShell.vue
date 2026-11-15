@@ -98,12 +98,12 @@ onMounted(() => {
           <button
             v-for="community in app.communities"
             :key="community.id"
-            style="width: 100%; padding: 9px 10px; text-align: left; border-radius: 8px; font-size: 11px; display: flex; justify-content: space-between"
+            style="width: 100%; padding: 9px 10px; text-align: left; border-radius: 8px; font-size: var(--font-size-body); display: flex; justify-content: space-between"
             :style="{ background: Number(community.id) === app.currentCommunityId ? '#f1edfc' : 'transparent' }"
             @click="selectCommunity(Number(community.id))"
           >
             <span>{{ community.name }}</span>
-            <span style="color: #aaa6b1; font-size: 9px">{{ community.code }}</span>
+            <span style="color: #aaa6b1; font-size: var(--font-size-caption)">{{ community.code }}</span>
           </button>
         </div>
       </div>
@@ -169,8 +169,8 @@ onMounted(() => {
           </div>
         </div>
         <div v-if="avatarOpen" class="notification-popover" style="right: 20px; width: 180px; padding: 6px">
-          <div style="padding: 9px 10px; color: #777381; font-size: 10px">{{ auth.admin?.realName }} · {{ auth.admin?.roles?.[0]?.name }}</div>
-          <button style="width: 100%; padding: 9px 10px; text-align: left; border-radius: 8px; font-size: 11px; color: #c85660" @click="logout">退出登录</button>
+          <div style="padding: 9px 10px; color: #777381; font-size: var(--font-size-body)">{{ auth.admin?.realName }} · {{ auth.admin?.roles?.[0]?.name }}</div>
+          <button style="width: 100%; padding: 9px 10px; text-align: left; border-radius: 8px; font-size: var(--font-size-body); color: #c85660" @click="logout">退出登录</button>
         </div>
       </header>
 
@@ -183,15 +183,15 @@ onMounted(() => {
       <div class="modal-card">
         <div class="command-input" style="height: 50px; padding: 0 12px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid #ece9f0; color: #817c8c">
           <Search :size="19" />
-          <input v-model="commandQuery" autofocus placeholder="搜索用户、内容、工单或功能…" style="flex: 1; border: 0; font-size: 13px" />
+          <input v-model="commandQuery" autofocus placeholder="搜索用户、内容、工单或功能…" style="flex: 1; border: 0; font-size: var(--font-size-body)" />
           <kbd>ESC</kbd>
         </div>
         <div style="padding: 8px">
-          <p style="padding: 8px 10px 6px; margin: 0; color: #aaa6b2; font-size: 9px; font-weight: 600; letter-spacing: .08em">快捷访问</p>
+          <p style="padding: 8px 10px 6px; margin: 0; color: #aaa6b2; font-size: var(--font-size-caption); font-weight: 600; letter-spacing: .08em">快捷访问</p>
           <button
             v-for="item in filteredCommands"
             :key="item.id"
-            style="width: 100%; padding: 10px; display: flex; align-items: center; gap: 10px; border-radius: 8px; color: #5a5663; font-size: 11px"
+            style="width: 100%; padding: 10px; display: flex; align-items: center; gap: 10px; border-radius: 8px; color: #5a5663; font-size: var(--font-size-body)"
             @click="navigate(item.route)"
           >
             <component :is="item.icon" :size="18" />

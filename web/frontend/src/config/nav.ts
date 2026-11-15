@@ -7,6 +7,7 @@ import {
   Coffee,
   Download,
   FileClock,
+  Flag,
   Gavel,
   HandHeart,
   LayoutDashboard,
@@ -62,6 +63,7 @@ export const figmaNavGroups: NavGroup[] = [
     items: [
       { id: 'community-maintenance', label: '社区运维', route: '/community-management/maintenance', icon: Map, permission: 'community:maintenance:view' },
       { id: 'community-residents', label: '社区业主', route: '/community-management/residents', icon: UserRound, permission: 'community:resident:view' },
+      { id: 'community-verification', label: '住户认证', route: '/governance/verification', icon: ShieldCheck, permission: 'community:resident:audit' },
     ],
   },
   {
@@ -73,6 +75,7 @@ export const figmaNavGroups: NavGroup[] = [
       { id: 'finance-reconciliations', label: '对账管理', route: '/finance/reconciliations', icon: Scale, permission: 'finance:reconcile:view' },
       { id: 'finance-orders', label: '订单查询', route: '/finance/orders', icon: ClipboardList, permission: 'finance:order:view' },
       { id: 'disputes', label: '纠纷调解', route: '/governance/disputes', icon: Gavel, permission: 'governance:dispute:view' },
+      { id: 'reports', label: '举报处理', route: '/governance/reports', icon: Flag, permission: 'governance:report:view' },
     ],
   },
   {

@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from src.db.base import Base
+from src.db.models.common import BigIntPk, Entity, JsonDict, utcnow
+
+
+class User(Entity):
+    """C 端业主账号（全平台用户主键，SRS 9.1 User）。
+    手机号 SM4/AES-256 加密存储 + HMAC 哈希查重；全链路脱敏展示（SRS 9.2）。"""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    phone_enc: Mapped[str] = mapped_column(Text, default="")
+    phone_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    nickname: Mapped[str] = mapped_column(String(64), default="")
+    avatar_key: Mapped[str] = mapped_column(String(255), default="")
+    gender: Mapped[str] = mapped_column(String(8), default="")
+    # ACTIVE / FROZEN / CANCELLED（注销后匿名化，BR-10）
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+    # NOT_LOGIN 以外的端侧状态由 certifications + residents 推导
+    realname_status: Mapped[str] = mapped_column(String(16), default="UNVERIFIED", index=True)
+    credit_score: Mapped[int] = mapped_column(default=100)
+    credit_level: Mapped[str] = mapped_column(String(16), default="良好")
+    # 端侧设置（通知开关/隐私等，M07-06）：{"pushEnabled": true, ...}
+    settings_json: Mapped[dict] = mapped_column(JsonDict, default=dict)
+    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Certification(Entity):
+    """实名/业主证明审核单（SRS W02、M01-03）。每次提交生成一张审核单进入后台队列；
+    驳回必须给出原因（M01-04），累计驳回 3 次转人工专线（M01-05）。"""
+
+    __tablename__ = "certifications"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    resident_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("residents.id"), index=True)
+    community_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
+    # REALNAME / OWNER_PROOF（业主/租户/家属）
+    type: Mapped[str] = mapped_column(String(24), index=True)
+    identity: Mapped[str] = mapped_column(String(16), default="owner")
+    # 材料对象键列表（私有桶，签名 URL 10 分钟，禁止下载原图）
+    materials: Mapped[dict] = mapped_column(JsonDict, default=list)
+    # 第三方自动核验结论（OCR/人脸比对），人工仅处理异常（W02-01）
+    auto_result: Mapped[dict] = mapped_column(JsonDict, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    reviewer_id: Mapped[int | None] = mapped_column(BigInteger)
+    review_note: Mapped[str] = mapped_column(String(500), default="")
+    reject_reason: Mapped[str] = mapped_column(String(500), default="")
+    reject_count: Mapped[int] = mapped_column(default=0)
+    trace_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Resident(Entity):
+    """社区人员档案。一个用户在一个社区仅一条有效档案（后台详设 5.6.1）；
+    业主证明通过后账号与小区强绑定（BR-02、W02-02）。"""
+
+    __tablename__ = "residents"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    community_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    gender: Mapped[str] = mapped_column(String(8), default="")
+    phone_enc: Mapped[str] = mapped_column(Text, default="")
+    phone_hash: Mapped[str] = mapped_column(String(128), default="", index=True)
+    # 业主 / 租户 / 家属 / 商务人员
+    identity_type: Mapped[str] = mapped_column(String(16), default="业主", index=True)
+    building: Mapped[str] = mapped_column(String(128), default="")
+    relationship: Mapped[str] = mapped_column(String(64), default="")
+    certification_status: Mapped[str] = mapped_column(String(16), default="UNVERIFIED", index=True)
+    certification_no: Mapped[str] = mapped_column(String(32), default="")
+    level: Mapped[str] = mapped_column(String(24), default="普通用户")
+    # ACTIVE / FROZEN / LEFT
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserPenalty(Entity):
+    """用户处置记录（W07-02）：警告/禁言/限制发布/限制交易/封禁。
+    处置必须填写原因并留痕。"""
+
+    __tablename__ = "user_penalties"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    type: Mapped[str] = mapped_column(String(24), index=True)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    operator_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+
+
+class CreditLog(Base):
+    """信用流水（SRS 9.1 CreditLog、M07-08）。分数可由流水重算，禁止直接改分。"""
+
+    __tablename__ = "credit_logs"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    delta: Mapped[int] = mapped_column()
+    # TRADE_FULFILL / ON_TIME_INSPECT / REVIEW / VIOLATION / DISPUTE_PENALTY
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    ref_type: Mapped[str] = mapped_column(String(24), default="")
+    ref_id: Mapped[int | None] = mapped_column(BigInteger)
+    balance_after: Mapped[int] = mapped_column(default=0)
+    note: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

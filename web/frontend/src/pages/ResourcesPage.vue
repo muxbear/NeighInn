@@ -134,7 +134,7 @@ onMounted(loadTree)
         <div class="resource-section-heading"><h3>页面基础信息</h3><p>用于路由、导航展示与权限策略识别</p></div>
         <div class="resource-form-grid">
           <label><span>页面名称</span><input :value="detail.name" :disabled="!editing" /></label>
-          <label><span>页面编码</span><div style="position: relative"><input :value="detail.code" :disabled="!editing" /><button style="position: absolute; top: 4px; right: 4px; height: 28px; padding: 0 8px; border-left: 1px solid #e7e4ea; color: #6a53c8; font-size: 9px" @click="copyCode">复制</button></div></label>
+          <label><span>页面编码</span><div style="position: relative"><input :value="detail.code" :disabled="!editing" /><button style="position: absolute; top: 4px; right: 4px; height: 28px; padding: 0 8px; border-left: 1px solid #e7e4ea; color: #6a53c8; font-size: var(--font-size-body)" @click="copyCode">复制</button></div></label>
           <label><span>页面路由</span><input :value="detail.route" :disabled="!editing" /></label>
           <label><span>所属区域</span><input :value="detail.region" disabled /></label>
           <label class="full"><span>页面说明</span><textarea :value="detail.description" :disabled="!editing" /></label>
@@ -149,7 +149,7 @@ onMounted(loadTree)
         </div>
         <div class="page-resource-toolbar">
           <div class="table-search"><Search :size="17" /><input placeholder="搜索资源名称或资源标识…" /></div>
-          <div><button style="height: 34px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e2dfe6; border-radius: 8px; color: #6e6976; background: #fff; font-size: 10px"><Filter :size="16" />资源类型</button><button class="primary-button" style="height: 34px" @click="addResource"><Plus :size="16" />新增资源</button></div>
+          <div><button style="height: 34px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e2dfe6; border-radius: 8px; color: #6e6976; background: #fff; font-size: var(--font-size-body)"><Filter :size="16" />资源类型</button><button class="primary-button" style="height: 34px" @click="addResource"><Plus :size="16" />新增资源</button></div>
         </div>
         <div class="table-wrap page-resource-table-wrap">
           <table class="page-resource-table">

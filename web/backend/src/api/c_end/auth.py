@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from src.core.config import settings
+from src.core.deps import CurrentUser, DbSession
+from src.core.responses import ERR_PARAM, ERR_UNAUTHORIZED, ApiError, ok
+from src.core.security import decode_token, issue_access_token, issue_refresh_token
+from src.db.models import Certification
+from src.services import auth_service as svc
+from src.services.auth_service import sms_code_store
+
+router = APIRouter(tags=["c:auth"])
+
+
+class SmsCodeIn(BaseModel):
+    phone: str
+
+
+class LoginSmsIn(BaseModel):
+    phone: str
+    code: str
+
+
+class RefreshIn(BaseModel):
+    refreshToken: str
+
+
+class RealnameIn(BaseModel):
+    frontImage: str
+    backImage: str
+    faceToken: str = ""
+
+
+class OwnerProofIn(BaseModel):
+    communityId: int
+    identity: str = "owner"  # owner / tenant / family（M01-03）
+    images: list[str] = []
+
+
+@router.post("/auth/sms-code")
+async def send_sms_code(payload: SmsCodeIn):
+    svc.validate_phone(payload.phone)
+    code, cooldown = sms_code_store.issue(payload.phone)
+    # 生产：通过短信适配器下发，绝不返回验证码本体（NF-06）。
+    data: dict = {"cooldown": cooldown}
+    if settings.app_env == "dev":
+        data["mockCode"] = code  # 仅开发环境回显（与移动端 Mock 行为一致）
+    return ok(data, "验证码已发送")
+
+
+@router.post("/auth/login/sms")
+async def login_by_sms(payload: LoginSmsIn, db: DbSession):
+    svc.validate_phone(payload.phone)
+    if not sms_code_store.verify(payload.phone, payload.code):
+        raise ApiError(ERR_UNAUTHORIZED, "验证码错误或已过期", 401)
+    user, is_new = await svc.get_or_create_user_by_phone(db, payload.phone)
+    await db.commit()
+    profile = await svc.serialize_profile(db, user)
+    return ok({
+        **svc.issue_token_pair(user),
+        "profile": profile,
+        "isNewUser": is_new,
+    }, "登录成功")
+
+
+@router.post("/auth/login/one-click")
+async def login_by_one_click(db: DbSession):
+    from src.core.responses import not_implemented
+
+    raise not_implemented("POST /auth/login/one-click（需运营商认证 SDK 联调）")
+
+
+@router.post("/auth/login/wechat")
+async def login_by_wechat(db: DbSession):
+    from src.core.responses import not_implemented
+
+    raise not_implemented("POST /auth/login/wechat（需微信开放平台联调）")
+
+
+@router.post("/auth/token/refresh")
+async def refresh_token(payload: RefreshIn, db: DbSession):
+    user_id = decode_token(payload.refreshToken, expected_type="refresh")
+    if not user_id:
+        raise ApiError(ERR_UNAUTHORIZED, "Refresh Token 已失效", 401)
+    from src.db.models import User
+
+    user = await db.get(User, user_id)
+    if not user or user.status != "ACTIVE":
+        raise ApiError(ERR_UNAUTHORIZED, "账号不可用", 401)
+    return ok({
+        "accessToken": issue_access_token(user.id),
+        "refreshToken": issue_refresh_token(user.id),
+    })
+
+
+@router.post("/auth/logout")
+async def logout(user: CurrentUser, db: DbSession):
+    # 无状态 JWT：客户端丢弃令牌即可；如需强制下线，接入 Redis 令牌黑名单。
+    return ok({"success": True}, "已退出登录")
+
+
+@router.get("/auth/status")
+async def auth_status(user: CurrentUser, db: DbSession):
+    return ok(await svc.compute_auth_status(db, user))
+
+
+@router.post("/auth/realname")
+async def submit_realname(payload: RealnameIn, user: CurrentUser, db: DbSession):
+    """实名认证（M01-02）：身份证正反面 + 活体人脸。
+    材料为上传后的对象键（私有桶）；生成审核单进入后台队列（W02-01）。"""
+    if not payload.frontImage or not payload.backImage:
+        raise ApiError(ERR_PARAM, "请上传身份证正反面照片", 400)
+    await svc.assert_no_pending_certification(db, user.id, "REALNAME")
+    cert = Certification(
+        user_id=user.id,
+        type="REALNAME",
+        materials=[payload.frontImage, payload.backImage],
+        auto_result={"faceToken": bool(payload.faceToken)},
+        status="PENDING",
+        trace_id=uuid.uuid4().hex[:16],
+    )
+    db.add(cert)
+    await db.commit()
+    return ok({"status": "PENDING", "message": "实名认证已提交，预计 24 小时内完成审核"})
+
+
+@router.post("/auth/owner-proof")
+async def submit_owner_proof(payload: OwnerProofIn, user: CurrentUser, db: DbSession):
+    """业主证明（M01-03）：物业居住证明/房产证/租赁合同 + 小区选择。
+    每次提交生成审核单进入后台审核队列（W02-02）。"""
+    from src.db.models import Community
+
+    if not payload.images:
+        raise ApiError(ERR_PARAM, "请上传至少 1 份证明材料", 400)
+    # SRS 4.1 流程顺序：实名认证 → 业主证明（服务端强校验）
+    realname = await svc.latest_certification(db, user.id, "REALNAME")
+    if not realname or realname.status != "VERIFIED":
+        raise ApiError(40302, "请先完成实名认证后再提交业主证明", 403)
+    community = await db.get(Community, payload.communityId)
+    if not community or community.status != "OPERATING":
+        raise ApiError(ERR_PARAM, "所选小区不存在或已停用", 400)
+    await svc.assert_no_pending_certification(db, user.id, "OWNER_PROOF")
+    cert = Certification(
+        user_id=user.id,
+        type="OWNER_PROOF",
+        community_id=payload.communityId,
+        identity=payload.identity,
+        materials=payload.images[:5],
+        status="PENDING",
+        trace_id=uuid.uuid4().hex[:16],
+    )
+    db.add(cert)
+    await db.commit()
+    return ok({"status": "PENDING", "auditHours": 24})
+
+
+@router.post("/auth/appeal")
+async def submit_appeal(user: CurrentUser, db: DbSession):
+    from src.core.responses import not_implemented
+
+    raise not_implemented("POST /auth/appeal（M01-05 申诉通道，Phase 2）")
+
+
+@router.delete("/auth/account")
+async def cancel_account(user: CurrentUser, db: DbSession):
+    from src.core.responses import not_implemented
+
+    raise not_implemented("DELETE /auth/account（BR-10 注销匿名化，Phase 2）")

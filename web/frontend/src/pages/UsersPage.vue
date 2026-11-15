@@ -53,8 +53,7 @@ onMounted(load)
 
 <template>
   <section class="page-heading list-heading">
-    <div><p>运营管理 / 用户管理</p><h1>用户管理</h1><span>统一管理居民、物业、商户与运营人员账户</span></div>
-    <button class="primary-button" @click="drawerOpen = true"><Plus :size="17" />新增用户</button>
+    <div><p>运营管理 / 用户管理</p><h1>用户管理</h1><span>检索与处置 C 端业主账号；注册与实名认证仅在移动端完成（W07 边界，保证审计链）</span></div>
   </section>
   <section class="summary-row">
     <div><span>全部用户</span><strong>{{ total + 47 }}</strong><em>总量</em></div>
