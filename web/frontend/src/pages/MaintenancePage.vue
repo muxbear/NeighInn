@@ -658,6 +658,7 @@ onMounted(loadRegions)
         <div class="community-location-icon"><Building2 :size="21" /></div>
         <div><span>当前地市</span><h2>{{ selectedCityName || '杭州市' }}</h2><p>{{ selectedProvinceName || '浙江省' }} · 社区基础信息目录</p></div>
         <div class="city-overview"><span><strong>{{ districtNodes.length }}</strong> 个区县</span><i /><span><strong>{{ cityStreetCount }}</strong> 个街道</span><i /><span><strong>{{ total }}</strong> 个社区</span></div>
+        <button class="community-import-button" @click="openImport"><Upload :size="16" />批量导入</button>
       </div>
       <div class="community-location-filters">
         <div class="location-path"><MapPin :size="16" /><span>{{ selectedProvinceName }}</span><ChevronRight :size="13" /><strong>{{ selectedCityName }}</strong></div>

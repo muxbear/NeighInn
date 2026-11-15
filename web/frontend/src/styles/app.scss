@@ -400,9 +400,11 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
 .geo-city-list button.selected { color: #5d46bd; background: #ebe7fa; font-weight: 600; } .geo-city-list button svg { color: #a09ba8; }
 .geo-tree-footer, .role-list-footer, .resource-tree-legend, .parameter-tree-footer { height: 42px; padding: 0 15px; display: flex; align-items: center; gap: 14px; border-top: 1px solid #ebe8ef; color: #a19da9; background: #f8f7fa; font-size: var(--font-size-caption); }
 .community-directory-panel { min-width: 0; display: flex; flex-direction: column; }
-.community-directory-header { min-height: 83px; padding: 16px 20px; display: flex; align-items: center; gap: 11px; border-bottom: 1px solid #ebe8ef; }
+.community-directory-header { min-height: 83px; padding: 16px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 11px; border-bottom: 1px solid #ebe8ef; }
+.community-import-button { height: 34px; margin-left: auto; padding: 0 11px; display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; border: 1px solid #ddd6ec; border-radius: 8px; color: #6750c7; background: #fff; font-size: var(--font-size-body); font-weight: 500; white-space: nowrap; }
+.community-import-button:hover { border-color: #c9bce9; background: #f8f5fe; }
 .community-location-icon { width: 40px; height: 40px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 11px; color: #6751c5; background: #eeeafd; }
-.community-directory-header > div:nth-child(2) { min-width: 0; flex: 1; } .community-directory-header > div:nth-child(2) > span { display: block; color: #9c98a4; font-size: var(--font-size-caption); }
+.community-directory-header > div:nth-child(2) { min-width: 0; flex: 1 1 180px; } .community-directory-header > div:nth-child(2) > span { display: block; color: #9c98a4; font-size: var(--font-size-caption); }
 .community-directory-header h2 { display: inline-block; margin: 1px 0 0; color: #3c3844; font-size: var(--font-size-title); font-weight: 600; } .community-directory-header p { margin: 2px 0 0; color: #9995a1; font-size: var(--font-size-caption); }
 .city-overview { display: flex; align-items: center; gap: 11px; color: #918d99; font-size: var(--font-size-caption); } .city-overview strong { color: #514c59; font-size: var(--font-size-body); } .city-overview i { width: 1px; height: 22px; background: #e2dfe5; }
 .community-location-filters { min-height: 75px; padding: 12px 18px; display: flex; align-items: flex-end; gap: 11px; border-bottom: 1px solid #ece9f0; background: #fcfbfd; }
@@ -880,7 +882,7 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
   .community-picker-results { height: 320px; }
   .resident-summary-grid { grid-template-columns: 1fr 1fr; }
   .community-maintenance-workspace { min-height: auto; grid-template-columns: 1fr; overflow: visible; } .geo-tree-panel { height: 360px; border-right: 0; border-bottom: 1px solid #e8e5ec; }
-  .community-directory-header { align-items: flex-start; flex-wrap: wrap; } .city-overview { width: 100%; justify-content: space-between; } .community-location-filters { align-items: stretch; flex-wrap: wrap; } .location-path { width: 100%; } .community-location-filters label { width: calc(50% - 6px); }
+  .community-directory-header { align-items: flex-start; flex-wrap: wrap; } .city-overview { width: 100%; justify-content: space-between; } .community-import-button { width: 100%; justify-content: center; } .community-location-filters { align-items: stretch; flex-wrap: wrap; } .location-path { width: 100%; } .community-location-filters label { width: calc(50% - 6px); }
   .community-table-toolbar { align-items: stretch; flex-direction: column; } .community-table-toolbar > div:last-child { flex-wrap: wrap; } .community-table-toolbar .table-search { width: 100%; } .community-table-toolbar > div:last-child > button { flex: 1; justify-content: center; }
   .community-pagination > span { display: none; } .community-pagination { justify-content: center; }
   .role-permission-workspace { min-height: auto; grid-template-columns: 1fr; overflow: visible; } .role-list-panel { height: 355px; border-right: 0; border-bottom: 1px solid #e8e5ec; }
