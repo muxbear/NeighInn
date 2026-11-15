@@ -48,14 +48,30 @@ def main() -> None:
     # 健康检查
     assert call("GET", "/health/live")["status"] == "ok"
 
-    # C 端：注册登录
+    # C 端：注册登录（注册意图；登录意图不会自动建号）
     code = call("POST", "/api/v1/auth/sms-code", {"phone": phone})["data"]["mockCode"]
-    login = call("POST", "/api/v1/auth/login/sms", {"phone": phone, "code": code})["data"]
+    login = call("POST", "/api/v1/auth/login/sms", {
+        "phone": phone,
+        "code": code,
+        "intent": "register",
+        "agreed": True,
+        "agreementVersion": "smoke-v1",
+        "privacyVersion": "smoke-v1",
+    })["data"]
     access = login["accessToken"]
     assert login["isNewUser"] is True
+    assert login["onboardingStatus"] == "NEW"
     assert login["profile"]["authStatus"] == "LOGGED_IN_UNVERIFIED"
     assert login["profile"]["phone"] == masked
     print("✓ 注册登录（脱敏手机号展示）")
+
+    # 新人引导：完善资料（头像/昵称）
+    onboard = call("POST", "/api/v1/auth/register/complete", {
+        "nickname": "冒烟邻居", "avatarKey": "avatar-person-1",
+    }, token=access)["data"]
+    assert onboard["onboardingStatus"] == "PROFILE_COMPLETED"
+    assert onboard["nickname"] == "冒烟邻居"
+    print("✓ 注册新人引导（资料完善）")
 
     # 实名认证提交
     realname = call("POST", "/api/v1/auth/realname",

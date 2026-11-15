@@ -39,6 +39,7 @@ def test_openapi_contract_surface():
     # C 端契约（mobile/api/*.api.ts）
     c_end_required = {
         "/api/v1/auth/login/sms",
+        "/api/v1/auth/register/complete",
         "/api/v1/auth/realname",
         "/api/v1/auth/owner-proof",
         "/api/v1/home",

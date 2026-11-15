@@ -91,12 +91,17 @@
           <text class="login__demo-code-text">开发环境验证码：{{ demoCode }}</text>
         </view>
         <ni-button type="primary" size="xl" block :loading="submitting" @tap="loginSms">
-          登录 / 注册
+          登录
         </ni-button>
         <view class="login__safe-note">
           <ni-icon name="lock" :size="12" state="tertiary" />
-          <text class="login__safe-note-text">未注册的手机号将自动创建账号，仅限本小区及邻近小区业主</text>
+          <text class="login__safe-note-text">未注册的手机号请先注册，仅限本小区及邻近小区业主</text>
         </view>
+      </view>
+
+      <view class="login__register-entry" @click="goRegister">
+        <text class="login__register-text">还没有账号？</text>
+        <text class="login__register-link">立即注册</text>
       </view>
 
       <view class="login__divider">
@@ -136,14 +141,19 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { LoginResult } from '../../models'
 import { useUserStore } from '../../stores/user.store'
+import { useAppStore } from '../../stores/app.store'
 import { authService } from '../../services/auth.service'
 import { useToast } from '../../composables/useToast'
 import { maskPhone } from '../../utils/desensitize'
 import { isPhone, isSmsCode } from '../../utils/validator'
-import { APP_INFO } from '../../config/env'
+import { openAgreement } from '../../utils/legal'
+import { AGREEMENT_VERSION, PRIVACY_VERSION } from '../../config/constants'
 
 const user = useUserStore()
+const appStore = useAppStore()
 const { toast, showToast } = useToast()
 
 const mode = ref<'oneclick' | 'sms'>('oneclick')
@@ -154,6 +164,13 @@ const countdown = ref(0)
 const submitting = ref(false)
 const demoCode = ref('')
 let timer: any = null
+
+onLoad((options: any) => {
+  if (options?.phone) {
+    mode.value = 'sms'
+    phone.value = String(options.phone)
+  }
+})
 
 // 开发环境验证码常驻提示：换手机号后旧验证码失效，先清空。
 watch(phone, () => {
@@ -177,12 +194,46 @@ function afterLogin(): void {
   }, 500)
 }
 
+function handleLoginResult(result: LoginResult): void {
+  if (result.isNewUser || result.onboardingStatus === 'NEW') {
+    showToast('账号已创建，完善资料即可开始')
+    setTimeout(() => {
+      uni.redirectTo({ url: '/pages/auth/register-profile' })
+    }, 400)
+    return
+  }
+  if (result.profile.onboardingStatus === 'PROFILE_COMPLETED') {
+    setTimeout(() => {
+      uni.redirectTo({ url: '/pages/auth/register-profile' })
+    }, 400)
+    return
+  }
+  afterLogin()
+}
+
+function goRegister(): void {
+  const suffix = phone.value ? `?phone=${phone.value}` : ''
+  uni.navigateTo({ url: `/pages/auth/register${suffix}` })
+}
+
+function showNotRegisteredModal(): void {
+  uni.showModal({
+    title: '手机号未注册',
+    content: '该手机号尚未注册，是否立即创建邻里账号？',
+    confirmText: '去注册',
+    cancelText: '再想想',
+    success: (res) => {
+      if (res.confirm) goRegister()
+    },
+  })
+}
+
 async function loginOneClick(): Promise<void> {
   if (!ensureAgreement() || submitting.value) return
   submitting.value = true
   try {
-    await user.loginWithOneClick('mock-carrier-token')
-    afterLogin()
+    const result = await user.loginWithOneClick('mock-carrier-token')
+    handleLoginResult(result)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '一键登录失败', 'alert')
   } finally {
@@ -233,9 +284,18 @@ async function loginSms(): Promise<void> {
   }
   submitting.value = true
   try {
-    await user.loginWithSms(phone.value, smsCode.value)
-    afterLogin()
-  } catch (error) {
+    const result = await user.loginWithSms(phone.value, smsCode.value, {
+      intent: 'login',
+      agreed: true,
+      agreementVersion: appStore.config.userAgreementVersion || AGREEMENT_VERSION,
+      privacyVersion: appStore.config.privacyPolicyVersion || PRIVACY_VERSION,
+    })
+    handleLoginResult(result)
+  } catch (error: any) {
+    if (error && error.code === 40401) {
+      showNotRegisteredModal()
+      return
+    }
     showToast(error instanceof Error ? error.message : '登录失败', 'alert')
   } finally {
     submitting.value = false
@@ -246,24 +306,13 @@ async function loginWechat(): Promise<void> {
   if (!ensureAgreement() || submitting.value) return
   submitting.value = true
   try {
-    await user.loginWithWechat('mock-wechat-code')
-    afterLogin()
+    const result = await user.loginWithWechat('mock-wechat-code')
+    handleLoginResult(result)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '微信登录失败', 'alert')
   } finally {
     submitting.value = false
   }
-}
-
-function openAgreement(type: 'user' | 'privacy'): void {
-  const title = type === 'user' ? '用户协议' : '隐私政策'
-  const url = type === 'user' ? APP_INFO.agreementUrl : APP_INFO.privacyUrl
-  uni.showModal({
-    title,
-    content: `${title}正式内容请访问：${url}`,
-    showCancel: false,
-    confirmText: '我知道了',
-  })
 }
 
 onUnmounted(() => {
@@ -445,6 +494,22 @@ onUnmounted(() => {
   margin-left: 4px;
   font-size: 7px;
   color: #a19892;
+}
+.login__register-entry {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  margin-top: 13px;
+}
+.login__register-text {
+  font-size: $ni-font-9;
+  color: #9a938d;
+}
+.login__register-link {
+  margin-left: 2px;
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
 }
 .login__field {
   margin-bottom: 10px;

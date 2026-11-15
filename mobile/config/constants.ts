@@ -153,6 +153,10 @@ export const AVATAR_CATEGORIES = [
   { key: 'nature', label: '自然风景', prefix: 'avatar-nature' },
 ] as const
 
+/** 协议版本默认值：实际以 /config/app 下发的管理端参数为准，这里是离线兜底。 */
+export const AGREEMENT_VERSION = '2026-11-01'
+export const PRIVACY_VERSION = '2026-11-01'
+
 export const STORAGE_KEYS = {
   accessToken: 'ni_token_access',
   refreshToken: 'ni_token_refresh',

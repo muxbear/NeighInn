@@ -9,6 +9,11 @@ export type AuthStatus =
   | 'VERIFIED_OWNER'
   | 'FROZEN'
 
+/** 注册新人引导状态：NEW → PROFILE_COMPLETED → COMPLETED。 */
+export type OnboardingStatus = 'NEW' | 'PROFILE_COMPLETED' | 'COMPLETED'
+
+export type LoginIntent = 'login' | 'register'
+
 export interface UserProfile {
   id: string
   nickname: string
@@ -27,6 +32,10 @@ export interface UserProfile {
   communityName: string
   joinedDays: number
   authStatus: AuthStatus
+  /** 旧版本缓存可能没有该字段，缺省视为 COMPLETED。 */
+  onboardingStatus?: OnboardingStatus
+  intentCommunityId?: string
+  intentCommunityName?: string
 }
 
 export interface LoginResult {
@@ -34,11 +43,28 @@ export interface LoginResult {
   refreshToken: string
   profile: UserProfile
   isNewUser: boolean
+  onboardingStatus?: OnboardingStatus
 }
 
 export interface SmsCodeResult {
   cooldown: number
   mockCode?: string
+}
+
+export interface LoginSmsOptions {
+  intent?: LoginIntent
+  agreed?: boolean
+  agreementVersion?: string
+  privacyVersion?: string
+}
+
+export interface RegisterCompletePayload {
+  nickname?: string
+  avatarKey?: string
+  /** 真实后端为数字 ID；Mock 小区 ID 为字符串，兼容两种形态。 */
+  intentCommunityId?: number | string
+  skip?: boolean
+  finish?: boolean
 }
 
 export interface AuthStatusResult {

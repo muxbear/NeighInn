@@ -92,6 +92,35 @@ const state = {
   favoriteIds: new Set<string>(ITEMS.filter((item) => item.favorite).map((item) => item.id)),
 }
 
+const DEFAULT_USER = clone<UserProfile>(USER)
+// Mock 中视为已注册的手机号；其余手机号走注册入口创建新账号。
+const registeredPhones = new Set<string>(['13812345628', '13800005628'])
+
+function createMockNewUser(phone: string): UserProfile {
+  return {
+    id: `mock-user-${phone.slice(-4)}`,
+    nickname: `邻居${phone.slice(-4)}`,
+    phone: `${phone.slice(0, 3)}****${phone.slice(-4)}`,
+    email: '',
+    address: '',
+    bio: '',
+    avatarPreset: 'avatar-person-1',
+    avatarDataUrl: '',
+    showBio: true,
+    shareAddressAfterOrder: false,
+    verified: false,
+    creditScore: 100,
+    creditLevel: '良好',
+    dealCount: 0,
+    communityName: '',
+    joinedDays: 0,
+    authStatus: 'LOGGED_IN_UNVERIFIED',
+    onboardingStatus: 'NEW',
+    intentCommunityId: '',
+    intentCommunityName: '',
+  }
+}
+
 function fail(code: number, message: string): never {
   throw new ApiError(code, message)
 }
@@ -350,18 +379,62 @@ async function route(
     if (!/^1[3-9]\d{9}$/.test(String(body.phone ?? ''))) fail(40001, '请输入正确的手机号')
     return { cooldown: 60, mockCode: '123456' }
   }
-  if ((path === '/auth/login/sms' || path === '/auth/login/one-click' || path === '/auth/login/wechat') && method === 'POST') {
-    if (path === '/auth/login/sms') {
-      if (!/^1[3-9]\d{9}$/.test(String(body.phone ?? ''))) fail(40001, '请输入正确的手机号')
-      if (!/^\d{6}$/.test(String(body.code ?? ''))) fail(40001, '请输入 6 位验证码')
+  if (path === '/auth/login/sms' && method === 'POST') {
+    const phone = String(body.phone ?? '')
+    if (!/^1[3-9]\d{9}$/.test(phone)) fail(40001, '请输入正确的手机号')
+    if (!/^\d{6}$/.test(String(body.code ?? ''))) fail(40001, '请输入 6 位验证码')
+    const intent = body.intent === 'register' ? 'register' : 'login'
+    const registered = registeredPhones.has(phone)
+    if (intent === 'register') {
+      if (registered) fail(40901, '该手机号已注册，请直接登录')
+      if (!body.agreed) fail(40001, '请先阅读并同意用户协议与隐私政策')
+      registeredPhones.add(phone)
+      state.user = createMockNewUser(phone)
+    } else if (!registered) {
+      fail(40401, '该手机号尚未注册，请先注册')
+    } else if (phone === '13812345628' || phone === '13800005628') {
+      state.user = clone(DEFAULT_USER)
     }
     const result: LoginResult = {
       accessToken: `mock-access-${Date.now()}`,
       refreshToken: `mock-refresh-${Date.now()}`,
       profile: clone(state.user),
-      isNewUser: false,
+      isNewUser: intent === 'register',
+      onboardingStatus: state.user.onboardingStatus ?? 'COMPLETED',
     }
     return result
+  }
+  if ((path === '/auth/login/one-click' || path === '/auth/login/wechat') && method === 'POST') {
+    const result: LoginResult = {
+      accessToken: `mock-access-${Date.now()}`,
+      refreshToken: `mock-refresh-${Date.now()}`,
+      profile: clone(state.user),
+      isNewUser: false,
+      onboardingStatus: state.user.onboardingStatus ?? 'COMPLETED',
+    }
+    return result
+  }
+  if (path === '/auth/register/complete' && method === 'POST') {
+    if (body.finish) {
+      state.user.onboardingStatus = 'COMPLETED'
+    } else if (body.skip) {
+      state.user.onboardingStatus = 'PROFILE_COMPLETED'
+    } else {
+      const nickname = String(body.nickname ?? '').trim()
+      if (!nickname) fail(40001, '请填写昵称')
+      if (nickname.length > 16) fail(40001, '昵称最多 16 字')
+      state.user.nickname = nickname
+      if (body.avatarKey) state.user.avatarPreset = String(body.avatarKey)
+      if (body.intentCommunityId !== undefined && body.intentCommunityId !== null && body.intentCommunityId !== '') {
+        const communityId = String(body.intentCommunityId)
+        const community = [...state.communities, ...state.nearbyCommunities]
+          .find((item) => item.id === communityId)
+        state.user.intentCommunityId = communityId
+        state.user.intentCommunityName = community?.name ?? ''
+      }
+      state.user.onboardingStatus = 'PROFILE_COMPLETED'
+    }
+    return clone(state.user)
   }
   if (path === '/auth/token/refresh' && method === 'POST') {
     return { accessToken: `mock-access-${Date.now()}`, refreshToken: `mock-refresh-${Date.now()}` }

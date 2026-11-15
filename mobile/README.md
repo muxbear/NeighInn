@@ -65,13 +65,13 @@ npm run icons        # 重新生成图标与内置头像资源
 - 后端 `CORS_ORIGINS` 必须放行移动端 H5 端口 `5191`，否则浏览器预检会被拒绝；开发环境已用 `CORS_ORIGIN_REGEX` 放宽本机/私网任意端口（详见 `web/backend/README.md`）。
 - 开发环境验证码会常驻显示在登录页验证码输入框下方，并输出到后端日志（手机号脱敏）；生产环境不返回验证码。
 - 切换到 staging/prod：修改 `CURRENT_ENV`，并把 `mock` 设为 `false`，替换 `baseUrl` / `wsUrl`。
-- 首次进入 App 会注入一个演示会话；在「设置 - 退出登录」后可体验登录页（验证码演示码 `123456`）。
+- 首次进入 App 默认停在登录页；开发环境验证码演示码为 `123456`。登录意图不会自动建号，未注册手机号会提示去注册；注册成功后进入新人引导。
 
 ## 目录结构
 
 ```
 App.uvue / main.ts / pages.json / manifest.json / uni.scss
-pages/                  36 个页面（主包 + trade/social/pay 等分包）
+pages/                  38 个页面（主包 + trade/social/pay 等分包）
 components/             40 个 ni-* 基础组件与业务组件
 composables/            useAuth / useIM / usePay / useUpload / useAudit / useToast ...
 services/               业务服务层（含 ws.service 长连接封装）
@@ -91,7 +91,7 @@ docs/                   详细设计方案
 
 ## 已实现
 
-- 登录（一键 / 验证码 / 微信，Mock）、实名认证、业主证明、认证结果
+- 登录（一键 / 验证码 / 微信，Mock）、用户注册与新人引导（手机号验证、昵称/头像/意向小区、协议留痕）、实名认证、业主证明、认证结果
 - 首页 Dashboard（专属区、喇叭站轮播、热门商品、邻里互助、生活频道）
 - 附近、搜索与筛选、专属区（赠与/互换/出售/服务互助）
 - 物品详情（轮播、卖家、留言、收藏、私信、三种交易入口、互换选择）

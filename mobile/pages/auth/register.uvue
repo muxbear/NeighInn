@@ -1,0 +1,501 @@
+<template>
+  <scroll-view class="reg" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <ni-status-bar />
+    <image class="reg__glow reg__glow--top" src="/static/placeholders/glow-warm.svg" mode="scaleToFill" />
+    <image class="reg__glow reg__glow--left" src="/static/placeholders/glow-sage.svg" mode="scaleToFill" />
+
+    <view class="reg__nav">
+      <view class="reg__nav-button" @click="goBack">
+        <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+      </view>
+      <text class="reg__nav-title">注册</text>
+      <view class="reg__nav-placeholder" />
+    </view>
+
+    <view class="reg__content">
+      <view class="reg__brand">
+        <view class="reg__logo">
+          <ni-icon name="home" :size="28" state="white" />
+          <view class="reg__logo-dot" />
+        </view>
+        <text class="reg__slogan">真实邻居 · 安心流转</text>
+        <text class="reg__title">创建你的邻里账号</text>
+        <text class="reg__subtitle">手机号验证后即可浏览本小区与邻近小区好物</text>
+      </view>
+
+      <view class="reg__progress">
+        <view class="reg__progress-head">
+          <text class="reg__progress-label">手机号验证</text>
+          <text class="reg__progress-step">1 / 2</text>
+        </view>
+        <ni-progress :percent="50" :height="6" />
+      </view>
+
+      <view class="reg__card">
+        <view class="reg__field">
+          <ni-input
+            v-model="phone"
+            placeholder="请输入手机号"
+            type="number"
+            :maxlength="11"
+            prefix-icon="phone"
+            :height="50"
+          />
+        </view>
+        <view class="reg__code-row">
+          <view class="reg__code-input">
+            <ni-input
+              v-model="smsCode"
+              placeholder="请输入 6 位验证码"
+              type="number"
+              :maxlength="6"
+              prefix-icon="lock"
+              :height="50"
+            />
+          </view>
+          <view
+            class="reg__code-button"
+            :class="{ 'reg__code-button--disabled': countdown > 0 }"
+            @click="sendCode"
+          >
+            <text class="reg__code-button-text">{{ countdown > 0 ? `${countdown}s` : '获取验证码' }}</text>
+          </view>
+        </view>
+
+        <view v-if="demoCode" class="reg__demo-code">
+          <text class="reg__demo-code-text">开发环境验证码：{{ demoCode }}</text>
+        </view>
+
+        <view class="reg__agreement">
+          <view class="reg__checkbox" :class="{ 'reg__checkbox--checked': agreed }" @click="agreed = !agreed">
+            <ni-icon v-if="agreed" name="check" :size="11" state="white" />
+          </view>
+          <view class="reg__agreement-copy">
+            <text class="reg__agreement-text">我已阅读并同意</text>
+            <text class="reg__agreement-link" @click="openAgreement('user')">《用户协议》</text>
+            <text class="reg__agreement-text">和</text>
+            <text class="reg__agreement-link" @click="openAgreement('privacy')">《隐私政策》</text>
+          </view>
+        </view>
+
+        <ni-button type="primary" size="xl" block :loading="submitting" @tap="submit">
+          注册并登录
+        </ni-button>
+
+        <view class="reg__login-entry" @click="goLogin">
+          <text class="reg__login-text">已有账号？</text>
+          <text class="reg__login-link">去登录</text>
+        </view>
+      </view>
+
+      <view class="reg__note">
+        <ni-icon name="shield" :size="14" state="gold" />
+        <text class="reg__note-text">同一手机号仅可注册一个账号；完成实名与业主认证后即可发布物品和参与交易</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { onUnmounted, ref, watch } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { LoginResult } from '../../models'
+import { ApiError } from '../../api/errors'
+import { authService } from '../../services/auth.service'
+import { useUserStore } from '../../stores/user.store'
+import { useAppStore } from '../../stores/app.store'
+import { useToast } from '../../composables/useToast'
+import { openAgreement } from '../../utils/legal'
+import { isPhone, isSmsCode } from '../../utils/validator'
+import { AGREEMENT_VERSION, PRIVACY_VERSION } from '../../config/constants'
+
+const user = useUserStore()
+const appStore = useAppStore()
+const { toast, showToast } = useToast()
+
+const phone = ref('')
+const smsCode = ref('')
+const agreed = ref(false)
+const countdown = ref(0)
+const submitting = ref(false)
+const demoCode = ref('')
+let timer: any = null
+
+onLoad((options: any) => {
+  if (options?.phone) phone.value = String(options.phone)
+  if (user.isLoggedIn) {
+    if (user.needsOnboarding) {
+      uni.redirectTo({ url: '/pages/auth/register-profile' })
+    } else {
+      uni.switchTab({ url: '/pages/home/index' })
+    }
+  }
+})
+
+watch(phone, () => {
+  demoCode.value = ''
+})
+
+function ensureAgreement(): boolean {
+  if (!agreed.value) {
+    showToast('请先阅读并同意用户协议与隐私政策', 'alert')
+    return false
+  }
+  return true
+}
+
+function startCountdown(): void {
+  countdown.value = 60
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0) {
+      countdown.value = 0
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+    }
+  }, 1000)
+}
+
+async function sendCode(): Promise<void> {
+  if (countdown.value > 0) return
+  if (!isPhone(phone.value)) {
+    showToast('请输入正确的手机号', 'alert')
+    return
+  }
+  try {
+    const result = await authService.sendSmsCode(phone.value)
+    demoCode.value = result.mockCode ?? ''
+    startCountdown()
+    showToast(result.mockCode ? `验证码已发送（演示码 ${result.mockCode}）` : '验证码已发送')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '发送失败', 'alert')
+  }
+}
+
+function afterRegister(result: LoginResult): void {
+  if (result.isNewUser || result.onboardingStatus === 'NEW') {
+    showToast('注册成功，完善资料即可开始')
+    setTimeout(() => {
+      uni.redirectTo({ url: '/pages/auth/register-profile' })
+    }, 400)
+    return
+  }
+  showToast('该手机号已注册，正在为你登录')
+  setTimeout(() => {
+    if (result.profile.onboardingStatus === 'NEW' || result.profile.onboardingStatus === 'PROFILE_COMPLETED') {
+      uni.redirectTo({ url: '/pages/auth/register-profile' })
+    } else {
+      uni.switchTab({ url: '/pages/home/index' })
+    }
+  }, 400)
+}
+
+function showRegisteredModal(): void {
+  uni.showModal({
+    title: '手机号已注册',
+    content: '该手机号已注册，请直接登录。',
+    confirmText: '去登录',
+    showCancel: false,
+    success: () => {
+      uni.reLaunch({ url: `/pages/auth/login?phone=${phone.value}` })
+    },
+  })
+}
+
+async function submit(): Promise<void> {
+  if (!ensureAgreement() || submitting.value) return
+  if (!isPhone(phone.value)) {
+    showToast('请输入正确的手机号', 'alert')
+    return
+  }
+  if (!isSmsCode(smsCode.value)) {
+    showToast('请输入 6 位验证码', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    const result = await user.loginWithSms(phone.value, smsCode.value, {
+      intent: 'register',
+      agreed: true,
+      agreementVersion: appStore.config.userAgreementVersion || AGREEMENT_VERSION,
+      privacyVersion: appStore.config.privacyPolicyVersion || PRIVACY_VERSION,
+    })
+    afterRegister(result)
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 40901) {
+      showRegisteredModal()
+      return
+    }
+    showToast(error instanceof Error ? error.message : '注册失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goLogin(): void {
+  const suffix = phone.value ? `?phone=${phone.value}` : ''
+  uni.reLaunch({ url: `/pages/auth/login${suffix}` })
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.reLaunch({ url: '/pages/auth/login' })
+}
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
+</script>
+
+<style scoped lang="scss">
+.reg {
+  flex: 1;
+  height: 1px;
+  background-image: $ni-gradient-login;
+  position: relative;
+}
+.reg__glow {
+  position: absolute;
+}
+.reg__glow--top {
+  top: -105px;
+  right: -90px;
+  width: 230px;
+  height: 230px;
+}
+.reg__glow--left {
+  top: 320px;
+  left: -110px;
+  width: 180px;
+  height: 180px;
+}
+.reg__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  position: relative;
+  z-index: 2;
+}
+.reg__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.reg__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.reg__nav-placeholder {
+  width: 42px;
+}
+.reg__content {
+  width: 100%;
+  max-width: 430px;
+  align-self: center;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 30px;
+  position: relative;
+  z-index: 2;
+}
+.reg__brand {
+  align-items: center;
+  margin-top: 8px;
+}
+.reg__logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  border: 5px solid #ffffff;
+  background-image: linear-gradient(135deg, #ff7a3d 0%, #ffb26f 100%);
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 28px rgba(255, 122, 61, 0.25);
+  position: relative;
+}
+.reg__logo-dot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background-color: $ni-color-sage;
+  border: 3px solid #ffffff;
+}
+.reg__slogan {
+  margin-top: 14px;
+  font-size: $ni-font-9;
+  color: #a36b4e;
+  letter-spacing: 1.4px;
+}
+.reg__title {
+  margin-top: 6px;
+  font-size: $ni-font-22;
+  line-height: 32px;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  letter-spacing: -0.6px;
+  text-align: center;
+}
+.reg__subtitle {
+  margin-top: 5px;
+  font-size: $ni-font-11;
+  color: #8f8179;
+  text-align: center;
+}
+.reg__progress {
+  margin-top: 20px;
+  padding: 13px;
+  border-radius: $ni-radius-16;
+  background-color: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 7px 22px rgba(93, 61, 41, 0.07);
+}
+.reg__progress-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.reg__progress-label {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.reg__progress-step {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.reg__card {
+  margin-top: 12px;
+  padding: 18px;
+  border-radius: $ni-radius-18;
+  background-color: rgba(255, 255, 255, 0.94);
+  border: 1px solid #eee8e4;
+  box-shadow: 0 7px 22px rgba(93, 61, 41, 0.07);
+}
+.reg__field {
+  margin-bottom: 10px;
+}
+.reg__code-row {
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.reg__code-input {
+  flex: 1;
+}
+.reg__code-button {
+  width: 104px;
+  height: 48px;
+  margin-left: 8px;
+  border-radius: $ni-radius-12;
+  border: 1px solid #ffb68e;
+  background-color: #fff6f0;
+  align-items: center;
+  justify-content: center;
+}
+.reg__code-button--disabled {
+  opacity: 0.6;
+}
+.reg__code-button-text {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.reg__demo-code {
+  margin-bottom: 12px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: $ni-radius-10;
+  background-color: $ni-color-primary-bg;
+  align-items: center;
+}
+.reg__demo-code-text {
+  font-size: $ni-font-9;
+  color: $ni-color-primary-dark;
+}
+.reg__agreement {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+.reg__checkbox {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 1px solid #d5c9c1;
+  background-color: #ffffff;
+  align-items: center;
+  justify-content: center;
+  margin-right: 7px;
+  margin-top: 1px;
+}
+.reg__checkbox--checked {
+  background-color: $ni-color-primary;
+  border-color: $ni-color-primary;
+}
+.reg__agreement-copy {
+  flex: 1;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.reg__agreement-text {
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: #99908b;
+}
+.reg__agreement-link {
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: #b9653d;
+  font-weight: 600;
+}
+.reg__login-entry {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  margin-top: 14px;
+}
+.reg__login-text {
+  font-size: $ni-font-9;
+  color: #9a938d;
+}
+.reg__login-link {
+  margin-left: 2px;
+  font-size: $ni-font-9;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.reg__note {
+  margin-top: 18px;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.reg__note-text {
+  flex: 1;
+  margin-left: 4px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #aaa09a;
+}
+</style>

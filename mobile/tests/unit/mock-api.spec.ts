@@ -75,4 +75,46 @@ describe('mock api', () => {
     expect(last.status).toBe('PASSED')
     expect(last.progress).toBe(100)
   })
+
+  it('registers a new user and completes onboarding', async () => {
+    const phone = '13700001111'
+    const result = await mockRequest<{
+      isNewUser: boolean
+      onboardingStatus: string
+      profile: { nickname: string }
+    }>({
+      url: '/auth/login/sms',
+      method: 'POST',
+      data: { phone, code: '123456', intent: 'register', agreed: true },
+    })
+    expect(result.isNewUser).toBe(true)
+    expect(result.onboardingStatus).toBe('NEW')
+    expect(result.profile.nickname).toBe('邻居1111')
+
+    const profile = await mockRequest<{ nickname: string; avatarPreset: string; onboardingStatus: string }>({
+      url: '/auth/register/complete',
+      method: 'POST',
+      data: { nickname: '新邻居', avatarKey: 'avatar-person-2' },
+    })
+    expect(profile.nickname).toBe('新邻居')
+    expect(profile.avatarPreset).toBe('avatar-person-2')
+    expect(profile.onboardingStatus).toBe('PROFILE_COMPLETED')
+
+    const done = await mockRequest<{ onboardingStatus: string }>({
+      url: '/auth/register/complete',
+      method: 'POST',
+      data: { finish: true },
+    })
+    expect(done.onboardingStatus).toBe('COMPLETED')
+  })
+
+  it('rejects login for an unregistered phone', async () => {
+    await expect(
+      mockRequest({
+        url: '/auth/login/sms',
+        method: 'POST',
+        data: { phone: '13700002222', code: '123456', intent: 'login' },
+      }),
+    ).rejects.toMatchObject({ code: 40401 })
+  })
 })

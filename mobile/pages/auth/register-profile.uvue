@@ -1,0 +1,562 @@
+<template>
+  <scroll-view class="regp" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="regp__header">
+      <ni-status-bar />
+      <view class="regp__nav">
+        <view class="regp__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="regp__nav-title">{{ showWelcome ? '注册完成' : '完善资料' }}</text>
+        <view class="regp__nav-placeholder" />
+      </view>
+    </view>
+
+    <view v-if="!showWelcome" class="regp__content">
+      <view class="regp__progress">
+        <view class="regp__progress-head">
+          <text class="regp__progress-label">完善邻里名片</text>
+          <text class="regp__progress-step">2 / 2</text>
+        </view>
+        <ni-progress :percent="100" :height="6" />
+      </view>
+
+      <view class="regp__card">
+        <text class="regp__title">让邻居更快认识你</text>
+        <text class="regp__desc">资料会展示在邻里互动与交易中，之后可在“我的”里随时修改</text>
+
+        <view class="regp__avatar-row">
+          <ni-avatar :src="avatarPreview" :name="nickname" :size="64" variant="orange" ring />
+          <view class="regp__avatar-copy">
+            <text class="regp__avatar-title">邻里头像</text>
+            <text class="regp__avatar-desc">选择内置头像，随时可更换</text>
+          </view>
+          <ni-button type="secondary" size="sm" @tap="openAvatarLibrary">更换</ni-button>
+        </view>
+
+        <text class="regp__label">昵称</text>
+        <ni-input
+          v-model="nickname"
+          placeholder="给自己起个邻居称呼"
+          :maxlength="16"
+          prefix-icon="friend"
+          :height="50"
+        />
+        <text class="regp__hint">1–16 字，将展示给邻里；请勿填写手机号等隐私信息</text>
+
+        <text class="regp__label">意向小区（选填）</text>
+        <ni-cell
+          icon="home"
+          icon-state="green"
+          :title="selectedCommunity?.name || '选择你所在的小区'"
+          :desc="selectedCommunity?.address || '仅用于业主认证预选，认证通过后正式绑定'"
+          right-text="选择"
+          @tap="chooseCommunity"
+        />
+      </view>
+
+      <ni-button type="primary" size="xl" block :loading="submitting" @tap="completeProfile">
+        完成注册
+      </ni-button>
+      <view class="regp__skip" @click="skipProfile">
+        <text class="regp__skip-text">跳过，先逛逛</text>
+      </view>
+
+      <view class="regp__privacy">
+        <ni-icon name="lock" :size="13" state="tertiary" />
+        <text class="regp__privacy-text">手机号不会公开；实名信息仅用于身份核验，展示时自动脱敏。</text>
+      </view>
+    </view>
+
+    <view v-else class="regp__welcome">
+      <view class="regp__success">
+        <ni-icon name="check" :size="42" state="white" />
+      </view>
+      <text class="regp__welcome-title">注册成功，欢迎加入邻里小栈</text>
+      <text class="regp__welcome-desc">你的邻里账号已创建。完成实名认证与业主证明后，就可以在小区里发布和交换闲置了。</text>
+
+      <view class="regp__checklist">
+        <view class="regp__check-row">
+          <view class="regp__check-icon regp__check-icon--done">
+            <ni-icon name="check" :size="14" state="white" />
+          </view>
+          <view class="regp__check-copy">
+            <text class="regp__check-title">手机号已验证</text>
+            <text class="regp__check-desc">账号已创建并登录</text>
+          </view>
+        </view>
+        <view class="regp__check-row">
+          <view class="regp__check-icon regp__check-icon--pending">
+            <ni-icon name="clock" :size="14" state="gold" />
+          </view>
+          <view class="regp__check-copy">
+            <text class="regp__check-title">实名认证</text>
+            <text class="regp__check-desc">约 1–2 分钟，身份证正反面 + 人脸核验</text>
+          </view>
+        </view>
+        <view class="regp__check-row regp__check-row--last">
+          <view class="regp__check-icon regp__check-icon--pending">
+            <ni-icon name="home" :size="14" state="gold" />
+          </view>
+          <view class="regp__check-copy">
+            <text class="regp__check-title">业主证明</text>
+            <text class="regp__check-desc">审核不超过 24 小时，通过后绑定小区</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="regp__permission">
+        <text class="regp__permission-title">你现在可以</text>
+        <text class="regp__permission-item">· 浏览本小区与邻近小区的好物</text>
+        <text class="regp__permission-item">· 收藏物品、查看浏览足迹</text>
+        <text class="regp__permission-note">完成认证后：发布物品、发起交易、互评；好友与私信需完成实名认证。</text>
+      </view>
+
+      <ni-button type="primary" size="xl" block icon="shield" @tap="goRealname">
+        去实名认证
+      </ni-button>
+      <view class="regp__skip" @click="goHome">
+        <text class="regp__skip-text">先逛逛，稍后认证</text>
+      </view>
+    </view>
+
+    <avatar-library
+      v-model:visible="avatarLibraryVisible"
+      :groups="avatarGroups"
+      :selected="avatarPreset"
+      @confirm="onAvatarConfirm"
+    />
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { AvatarPresetGroup, CommunityBinding } from '../../models'
+import { useUserStore } from '../../stores/user.store'
+import { useCommunityStore } from '../../stores/community.store'
+import { useToast } from '../../composables/useToast'
+import { profileService } from '../../services/profile.service'
+
+const user = useUserStore()
+const communityStore = useCommunityStore()
+const { toast, showToast } = useToast()
+
+const FALLBACK_AVATAR_GROUPS: AvatarPresetGroup[] = [
+  {
+    key: 'person',
+    label: '卡通人物',
+    items: ['avatar-person-1', 'avatar-person-2', 'avatar-person-3'],
+  },
+  {
+    key: 'animal',
+    label: '卡通动物',
+    items: ['avatar-animal-1', 'avatar-animal-2', 'avatar-animal-3'],
+  },
+  {
+    key: 'landmark',
+    label: '名胜古迹',
+    items: ['avatar-landmark-1', 'avatar-landmark-2', 'avatar-landmark-3'],
+  },
+  {
+    key: 'nature',
+    label: '自然风景',
+    items: ['avatar-nature-1', 'avatar-nature-2', 'avatar-nature-3'],
+  },
+]
+
+const nickname = ref('')
+const avatarPreset = ref('avatar-person-1')
+const avatarGroups = ref<AvatarPresetGroup[]>([])
+const avatarLibraryVisible = ref(false)
+const selectedCommunity = ref<CommunityBinding | null>(null)
+const welcome = ref(false)
+const submitting = ref(false)
+
+const showWelcome = computed(() => welcome.value || user.onboardingStatus === 'PROFILE_COMPLETED')
+const avatarPreview = computed(() =>
+  avatarPreset.value ? `/static/avatars/${avatarPreset.value}.svg` : user.avatarSrc,
+)
+
+onLoad(async () => {
+  if (!user.isLoggedIn) {
+    uni.redirectTo({ url: '/pages/auth/login' })
+    return
+  }
+  await user.refreshProfile()
+  if (!user.profile) return
+  if (user.onboardingStatus === 'COMPLETED') {
+    uni.switchTab({ url: '/pages/home/index' })
+    return
+  }
+  welcome.value = user.onboardingStatus === 'PROFILE_COMPLETED'
+  nickname.value = user.profile?.nickname || ''
+  avatarPreset.value = user.profile?.avatarPreset || 'avatar-person-1'
+
+  try {
+    avatarGroups.value = await profileService.getAvatarPresets()
+  } catch {
+    avatarGroups.value = []
+  }
+  if (!avatarGroups.value.length) {
+    avatarGroups.value = FALLBACK_AVATAR_GROUPS
+  }
+
+  await communityStore.fetchNearby().catch(() => undefined)
+  const intentId = user.profile?.intentCommunityId || ''
+  if (intentId) {
+    const found = [...communityStore.bindings, ...communityStore.nearby].find((item) => item.id === intentId)
+    if (found) selectedCommunity.value = found
+  }
+})
+
+function openAvatarLibrary(): void {
+  if (!avatarGroups.value.length) {
+    showToast('头像库加载中，请稍后再试', 'alert')
+    return
+  }
+  avatarLibraryVisible.value = true
+}
+
+function onAvatarConfirm(key: string): void {
+  avatarPreset.value = key
+  showToast('头像已选择')
+}
+
+function chooseCommunity(): void {
+  const options = communityStore.nearby.slice(0, 5)
+  if (!options.length) {
+    showToast('暂未获取到附近小区，可稍后在小区管理中查看', 'alert')
+    return
+  }
+  const itemList = [...options.map((item) => item.name), '暂不选择']
+  uni.showActionSheet({
+    itemList,
+    success: (res: any) => {
+      const index = Number(res.tapIndex)
+      if (index === options.length) {
+        selectedCommunity.value = null
+        return
+      }
+      selectedCommunity.value = options[index] ?? null
+    },
+  })
+}
+
+function intentCommunityPayload(): number | string | undefined {
+  const id = selectedCommunity.value?.id
+  if (!id) return undefined
+  return /^\d+$/.test(id) ? Number(id) : id
+}
+
+async function completeProfile(): Promise<void> {
+  if (submitting.value) return
+  const name = nickname.value.trim()
+  if (!name) {
+    showToast('请填写昵称', 'alert')
+    return
+  }
+  if (name.length > 16) {
+    showToast('昵称最多 16 字', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await user.completeRegistration({
+      nickname: name,
+      avatarKey: avatarPreset.value,
+      intentCommunityId: intentCommunityPayload(),
+    })
+    welcome.value = true
+    showToast('注册资料已保存')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '保存失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function skipProfile(): Promise<void> {
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    await user.completeRegistration({ skip: true })
+    welcome.value = true
+    showToast('已跳过，认证后即可发布与交易')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function finishOnboarding(): Promise<void> {
+  if (user.onboardingStatus === 'COMPLETED') return
+  try {
+    await user.completeRegistration({ finish: true })
+  } catch {
+    // 网络异常不阻塞进入首页/实名认证
+  }
+}
+
+async function goRealname(): Promise<void> {
+  await finishOnboarding()
+  uni.navigateTo({ url: '/pages/auth/realname' })
+}
+
+async function goHome(): Promise<void> {
+  await finishOnboarding()
+  uni.switchTab({ url: '/pages/home/index' })
+}
+
+function goBack(): void {
+  if (showWelcome.value) {
+    goHome()
+    return
+  }
+  uni.showModal({
+    title: '暂不完善资料？',
+    content: '你可以先逛逛，完善资料后才能发布物品和参与交易。',
+    confirmText: '先逛逛',
+    cancelText: '继续完善',
+    success: (res) => {
+      if (res.confirm) goHome()
+    },
+  })
+}
+</script>
+
+<style scoped lang="scss">
+.regp {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.regp__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.regp__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.regp__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.regp__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.regp__nav-placeholder {
+  width: 42px;
+}
+.regp__content {
+  padding: 14px;
+  padding-bottom: 30px;
+}
+.regp__progress {
+  padding: 13px;
+  border-radius: $ni-radius-14;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.regp__progress-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+.regp__progress-label {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.regp__progress-step {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.regp__card {
+  margin-top: 10px;
+  padding: 15px;
+  border-radius: $ni-radius-18;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.regp__title {
+  font-size: $ni-font-17;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.regp__desc {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: $ni-color-text-tertiary;
+}
+.regp__avatar-row {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 15px;
+  margin-bottom: 16px;
+}
+.regp__avatar-copy {
+  flex: 1;
+  margin-left: 11px;
+}
+.regp__avatar-title {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.regp__avatar-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.regp__label {
+  margin-top: 12px;
+  margin-bottom: 7px;
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.regp__hint {
+  margin-top: 5px;
+  margin-bottom: 4px;
+  font-size: 7px;
+  line-height: 13px;
+  color: $ni-color-text-tertiary;
+}
+.regp__skip {
+  align-items: center;
+  justify-content: center;
+  padding-top: 15px;
+  padding-bottom: 8px;
+}
+.regp__skip-text {
+  font-size: $ni-font-11;
+  color: $ni-color-text-tertiary;
+}
+.regp__privacy {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-fill-1;
+}
+.regp__privacy-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: $ni-color-text-tertiary;
+}
+.regp__welcome {
+  padding: 30px 20px;
+  align-items: center;
+}
+.regp__success {
+  width: 86px;
+  height: 86px;
+  border-radius: 31px;
+  background-image: $ni-gradient-success;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 22px rgba(85, 161, 115, 0.24);
+}
+.regp__welcome-title {
+  margin-top: 16px;
+  font-size: $ni-font-22;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  text-align: center;
+}
+.regp__welcome-desc {
+  margin-top: 7px;
+  font-size: $ni-font-11;
+  line-height: 18px;
+  color: $ni-color-text-secondary;
+  text-align: center;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.regp__checklist {
+  width: 100%;
+  margin-top: 20px;
+  padding: 4px 14px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.regp__check-row {
+  flex-direction: row;
+  align-items: center;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-bottom: $ni-border-divider;
+}
+.regp__check-row--last {
+  border-bottom: 0;
+}
+.regp__check-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+}
+.regp__check-icon--done {
+  background-color: $ni-color-gift;
+}
+.regp__check-icon--pending {
+  background-color: $ni-color-credit-bg;
+}
+.regp__check-copy {
+  flex: 1;
+  margin-left: 9px;
+}
+.regp__check-title {
+  font-size: $ni-font-12;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.regp__check-desc {
+  margin-top: 2px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.regp__permission {
+  width: 100%;
+  margin-top: 12px;
+  margin-bottom: 18px;
+  padding: 13px;
+  border-radius: $ni-radius-14;
+  background-color: #fff8e8;
+}
+.regp__permission-title {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-service-deep;
+}
+.regp__permission-item {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  line-height: 15px;
+  color: #9a7c45;
+}
+.regp__permission-note {
+  margin-top: 7px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

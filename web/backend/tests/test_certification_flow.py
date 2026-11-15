@@ -14,6 +14,7 @@ from tests.conftest import (
     admin_login,
     bearer,
     first_pending_cert,
+    login_user,
     register_user,
     submit_owner_proof,
     verify_realname,
@@ -28,7 +29,7 @@ async def test_sms_register_login_and_profile(client):
     assert result["profile"]["authStatus"] == "LOGGED_IN_UNVERIFIED"
 
     # 再次登录：同一手机号唯一账号（M01-01）
-    again = await register_user(client)
+    again = await login_user(client)
     assert again["isNewUser"] is False
     assert again["profile"]["id"] == result["profile"]["id"]
 

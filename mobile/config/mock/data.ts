@@ -1498,6 +1498,9 @@ export const USER: UserProfile = {
   communityName: '阳光花园小区',
   joinedDays: 286,
   authStatus: 'VERIFIED_OWNER',
+  onboardingStatus: 'COMPLETED',
+  intentCommunityId: '',
+  intentCommunityName: '',
 }
 
 export const MY_SELLER: SellerSummary = {
@@ -1619,6 +1622,8 @@ export const APP_CONFIG: AppConfig = {
   payTimeoutMinutes: 30,
   appointmentAutoCancelHours: 48,
   supportPhone: '400-800-2026',
+  userAgreementVersion: '2026-11-01',
+  privacyPolicyVersion: '2026-11-01',
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {

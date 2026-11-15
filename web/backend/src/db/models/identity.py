@@ -25,6 +25,19 @@ class User(Entity):
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
     # NOT_LOGIN 以外的端侧状态由 certifications + residents 推导
     realname_status: Mapped[str] = mapped_column(String(16), default="UNVERIFIED", index=True)
+    # 注册引导：NEW（刚建号）/ PROFILE_COMPLETED（资料已完善或跳过）/ COMPLETED（引导完成）。
+    # 存量用户迁移时回填 COMPLETED，避免升级后被强制拉去注册。
+    onboarding_status: Mapped[str] = mapped_column(String(16), default="COMPLETED", index=True)
+    # 注册时选择的意向小区：用于内容推荐/业主认证预选，业主证明通过后才写 Resident 正式绑定。
+    intent_community_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("communities.id"), index=True
+    )
+    # sms / wechat / one_click
+    registration_channel: Mapped[str] = mapped_column(String(16), default="sms")
+    # 协议同意留痕（P0 存用户主表；P1 可迁移到 user_agreements 明细表）。
+    agreement_version: Mapped[str] = mapped_column(String(32), default="")
+    privacy_version: Mapped[str] = mapped_column(String(32), default="")
+    agreed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credit_score: Mapped[int] = mapped_column(default=100)
     credit_level: Mapped[str] = mapped_column(String(16), default="良好")
     # 端侧设置（通知开关/隐私等，M07-06）：{"pushEnabled": true, ...}

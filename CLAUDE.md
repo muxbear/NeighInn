@@ -6,7 +6,7 @@
 
 **邻里小栈（Neighbor's Inn，项目代码 `NeighInn`）**：面向同一小区及邻近小区业主的闲置物品共享交易平台。线上撮合、线下验货交割（O2O），AI 质检护航，支持**免费赠与 / 物品互换 / 货币担保交易**三种流转方式。
 
-- **当前阶段**：移动端已完成 uni-app x（Vapor）脚手架、设计 Token、40 个组件与 36 个页面，Mock 全流程可跑通；Web 管理端已完成第一版前后端可运行实现（Vue 3 + FastAPI），核心页面与资金/纠纷/审计模块已接入本地开发数据库与 MinIO。
+- **当前阶段**：移动端已完成 uni-app x（Vapor）脚手架、设计 Token、40 个组件与 38 个页面（新增注册与新人引导），Mock 全流程可跑通；Web 管理端已完成第一版前后端可运行实现（Vue 3 + FastAPI），核心页面与资金/纠纷/审计模块已接入本地开发数据库与 MinIO。
 - Web 端真实支付、推送、短信、AI 质检等外部服务仍待接入；移动端真实后端联调与 UTS 插件待接入。
 
 ## 仓库结构
@@ -35,7 +35,7 @@ NeighInn‌/                          # 根目录名末尾含 U+200C
 │   │   ├── src/domain/             # 业务枚举 + 8 个状态机
 │   │   ├── src/services/           # 认证/物品/AI 质检/订单/资金/参数/IM
 │   │   ├── alembic/                # 数据库迁移
-│   │   ├── tests/                  # 80 个测试
+│   │   ├── tests/                  # 87 个测试
 │   │   └── scripts/smoke_e2e.py    # 真实 HTTP 端到端冒烟
 │   ├── frontend/                   # Vue 3 + TypeScript + Pinia + Vite
 │   ├── docs/邻里小栈后台管理系统详细设计说明书.md
@@ -75,7 +75,7 @@ Figma Make 原型：`https://www.figma.com/make/OEw7s8EWAlGNNd4xnjZXkS/NeighInn%
 ### 移动端目录与分层
 
 ```
-pages/          # 36 个页面（主包 + trade/social/pay 分包）
+pages/          # 38 个页面（主包 + trade/social/pay 分包）
 components/     # 40 个 ni-* 基础组件与业务组件（easycom）
 composables/    # useAuth / useIM / usePay / useUpload / useLocation / useAudit / useToast ...
 services/       # 业务服务层，含 ws.service.ts 长连接
@@ -177,7 +177,7 @@ npm run dev
 - **验证码存储**：`SMS_CODE_BACKEND=redis`（推荐，重启/多副本不丢）/ `memory`；非 dev 环境未接短信通道时 `/auth/sms-code` 返回 50301。
 - **已实现**：46+ 张表与 Alembic 迁移；8 个状态机；认证（实名/业主证明/审核/冻结联动下架）；物品（发布校验/AI 质检 Mock 适配器/人工复核/快车道）；订单（三种交易方式/BR-08 一物一卖/验货双向确认）；资金（复式账本/托管/放款/退款/提现双人复核/纠纷资金处置）；内容（生活/喇叭/互助/评论审核）；社交（好友/私信 client_msg_id 幂等/内容安全）；通知（公告下发/任务投递/已读）；参数（发布即生效下发 AppConfig）；管理面（社区 CRUD/用户处置/角色权限/管理员账号/审计/导出/举报工作台）；WebSocket 推送。
 - **铁律**：状态变更只经 `src/domain/state.py`；金额一律整数分；余额只由 `ledger_entries` 推导；管理端路由默认 `require_permission`；写操作走幂等键；跨端一致性靠事件+缓存失效，不做双写。
-- **测试**：`cd web/backend && uv run pytest -q`（80 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
+- **测试**：`cd web/backend && uv run pytest -q`（87 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
 - **双端接线**：移动端 `config/env.ts` → `CURRENT_ENV='local'` 指向 5193；Web 前端 Vite 代理 `/api` → 5193，页面通过 `src/api/compat.ts` 适配统一服务端契约。
 - **端到端冒烟**：`PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py`（对运行中的 5193 执行 AC-01 全链路）。
 
@@ -200,7 +200,7 @@ npm run icons        # 重新生成多状态 SVG 图标与内置头像
 ```
 
 - 开发/真机：HBuilderX 5.34 打开 `mobile/`，运行到 Android/iOS/HarmonyOS/微信开发者工具/浏览器。
-  - 已实测：**HBuilderX 5.34 Web 编译通过、微信小程序编译通过**（36 页面 + 40 组件）。
+  - 已实测：**HBuilderX 5.34 Web 编译通过、微信小程序编译通过**（38 页面 + 40 组件）。
   - H5 开发端口 **5191**（`manifest.json` → `web.devServer.port` / `h5.devServer.port`，含 `strictPort`）；需安装 `compile-dart-sass` 插件（CLI：`cli installPlugin --name compile-dart-sass`）。
   - Android 运行需要连接真机/模拟器；iOS 需 macOS；HarmonyOS 需 DevEco Studio。
 - 常用 CLI（安装路径示例 `D:\opt\DCloud\HBuilderX`）：
@@ -256,11 +256,11 @@ npm run build
 
 ## 当前实现状态与待办
 
-**移动端已完成**：登录/认证、首页、附近、搜索、四个专属区、物品详情、生活频道/详情、喇叭站、发布物品/生活、AI 质检进度与报告、消息/IM/好友、通知中心、订单（免费/互换/货币）与收银台/预约/验货/评价/纠纷、钱包、我的/资料/头像库/设置、小区管理、收藏足迹、信用中心、帮助与举报；设计 Token、40 个组件、多状态 SVG 图标、Mock 全流程与 Vitest。**HBuilderX 5.34 已验证 Web 与微信小程序编译通过**（Android 待连接设备验证）。
+**移动端已完成**：登录/认证、用户注册（手机号验证 + 新人引导 + 协议留痕）、首页、附近、搜索、四个专属区、物品详情、生活频道/详情、喇叭站、发布物品/生活、AI 质检进度与报告、消息/IM/好友、通知中心、订单（免费/互换/货币）与收银台/预约/验货/评价/纠纷、钱包、我的/资料/头像库/设置、小区管理、收藏足迹、信用中心、帮助与举报；设计 Token、40 个组件、多状态 SVG 图标、Mock 全流程与 Vitest。**HBuilderX 5.34 已验证 Web 与微信小程序编译通过**（Android 待连接设备验证）。
 
 **Web 管理端已完成第一版**：FastAPI + Vue 3 前后端可运行；登录/会话/CSRF、工作台、社区运营四页、公告、通知任务、社区运维、社区业主、用户、角色权限、资源管理、参数配置、审计日志、资金看板/流水/提现/对账/订单、纠纷调解、报事报修、投诉建议；PostgreSQL 种子数据、MinIO 预签名、本地构建与 API 冒烟测试通过。**Redis 认证、RabbitMQ、真实支付/短信/Push/AI、2FA 界面、Alembic 迁移与部分新增/编辑抽屉仍待补齐。**
 
-**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82 路径 + 管理端 148 路径）、认证/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、80 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5193 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
+**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82+ 路径 + 管理端 148 路径）、认证/注册引导/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、87 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5193 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
 
 **Git 现状**：
 

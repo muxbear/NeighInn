@@ -44,6 +44,7 @@ async def _row(db: DbSession, user: User) -> dict:
         "status": user.status, "realnameStatus": user.realname_status,
         "creditScore": user.credit_score, "creditLevel": user.credit_level,
         "communityName": community_name,
+        "onboardingStatus": user.onboarding_status or "COMPLETED",
         "residentId": str(resident.id) if resident else "",
         "identityType": resident.identity_type if resident else "",
         "certificationStatus": resident.certification_status if resident else "UNVERIFIED",

@@ -77,7 +77,7 @@ TEST_PHONE = "13900001111"
 
 
 async def register_user(client: AsyncClient, phone: str = TEST_PHONE) -> dict:
-    """短信注册登录全流程：返回 {token, profile}。
+    """短信注册全流程：返回 {token, profile}。
     测试内清理验证码与冷却（模块级存储跨用例共享）。"""
     from src.services.auth_service import sms_code_store
 
@@ -85,7 +85,14 @@ async def register_user(client: AsyncClient, phone: str = TEST_PHONE) -> dict:
     resp = await client.post(f"{C_BASE}/auth/sms-code", json={"phone": phone})
     assert resp.status_code == 200, resp.text
     code = resp.json()["data"]["mockCode"]
-    resp = await client.post(f"{C_BASE}/auth/login/sms", json={"phone": phone, "code": code})
+    resp = await client.post(f"{C_BASE}/auth/login/sms", json={
+        "phone": phone,
+        "code": code,
+        "intent": "register",
+        "agreed": True,
+        "agreementVersion": "test-v1",
+        "privacyVersion": "test-v1",
+    })
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     return {
@@ -93,6 +100,31 @@ async def register_user(client: AsyncClient, phone: str = TEST_PHONE) -> dict:
         "refresh": data["refreshToken"],
         "profile": data["profile"],
         "isNewUser": data["isNewUser"],
+        "onboardingStatus": data["onboardingStatus"],
+    }
+
+
+async def login_user(client: AsyncClient, phone: str = TEST_PHONE) -> dict:
+    """已注册用户短信登录：返回 {token, profile}。"""
+    from src.services.auth_service import sms_code_store
+
+    await sms_code_store.clear(phone)
+    resp = await client.post(f"{C_BASE}/auth/sms-code", json={"phone": phone})
+    assert resp.status_code == 200, resp.text
+    code = resp.json()["data"]["mockCode"]
+    resp = await client.post(f"{C_BASE}/auth/login/sms", json={
+        "phone": phone,
+        "code": code,
+        "intent": "login",
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    return {
+        "token": data["accessToken"],
+        "refresh": data["refreshToken"],
+        "profile": data["profile"],
+        "isNewUser": data["isNewUser"],
+        "onboardingStatus": data["onboardingStatus"],
     }
 
 

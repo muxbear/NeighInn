@@ -237,6 +237,10 @@ PARAMETER_TREE: dict[str, list[tuple[str, str, str]]] = {
         ("friend.max_count", "500", "好友数量上限（BR-14）"),
         ("content.review.required", "true", "UGC 全量内容安全审核（A-09）"),
     ],
+    "账号与合规": [
+        ("agreement.user.version", "2026-11-01", "用户协议版本（管理员维护）"),
+        ("agreement.privacy.version", "2026-11-01", "隐私政策版本（管理员维护）"),
+    ],
 }
 
 HOT_KEYWORDS = ["儿童椅", "婴儿床", "绘本", "露营", "戴森", "免费领取"]
@@ -318,18 +322,29 @@ async def seed_if_empty(session: AsyncSession) -> None:
     await session.execute(insert(admin_user_roles).values(
         admin_user_id=admin.id, role_id=roles["super_admin"].id))
 
-    # 参数树
+    # 参数树（按 code 幂等：迁移可能已补入协议版本等参数）
     for sort, (group_label, items) in enumerate(PARAMETER_TREE.items()):
-        group = ParameterKey(label=group_label, code=f"group.{sort}", kind="GROUP", sort=sort)
-        session.add(group)
-        await session.flush()
-        for item_sort, (code, value, description) in enumerate(items):
-            key = ParameterKey(label=description[:12], code=code, kind="KEY", sort=item_sort,
-                               parent_id=group.id)
-            session.add(key)
+        group_code = f"group.{sort}"
+        group = await session.scalar(
+            select(ParameterKey).where(ParameterKey.code == group_code))
+        if not group:
+            group = ParameterKey(label=group_label, code=group_code, kind="GROUP", sort=sort)
+            session.add(group)
             await session.flush()
-            session.add(ParameterItem(parameter_key_id=key.id, name=code, value=value,
-                                      description=description))
+        for item_sort, (code, value, description) in enumerate(items):
+            key = await session.scalar(
+                select(ParameterKey).where(ParameterKey.code == code))
+            if not key:
+                key = ParameterKey(label=description[:12], code=code, kind="KEY",
+                                   sort=item_sort, parent_id=group.id)
+                session.add(key)
+                await session.flush()
+            existing_item = await session.scalar(
+                select(ParameterItem).where(ParameterItem.parameter_key_id == key.id,
+                                            ParameterItem.name == code))
+            if not existing_item:
+                session.add(ParameterItem(parameter_key_id=key.id, name=code, value=value,
+                                          description=description))
 
     # 搜索热词（与移动端 Mock 对齐）
     for sort, keyword in enumerate(HOT_KEYWORDS):

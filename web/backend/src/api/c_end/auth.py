@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
-from src.core.responses import ERR_DEPENDENCY, ERR_PARAM, ERR_UNAUTHORIZED, ApiError, ok
+from src.core.responses import (
+    ERR_CONFLICT,
+    ERR_DEPENDENCY,
+    ERR_NOT_FOUND,
+    ERR_PARAM,
+    ERR_UNAUTHORIZED,
+    ApiError,
+    ok,
+)
 from src.core.security import decode_token, issue_access_token, issue_refresh_token, mask_phone
 from src.db.models import Certification
 from src.services import auth_service as svc
@@ -25,6 +34,20 @@ class SmsCodeIn(BaseModel):
 class LoginSmsIn(BaseModel):
     phone: str
     code: str
+    # login：仅登录，未注册手机号提示去注册；register：仅注册，已注册手机号提示去登录。
+    intent: Literal["login", "register"] = "login"
+    agreed: bool = False
+    agreementVersion: str = ""
+    privacyVersion: str = ""
+    deviceId: str = ""
+
+
+class RegisterCompleteIn(BaseModel):
+    nickname: str | None = None
+    avatarKey: str | None = None
+    intentCommunityId: int | None = None
+    skip: bool = False
+    finish: bool = False
 
 
 class RefreshIn(BaseModel):
@@ -57,17 +80,64 @@ async def send_sms_code(payload: SmsCodeIn):
 
 @router.post("/auth/login/sms")
 async def login_by_sms(payload: LoginSmsIn, db: DbSession):
+    """手机号验证码登录/注册（M01-01）。
+
+    intent=login：仅登录，未注册手机号返回 40401，引导用户走注册页；
+    intent=register：仅注册，已注册手机号返回 40901，引导用户去登录。
+    注册即登录：注册成功后直接签发 token，移动端继续完善资料。
+    """
     svc.validate_phone(payload.phone)
     if not await sms_code_store.verify(payload.phone, payload.code):
         raise ApiError(ERR_UNAUTHORIZED, "验证码错误或已过期", 401)
-    user, is_new = await svc.get_or_create_user_by_phone(db, payload.phone)
+
+    existing = await svc.find_user_by_phone(db, payload.phone)
+
+    if payload.intent == "register":
+        if existing:
+            if existing.status == "FROZEN":
+                raise ApiError(ERR_UNAUTHORIZED, "账号不可用", 401)
+            if existing.status == "CANCELLED":
+                svc.assert_phone_can_register(existing)
+            raise ApiError(ERR_CONFLICT, "该手机号已注册，请直接登录", 409)
+        if not payload.agreed or not payload.agreementVersion or not payload.privacyVersion:
+            raise ApiError(ERR_PARAM, "请先阅读并同意用户协议与隐私政策", 400)
+        user, is_new = await svc.get_or_create_user_by_phone(db, payload.phone)
+    else:
+        if not existing:
+            raise ApiError(ERR_NOT_FOUND, "该手机号尚未注册，请先注册", 404)
+        if existing.status != "ACTIVE":
+            raise ApiError(ERR_UNAUTHORIZED, "账号不可用", 401)
+        user, is_new = existing, False
+
+    if payload.agreed:
+        svc.record_agreement(user, payload.agreementVersion, payload.privacyVersion)
+
     await db.commit()
     profile = await svc.serialize_profile(db, user)
     return ok({
         **svc.issue_token_pair(user),
         "profile": profile,
         "isNewUser": is_new,
-    }, "登录成功")
+        "onboardingStatus": user.onboarding_status or "COMPLETED",
+    }, "注册成功" if is_new else "登录成功")
+
+
+@router.post("/auth/register/complete")
+async def complete_registration(
+    payload: RegisterCompleteIn, user: CurrentUser, db: DbSession
+):
+    """新人引导：保存昵称/头像/意向小区，或跳过；finish=true 关闭成功引导页。"""
+    profile = await svc.complete_registration(
+        db,
+        user,
+        nickname=payload.nickname,
+        avatar_key=payload.avatarKey,
+        intent_community_id=payload.intentCommunityId,
+        skip=payload.skip,
+        finish=payload.finish,
+    )
+    message = "注册引导已完成" if payload.finish else "注册资料已保存"
+    return ok(profile, message)
 
 
 @router.post("/auth/login/one-click")

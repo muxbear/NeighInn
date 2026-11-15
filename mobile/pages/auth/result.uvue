@@ -12,8 +12,8 @@
     </view>
 
     <view class="auth-result__content">
-      <view class="auth-result__icon" :class="isOwner ? 'auth-result__icon--pending' : 'auth-result__icon--success'">
-        <ni-icon :name="isOwner ? 'clock' : 'check'" :size="40" :state="isOwner ? 'gold' : 'white'" />
+      <view class="auth-result__icon auth-result__icon--pending">
+        <ni-icon name="clock" :size="40" state="gold" />
       </view>
       <text class="auth-result__title">{{ title }}</text>
       <text class="auth-result__desc">{{ desc }}</text>
@@ -29,7 +29,7 @@
         </view>
         <view class="auth-result__row">
           <text class="auth-result__row-label">当前状态</text>
-          <text class="auth-result__row-value auth-result__row-value--primary">{{ isOwner ? '审核中（≤24小时）' : '已通过' }}</text>
+          <text class="auth-result__row-value auth-result__row-value--primary">审核中（≤24小时）</text>
         </view>
         <view class="auth-result__row auth-result__row--last">
           <text class="auth-result__row-label">说明</text>
@@ -47,10 +47,10 @@
         </view>
         <view class="auth-result__timeline-line" />
         <view class="auth-result__timeline-item">
-          <view class="auth-result__timeline-dot" :class="{ 'auth-result__timeline-dot--done': !isOwner, 'auth-result__timeline-dot--active': isOwner }" />
+          <view class="auth-result__timeline-dot auth-result__timeline-dot--active" />
           <view class="auth-result__timeline-copy">
-            <text class="auth-result__timeline-title">{{ isOwner ? '人工审核中' : '实名核验通过' }}</text>
-            <text class="auth-result__timeline-desc">{{ isOwner ? '预计 24 小时内完成' : '身份信息已核验' }}</text>
+            <text class="auth-result__timeline-title">{{ isOwner ? '人工审核中' : '实名审核中' }}</text>
+            <text class="auth-result__timeline-desc">预计 24 小时内完成</text>
           </view>
         </view>
         <view class="auth-result__timeline-line" />
@@ -87,11 +87,11 @@ const type = ref<'realname' | 'owner'>('owner')
 const submitTime = ref(formatDateTime(Date.now()))
 
 const isOwner = computed(() => type.value === 'owner')
-const title = computed(() => (isOwner.value ? '业主认证已提交' : '实名认证已通过'))
+const title = computed(() => (isOwner.value ? '业主认证已提交' : '实名认证已提交'))
 const desc = computed(() =>
   isOwner.value
     ? '我们已收到你的证明材料，审核通过后即可在该小区发布闲置与参与交易。'
-    : '你的身份信息已完成核验，可以继续申请业主认证，解锁本小区交易。',
+    : '我们已收到你的实名材料，审核通过后即可继续申请业主认证，解锁本小区交易。',
 )
 
 onLoad((options: any) => {

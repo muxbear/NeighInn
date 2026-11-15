@@ -16,7 +16,14 @@ onLaunch(() => {
   const user = useUserStore()
   user.hydrate()
   if (user.isLoggedIn) {
-    user.refreshProfile()
+    user.refreshProfile().then(() => {
+      // 新建账号或注册中途退出的用户，冷启动恢复新人引导。
+      if (user.needsOnboarding) {
+        setTimeout(() => {
+          uni.reLaunch({ url: '/pages/auth/register-profile' })
+        }, 0)
+      }
+    })
     useNotificationStore().fetchUnread()
     wsService.connect()
   } else {

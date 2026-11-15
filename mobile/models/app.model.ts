@@ -18,6 +18,8 @@ export interface AppConfig {
   payTimeoutMinutes: number
   appointmentAutoCancelHours: number
   supportPhone: string
+  userAgreementVersion: string
+  privacyPolicyVersion: string
 }
 
 export interface HomeBundle {

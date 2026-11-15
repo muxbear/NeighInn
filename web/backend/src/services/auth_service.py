@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import random
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import select
@@ -26,6 +26,7 @@ from src.core.security import (
     mask_phone,
 )
 from src.db.models import Certification, Community, Resident, User
+from src.db.models.common import ensure_utc, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,16 @@ SMS_CODE_TTL_SECONDS = 300
 SMS_COOLDOWN_SECONDS = 60
 SMS_MAX_ATTEMPTS = 5
 SMS_REDIS_PREFIX = "ni:sms:"
+# 账号注销后重新注册冷却期（产品确认：7 个自然日）。
+REREGISTER_COOLDOWN_DAYS = 7
+
+# 内置头像键（与 mobile/static/avatars 对齐）；注册完善资料时做白名单校验。
+AVATAR_PRESET_KEYS = frozenset({
+    "avatar-person-1", "avatar-person-2", "avatar-person-3",
+    "avatar-animal-1", "avatar-animal-2", "avatar-animal-3",
+    "avatar-landmark-1", "avatar-landmark-2", "avatar-landmark-3",
+    "avatar-nature-1", "avatar-nature-2", "avatar-nature-3",
+})
 
 
 class SmsCodeStore(Protocol):
@@ -195,22 +206,107 @@ def build_sms_code_store() -> SmsCodeStore:
 sms_code_store: SmsCodeStore = build_sms_code_store()
 
 
-async def get_or_create_user_by_phone(db: AsyncSession, phone: str) -> tuple[User, bool]:
-    """同一手机号唯一账号（M01-01）。不存在则注册。"""
-    phone_hash = hmac_index(phone)
-    user = await db.scalar(select(User).where(User.phone_hash == phone_hash))
+async def find_user_by_phone(db: AsyncSession, phone: str) -> User | None:
+    return await db.scalar(select(User).where(User.phone_hash == hmac_index(phone)))
+
+
+async def get_or_create_user_by_phone(
+    db: AsyncSession, phone: str, channel: str = "sms"
+) -> tuple[User, bool]:
+    """同一手机号唯一账号（M01-01）。不存在则注册。
+    仅注册入口调用；登录入口必须先 find_user_by_phone 判定是否已注册。"""
+    user = await find_user_by_phone(db, phone)
     if user:
         return user, False
     user = User(
         phone_enc=encrypt_field(phone),
-        phone_hash=phone_hash,
+        phone_hash=hmac_index(phone),
         nickname=f"邻居{phone[-4:]}",
         status="ACTIVE",
         realname_status="UNVERIFIED",
+        onboarding_status="NEW",
+        registration_channel=channel,
     )
     db.add(user)
     await db.flush()
     return user, True
+
+
+def record_agreement(user: User, user_version: str, privacy_version: str) -> None:
+    """记录协议同意版本与时间（P0 落在 users 主表）。"""
+    if not user_version and not privacy_version:
+        return
+    if user_version:
+        user.agreement_version = user_version[:32]
+    if privacy_version:
+        user.privacy_version = privacy_version[:32]
+    user.agreed_at = utcnow()
+
+
+def assert_phone_can_register(user: User) -> None:
+    """注销账号重新注册：7 个自然日冷却（产品确认）；冷却后仍需客服开通。"""
+    if user.status != "CANCELLED":
+        return
+    updated_at = ensure_utc(user.updated_at)
+    if updated_at and utcnow() < updated_at + timedelta(days=REREGISTER_COOLDOWN_DAYS):
+        raise ApiError(
+            ERR_CONFLICT,
+            "账号已注销，注销后 7 个自然日内不可重新注册，请联系客服",
+            409,
+        )
+    raise ApiError(ERR_CONFLICT, "账号已注销，请联系客服重新开通", 409)
+
+
+async def complete_registration(
+    db: AsyncSession,
+    user: User,
+    *,
+    nickname: str | None = None,
+    avatar_key: str | None = None,
+    intent_community_id: int | None = None,
+    skip: bool = False,
+    finish: bool = False,
+) -> dict:
+    """注册新人引导：完善资料 / 跳过 / 完成。
+
+    NEW → PROFILE_COMPLETED（保存资料或跳过）→ COMPLETED（关闭成功引导页）。
+    存量用户迁移后为 COMPLETED，不会进入本流程。
+    """
+    if finish:
+        user.onboarding_status = "COMPLETED"
+        await db.commit()
+        return await serialize_profile(db, user)
+
+    if skip:
+        if user.onboarding_status != "COMPLETED":
+            user.onboarding_status = "PROFILE_COMPLETED"
+        await db.commit()
+        return await serialize_profile(db, user)
+
+    if user.onboarding_status == "COMPLETED":
+        return await serialize_profile(db, user)
+
+    name = (nickname or "").strip()
+    if not name:
+        raise ApiError(ERR_PARAM, "请填写昵称", 400)
+    if len(name) > 16:
+        raise ApiError(ERR_PARAM, "昵称最多 16 字", 400)
+    if avatar_key and avatar_key not in AVATAR_PRESET_KEYS:
+        raise ApiError(ERR_PARAM, "头像不存在，请重新选择", 400)
+
+    if intent_community_id is not None:
+        community = await db.get(Community, intent_community_id)
+        if not community or community.status != "OPERATING":
+            raise ApiError(ERR_PARAM, "所选小区不存在或已停用", 400)
+        user.intent_community_id = intent_community_id
+
+    user.nickname = name
+    if avatar_key:
+        user.avatar_key = avatar_key
+    if user.onboarding_status != "COMPLETED":
+        user.onboarding_status = "PROFILE_COMPLETED"
+    await db.commit()
+    return await serialize_profile(db, user)
 
 
 def issue_token_pair(user: User) -> dict:
@@ -295,6 +391,10 @@ async def serialize_profile(db: AsyncSession, user: User) -> dict:
     if resident:
         community = await db.get(Community, resident.community_id)
         community_name = community.name if community else ""
+    intent_community = (
+        await db.get(Community, user.intent_community_id)
+        if user.intent_community_id else None
+    )
     auth = await compute_auth_status(db, user)
     phone = decrypt_field(user.phone_enc)
     joined_days = max(0, (datetime.now(UTC).replace(tzinfo=None)
@@ -317,6 +417,9 @@ async def serialize_profile(db: AsyncSession, user: User) -> dict:
         "communityName": community_name,
         "joinedDays": joined_days,
         "authStatus": auth["status"],
+        "onboardingStatus": user.onboarding_status or "COMPLETED",
+        "intentCommunityId": str(user.intent_community_id) if user.intent_community_id else "",
+        "intentCommunityName": intent_community.name if intent_community else "",
     }
 
 

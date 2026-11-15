@@ -47,6 +47,20 @@
       }
     },
     {
+      "path": "pages/auth/register",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FFF5ED"
+      }
+    },
+    {
+      "path": "pages/auth/register-profile",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
       "path": "pages/auth/realname",
       "style": {
         "navigationStyle": "custom",

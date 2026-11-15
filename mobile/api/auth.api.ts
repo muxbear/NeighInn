@@ -1,12 +1,36 @@
-import type { AuthStatusResult, LoginResult, OwnerProofPayload, RealnamePayload, SmsCodeResult } from '../models'
+import type {
+  AuthStatusResult,
+  LoginResult,
+  LoginSmsOptions,
+  OwnerProofPayload,
+  RealnamePayload,
+  RegisterCompletePayload,
+  SmsCodeResult,
+  UserProfile,
+} from '../models'
 import { get, post } from './request'
 
 export function sendSmsCode(phone: string): Promise<SmsCodeResult> {
   return post<SmsCodeResult>('/auth/sms-code', { phone }, { auth: false, idempotent: false })
 }
 
-export function loginBySms(phone: string, code: string): Promise<LoginResult> {
-  return post<LoginResult>('/auth/login/sms', { phone, code }, { auth: false })
+export function loginBySms(phone: string, code: string, options: LoginSmsOptions = {}): Promise<LoginResult> {
+  return post<LoginResult>(
+    '/auth/login/sms',
+    {
+      phone,
+      code,
+      intent: options.intent ?? 'login',
+      agreed: options.agreed ?? false,
+      agreementVersion: options.agreementVersion ?? '',
+      privacyVersion: options.privacyVersion ?? '',
+    },
+    { auth: false },
+  )
+}
+
+export function completeRegistration(payload: RegisterCompletePayload): Promise<UserProfile> {
+  return post<UserProfile>('/auth/register/complete', payload as Record<string, any>, { loading: true })
 }
 
 export function loginByOneClick(token: string): Promise<LoginResult> {

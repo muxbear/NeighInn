@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { LoginResult, UserProfile } from '../models'
+import type {
+  LoginResult,
+  LoginSmsOptions,
+  OnboardingStatus,
+  RegisterCompletePayload,
+  UserProfile,
+} from '../models'
 import { STORAGE_KEYS } from '../config/constants'
 import { authService } from '../services/auth.service'
 import { profileService } from '../services/profile.service'
@@ -26,6 +32,13 @@ export const useUserStore = defineStore('user', () => {
   })
   const displayPhone = computed(() => maskPhone(profile.value?.phone ?? ''))
   const authStatus = computed(() => profile.value?.authStatus ?? 'NOT_LOGIN')
+  // 旧版本本地缓存没有 onboardingStatus，按已完成处理，避免存量用户被引导。
+  const onboardingStatus = computed<OnboardingStatus>(
+    () => profile.value?.onboardingStatus ?? 'COMPLETED',
+  )
+  const needsOnboarding = computed(
+    () => onboardingStatus.value === 'NEW' || onboardingStatus.value === 'PROFILE_COMPLETED',
+  )
 
   function hydrate(): void {
     if (hydrated.value) return
@@ -42,37 +55,57 @@ export const useUserStore = defineStore('user', () => {
     accessToken.value = result.accessToken
     refreshToken.value = result.refreshToken
     secureStorage.setTokens(result.accessToken, result.refreshToken)
-    profile.value = result.profile
-    setStorage(STORAGE_KEYS.userProfile, result.profile)
-    logger.setUserId(result.profile.id)
+    const nextProfile: UserProfile = {
+      ...result.profile,
+      onboardingStatus:
+        result.profile.onboardingStatus ??
+        result.onboardingStatus ??
+        (result.isNewUser ? 'NEW' : 'COMPLETED'),
+    }
+    profile.value = nextProfile
+    setStorage(STORAGE_KEYS.userProfile, nextProfile)
+    logger.setUserId(nextProfile.id)
     wsService.connect()
   }
 
-  async function loginWithSms(phone: string, code: string): Promise<void> {
+  async function loginWithSms(
+    phone: string,
+    code: string,
+    options: LoginSmsOptions = {},
+  ): Promise<LoginResult> {
     loading.value = true
     try {
-      const result = await authService.loginBySms(phone, code)
+      const result = await authService.loginBySms(phone, code, options)
       applyLogin(result)
+      return result
     } finally {
       loading.value = false
     }
   }
 
-  async function loginWithOneClick(carrierToken: string): Promise<void> {
+  async function completeRegistration(payload: RegisterCompletePayload): Promise<void> {
+    const updated = await authService.completeRegistration(payload)
+    profile.value = updated
+    setStorage(STORAGE_KEYS.userProfile, updated)
+  }
+
+  async function loginWithOneClick(carrierToken: string): Promise<LoginResult> {
     loading.value = true
     try {
       const result = await authService.loginByOneClick(carrierToken)
       applyLogin(result)
+      return result
     } finally {
       loading.value = false
     }
   }
 
-  async function loginWithWechat(code: string): Promise<void> {
+  async function loginWithWechat(code: string): Promise<LoginResult> {
     loading.value = true
     try {
       const result = await authService.loginByWechat(code)
       applyLogin(result)
+      return result
     } finally {
       loading.value = false
     }
@@ -133,11 +166,14 @@ export const useUserStore = defineStore('user', () => {
     avatarSrc,
     displayPhone,
     authStatus,
+    onboardingStatus,
+    needsOnboarding,
     hydrate,
     applyLogin,
     loginWithSms,
     loginWithOneClick,
     loginWithWechat,
+    completeRegistration,
     refreshProfile,
     updateProfile,
     updateAvatar,

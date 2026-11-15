@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { AppConfig, AppSettings } from '../models'
-import { STORAGE_KEYS } from '../config/constants'
+import { AGREEMENT_VERSION, PRIVACY_VERSION, STORAGE_KEYS } from '../config/constants'
 import { getAppConfig } from '../api/config.api'
 import { getStorage, setStorage } from '../utils/storage'
 import { logger } from '../utils/logger'
@@ -26,6 +26,8 @@ const DEFAULT_CONFIG: AppConfig = {
   payTimeoutMinutes: 30,
   appointmentAutoCancelHours: 48,
   supportPhone: '400-800-2026',
+  userAgreementVersion: AGREEMENT_VERSION,
+  privacyPolicyVersion: PRIVACY_VERSION,
 }
 
 export const useAppStore = defineStore('app', () => {

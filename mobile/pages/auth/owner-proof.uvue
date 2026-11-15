@@ -99,11 +99,13 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import type { CommunityBinding } from '../../models'
 import { useCommunityStore } from '../../stores/community.store'
+import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
 import { authService } from '../../services/auth.service'
 import { IDENTITY_OPTIONS } from '../../config/constants'
 
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 const { toast, showToast } = useToast()
 
 const selectedCommunity = ref<CommunityBinding | null>(null)
@@ -121,7 +123,11 @@ onLoad(async () => {
   if (!communityStore.current && communityStore.bindings.length === 0) {
     await communityStore.fetchNearby().catch(() => undefined)
   }
-  selectedCommunity.value = communityStore.current ?? communityStore.bindings[0] ?? communityStore.nearby[0] ?? null
+  const source = [...communityStore.bindings, ...communityStore.nearby]
+  const intentId = userStore.profile?.intentCommunityId || ''
+  const intent = intentId ? source.find((item) => item.id === intentId) : undefined
+  selectedCommunity.value =
+    intent ?? communityStore.current ?? communityStore.bindings[0] ?? communityStore.nearby[0] ?? null
 })
 
 function chooseCommunity(): void {

@@ -72,4 +72,7 @@ async def app_config_bundle(db: AsyncSession) -> dict:
         "payTimeoutMinutes": await get_int(db, "order.pay.timeout_minutes", 30),
         "appointmentAutoCancelHours": await get_int(db, "order.confirm.timeout_hours", 48),
         "supportPhone": "400-800-2026",
+        # 协议版本由管理员在后台参数配置维护（W04-05）。
+        "userAgreementVersion": await get_param(db, "agreement.user.version", "2026-11-01"),
+        "privacyPolicyVersion": await get_param(db, "agreement.privacy.version", "2026-11-01"),
     }

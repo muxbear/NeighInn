@@ -27,11 +27,11 @@ Web 管理端 Vue 3 ──/api/v1/admin（Cookie+CSRF+2FA）──┘
 | 部分 | 状态 |
 | --- | --- |
 | 领域模型（62 张表） | ✅ 完成（`src/db/models/`，跨库类型变体：生产 JSONB/BigInt、测试 JSON/Integer） |
-| Alembic 初始迁移 | ✅ `alembic/versions/0001_initial.py` |
+| Alembic 迁移 | ✅ `0001_initial.py`（初始建表）、`0002_registration_onboarding.py`（注册引导/协议留痕/协议版本参数） |
 | 种子数据 | ✅ `src/db/seed.py`（区划/社区/类目/字典/权限/角色/超管/参数/热词，与移动端 Mock 夹具对齐） |
 | 状态机（唯一状态变更入口） | ✅ `src/domain/state.py`（8 个状态机 + 15 个单测） |
 | 权限/数据范围/审计/幂等 | ✅ `src/core/`（require_permission / data_scope / write_audit / 幂等守卫） |
-| **C 端认证域（M01）** | ✅ **真实实现**：短信登录注册、JWT 续期、实名/业主证明提交（先实名后证明强校验）、认证状态机、小区绑定查询（mine/nearby/search 含 Haversine 距离） |
+| **C 端认证域（M01）** | ✅ **真实实现**：短信注册/登录意图分离（`intent=login/register`）、注册新人引导（昵称/头像/意向小区、`onboardingStatus`）、协议版本留痕、JWT 续期、实名/业主证明提交（先实名后证明强校验）、认证状态机、小区绑定查询（mine/nearby/search 含 Haversine 距离） |
 | **管理端认证域（W01/W02）** | ✅ **真实实现**：登录（5 次锁定 15 分钟、2FA 通道）、会话/CSRF、认证审核队列（通过/驳回≥10 字/补充材料/纠正小区）、冻结联动自动下架、撤销、全量审计 + 站内通知 + Outbox |
 | **C 端物品域（M03/M04）** | ✅ **真实实现**：发布校验（BR-02 本小区绑定/BR-05 照片/BR-06 三交易方式/BR-13 互换描述/M03-01 说明≥20 字/W07 处置联动）、草稿-编辑-重提闭环、AI 质检提交与进度报告、上架/下架/续期/删除、留言（A-09 内容安全拦截）、收藏、距离与三种耗时（SRS 8.2） |
 | **AI 质检适配器（SRS 7 章）** | ✅ Mock 流水线：图像质量/图文一致性/合规性/成色建议四维输出 + 置信度 + 风险 + 建议 + trace_id；高置信快车道直上架、低置信/转人工进复核队列；违禁词库与导流敏感检测 |
@@ -83,7 +83,7 @@ uv run python run.py
 
 ```bash
 uv run ruff check src tests run.py scripts
-uv run pytest -q            # 80 个测试（状态机/认证/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
+uv run pytest -q            # 87 个测试（状态机/认证注册/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
 ```
 
 ## 双端接线（联调）
@@ -143,6 +143,7 @@ PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py
 ```text
 web/backend/
 ├── alembic/versions/0001_initial.py   # 统一模型初始迁移
+├── alembic/versions/0002_registration_onboarding.py  # 注册引导/协议留痕
 ├── src/
 │   ├── main.py                        # 应用入口（双端前缀挂载、中间件、异常映射）
 │   ├── core/                          # config / db / responses / security / sessions /

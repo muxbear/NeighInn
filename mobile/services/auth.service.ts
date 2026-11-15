@@ -1,6 +1,15 @@
 import * as authApi from '../api/auth.api'
 import { ApiError } from '../api/errors'
-import type { AuthStatusResult, LoginResult, OwnerProofPayload, RealnamePayload, SmsCodeResult } from '../models'
+import type {
+  AuthStatusResult,
+  LoginResult,
+  LoginSmsOptions,
+  OwnerProofPayload,
+  RealnamePayload,
+  RegisterCompletePayload,
+  SmsCodeResult,
+  UserProfile,
+} from '../models'
 import { isPhone, isSmsCode } from '../utils/validator'
 
 export const authService = {
@@ -9,10 +18,14 @@ export const authService = {
     return authApi.sendSmsCode(phone.trim())
   },
 
-  async loginBySms(phone: string, code: string): Promise<LoginResult> {
+  async loginBySms(phone: string, code: string, options: LoginSmsOptions = {}): Promise<LoginResult> {
     if (!isPhone(phone)) throw new ApiError(40001, '请输入正确的手机号')
     if (!isSmsCode(code)) throw new ApiError(40001, '请输入 6 位验证码')
-    return authApi.loginBySms(phone.trim(), code.trim())
+    return authApi.loginBySms(phone.trim(), code.trim(), options)
+  },
+
+  completeRegistration(payload: RegisterCompletePayload): Promise<UserProfile> {
+    return authApi.completeRegistration(payload)
   },
 
   loginByOneClick(token: string): Promise<LoginResult> {
