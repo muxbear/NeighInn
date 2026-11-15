@@ -19,6 +19,7 @@
 4. 选择运行目标：
    - **Web 预览**：运行 → 运行到浏览器 → Chrome（已验证 HBuilderX 5.34 编译通过；根目录 `index.html` 为 H5 入口；H5 开发端口 **5191**，配置在 `manifest.json` 的 `web.devServer.port` 与 `h5.devServer.port`）
    - **微信小程序**：运行 → 运行到小程序模拟器 → 微信开发者工具（已验证 HBuilderX 5.34 编译通过；需在微信开发者工具“设置 → 安全设置”中开启服务端口）
+     > 小程序 WXSS 类名只允许 ASCII，动态 class 不要直接拼中文分类（否则 WXSS 编译失败会白屏）；AppID 需替换为真实值（当前为占位值）。
    - **Android**：手机开启 USB 调试并连接 → 运行 → 运行到手机或模拟器 → 运行到 Android App 基座（Vapor 蒸汽模式）
    - **iOS**：需要 macOS；**HarmonyOS**：需要 DevEco Studio 与 HarmonyOS SDK
 5. App 端建议使用 release 包做性能验收（debug 模式性能较差）。

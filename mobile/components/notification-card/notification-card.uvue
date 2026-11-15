@@ -6,7 +6,7 @@
     :hover-stay-time="100"
     @click="onTap"
   >
-    <view class="notification__icon" :class="`notification__icon--${notification.category}`">
+    <view class="notification__icon" :class="categoryClass">
       <ni-icon :name="notification.icon" :size="19" :state="iconState" />
     </view>
     <view class="notification__body">
@@ -38,6 +38,13 @@ const iconState = computed(() => {
   if (props.notification.category === '交易') return 'active'
   if (props.notification.category === '互动') return 'green'
   return 'blue'
+})
+
+// 微信小程序 WXSS 不支持中文类名，分类到 ASCII 类名映射。
+const categoryClass = computed(() => {
+  if (props.notification.category === '交易') return 'notification__icon--trade'
+  if (props.notification.category === '互动') return 'notification__icon--social'
+  return 'notification__icon--community'
 })
 
 function onTap(): void {
@@ -72,13 +79,13 @@ function onTap(): void {
   justify-content: center;
   margin-right: 10px;
 }
-.notification__icon--交易 {
+.notification__icon--trade {
   background-color: #fff0e7;
 }
-.notification__icon--互动 {
+.notification__icon--social {
   background-color: $ni-color-success-bg;
 }
-.notification__icon--社区 {
+.notification__icon--community {
   background-color: $ni-color-swap-bg;
 }
 .notification__body {
