@@ -68,7 +68,7 @@ NeighInn‌/                          # 根目录名末尾含 U+200C
 - 布局一律 Flex；文字样式必须写在 `<text>` 上；非 Web 端 SVG 不换色，按状态导出多份；
 - 最低系统：Android 6.0+ / iOS 15+ / HarmonyOS 6.0+（API 20+）；微信小程序基础库 3.7.1+；
 - 状态管理 Pinia 2.x；原生扩展仅 UTS 插件；
-- H5 开发端口：HBuilderX 5.34 实际使用 Vite 默认 **5173**（被占用时自动 +1，以控制台输出为准；`manifest.json` 的 `h5.devServer.port=5191` 在该版本未生效）。后端 CORS 同时放行 5173/5191/5192 与私网任意端口。
+- H5 开发端口：**5191**（`manifest.json` 的 `web.devServer.port` 与 `h5.devServer.port` 均已配置；uni-app 解析 H5 时优先取 `web` 节点）。后端 CORS 同时放行 5191/5192/5173 与私网任意端口。
 
 Figma Make 原型：`https://www.figma.com/make/OEw7s8EWAlGNNd4xnjZXkS/NeighInn%E2%80%8CMobile?t=oDXGBVFADNsqDfZu-6`（2026-11-14）。
 
@@ -173,7 +173,7 @@ npm run dev
 
 - **技术栈**：FastAPI + SQLAlchemy 2.0 async + PostgreSQL（测试 SQLite）+ Redis + MinIO + RabbitMQ（Outbox）。
 - **端口 5193**：C 端 `/api/v1`（JWT Bearer）；管理端 `/api/v1/admin`（Cookie + CSRF 双提交）；WebSocket `/api/v1/ws`。
-- **CORS 与本地联调**：`web/backend/.env` 的 `CORS_ORIGINS` 必须包含移动端 H5（实际 5173 / manifest 5191）与 Web 前端（5192）；开发环境 `CORS_ORIGIN_REGEX` 放行本机/私网 IP 的任意端口；真机联调把 `APP_HOST` 改为 `0.0.0.0` 并调整移动端 `LOCAL_HOST`。
+- **CORS 与本地联调**：`web/backend/.env` 的 `CORS_ORIGINS` 必须包含移动端 H5（5191）与 Web 前端（5192）；开发环境 `CORS_ORIGIN_REGEX` 放行本机/私网 IP 的任意端口；真机联调把 `APP_HOST` 改为 `0.0.0.0` 并调整移动端 `LOCAL_HOST`。
 - **验证码存储**：`SMS_CODE_BACKEND=redis`（推荐，重启/多副本不丢）/ `memory`；非 dev 环境未接短信通道时 `/auth/sms-code` 返回 50301。
 - **已实现**：46+ 张表与 Alembic 迁移；8 个状态机；认证（实名/业主证明/审核/冻结联动下架）；物品（发布校验/AI 质检 Mock 适配器/人工复核/快车道）；订单（三种交易方式/BR-08 一物一卖/验货双向确认）；资金（复式账本/托管/放款/退款/提现双人复核/纠纷资金处置）；内容（生活/喇叭/互助/评论审核）；社交（好友/私信 client_msg_id 幂等/内容安全）；通知（公告下发/任务投递/已读）；参数（发布即生效下发 AppConfig）；管理面（社区 CRUD/用户处置/角色权限/管理员账号/审计/导出/举报工作台）；WebSocket 推送。
 - **铁律**：状态变更只经 `src/domain/state.py`；金额一律整数分；余额只由 `ledger_entries` 推导；管理端路由默认 `require_permission`；写操作走幂等键；跨端一致性靠事件+缓存失效，不做双写。
@@ -201,7 +201,7 @@ npm run icons        # 重新生成多状态 SVG 图标与内置头像
 
 - 开发/真机：HBuilderX 5.34 打开 `mobile/`，运行到 Android/iOS/HarmonyOS/微信开发者工具/浏览器。
   - 已实测：**HBuilderX 5.34 Web 编译通过、微信小程序编译通过**（36 页面 + 40 组件）。
-  - H5 开发端口以 HBuilderX 控制台为准（5.34 实际为 **5173**，被占用时自动 +1；manifest 的 5191 未生效）；需安装 `compile-dart-sass` 插件（CLI：`cli installPlugin --name compile-dart-sass`）。
+  - H5 开发端口 **5191**（`manifest.json` → `web.devServer.port` / `h5.devServer.port`，含 `strictPort`）；需安装 `compile-dart-sass` 插件（CLI：`cli installPlugin --name compile-dart-sass`）。
   - Android 运行需要连接真机/模拟器；iOS 需 macOS；HarmonyOS 需 DevEco Studio。
 - 常用 CLI（安装路径示例 `D:\opt\DCloud\HBuilderX`）：
   - `cli project open --path <项目绝对路径>`

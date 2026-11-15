@@ -17,7 +17,7 @@
    ```
 3. 打开 `manifest.json` 可视化界面，在“基础配置”中**重新获取 DCloud AppID**；微信小程序端填写自己的 AppID（当前为占位值）。
 4. 选择运行目标：
-   - **Web 预览**：运行 → 运行到浏览器 → Chrome（已验证 HBuilderX 5.34 编译通过；根目录 `index.html` 为 H5 入口；HBuilderX 5.34 实际使用 Vite 默认端口 **5173**，被占用时自动 +1，以控制台输出为准；`manifest.json` 的 `h5.devServer.port=5191` 在该版本未生效）
+   - **Web 预览**：运行 → 运行到浏览器 → Chrome（已验证 HBuilderX 5.34 编译通过；根目录 `index.html` 为 H5 入口；H5 开发端口 **5191**，配置在 `manifest.json` 的 `web.devServer.port` 与 `h5.devServer.port`）
    - **微信小程序**：运行 → 运行到小程序模拟器 → 微信开发者工具（已验证 HBuilderX 5.34 编译通过；需在微信开发者工具“设置 → 安全设置”中开启服务端口）
    - **Android**：手机开启 USB 调试并连接 → 运行 → 运行到手机或模拟器 → 运行到 Android App 基座（Vapor 蒸汽模式）
    - **iOS**：需要 macOS；**HarmonyOS**：需要 DevEco Studio 与 HarmonyOS SDK
@@ -61,7 +61,8 @@ npm run icons        # 重新生成图标与内置头像资源
   - Web 预览 / 微信开发者工具：`127.0.0.1`；
   - Android 模拟器：`10.0.2.2`；
   - 真机：电脑局域网 IP（如 `192.168.1.100`），同时把 `web/backend/.env` 的 `APP_HOST` 改为 `0.0.0.0`。
-- 后端 `CORS_ORIGINS` 必须放行移动端 H5 实际端口（HBuilderX 当前为 `5173`，manifest 配置为 `5191`），否则浏览器预检会被拒绝；开发环境已用 `CORS_ORIGIN_REGEX` 放宽本机/私网任意端口（详见 `web/backend/README.md`）。
+- 后端 `CORS_ORIGINS` 必须放行移动端 H5 端口 `5191`，否则浏览器预检会被拒绝；开发环境已用 `CORS_ORIGIN_REGEX` 放宽本机/私网任意端口（详见 `web/backend/README.md`）。
+- 开发环境验证码会常驻显示在登录页验证码输入框下方，并输出到后端日志（手机号脱敏）；生产环境不返回验证码。
 - 切换到 staging/prod：修改 `CURRENT_ENV`，并把 `mock` 设为 `false`，替换 `baseUrl` / `wsUrl`。
 - 首次进入 App 会注入一个演示会话；在「设置 - 退出登录」后可体验登录页（验证码演示码 `123456`）。
 

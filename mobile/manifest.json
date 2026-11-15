@@ -60,7 +60,8 @@
 			"mode": "hash"
 		},
 		"devServer": {
-			"port": 5191
+			"port": 5191,
+			"strictPort": true
 		}
 	},
 	"app-android": {
@@ -103,6 +104,10 @@
 			"mode": "hash"
 		},
 		"title": "邻里小栈",
+		"devServer": {
+			"port": 5191,
+			"strictPort": true
+		},
 		"sdkConfigs": {
 			"maps": {
 				"amap": {

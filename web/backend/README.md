@@ -96,8 +96,8 @@ uv run pytest -q            # 80 个测试（状态机/认证/物品/订单资�
 
 > **移动端联调注意**
 >
-> - 移动端 H5 端口以 HBuilderX 控制台为准：5.34 实际为 **5173**（manifest 配置的 5191 未生效，被占用时会自动 +1）。
->   `web/backend/.env` 的 `CORS_ORIGINS` 已同时包含 5173/5191/5192；开发环境 `CORS_ORIGIN_REGEX` 进一步放行本机/私网任意端口，
+> - 移动端 H5 端口为 **5191**（`manifest.json` 的 `web.devServer.port` / `h5.devServer.port`）。
+>   `web/backend/.env` 的 `CORS_ORIGINS` 已包含 5191/5192/5173（5173 为 Vite 默认端口兼容）；开发环境 `CORS_ORIGIN_REGEX` 进一步放行本机/私网任意端口，
 >   否则浏览器预检会返回 `400 Disallowed CORS origin`。
 > - 真机联调：后端 `APP_HOST` 改为 `0.0.0.0`，并把 `mobile/config/env.ts` 的 `LOCAL_HOST` 改为电脑局域网 IP；
 >   开发环境 `CORS_ORIGIN_REGEX` 已放行私网 IP 的 H5 来源（生产不生效）。

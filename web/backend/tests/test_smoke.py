@@ -17,7 +17,7 @@ async def test_liveness():
 
 @pytest.mark.asyncio
 async def test_mobile_h5_cors_preflight(client):
-    """移动端 H5（HBuilderX 实际 5173 / manifest 配置 5191）必须通过 CORS 预检。"""
+    """移动端 H5（5191；兼容 Vite 默认 5173）必须通过 CORS 预检。"""
     for origin in ("http://localhost:5173", "http://localhost:5191"):
         resp = await client.options(
             "/api/v1/auth/sms-code",

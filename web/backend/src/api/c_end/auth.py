@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter
@@ -8,12 +9,13 @@ from pydantic import BaseModel
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
 from src.core.responses import ERR_DEPENDENCY, ERR_PARAM, ERR_UNAUTHORIZED, ApiError, ok
-from src.core.security import decode_token, issue_access_token, issue_refresh_token
+from src.core.security import decode_token, issue_access_token, issue_refresh_token, mask_phone
 from src.db.models import Certification
 from src.services import auth_service as svc
 from src.services.auth_service import sms_code_store
 
 router = APIRouter(tags=["c:auth"])
+logger = logging.getLogger(__name__)
 
 
 class SmsCodeIn(BaseModel):
@@ -48,7 +50,8 @@ async def send_sms_code(payload: SmsCodeIn):
         # 真实短信通道尚未接入：显式报错，避免前端收到“发送成功”却永远收不到验证码。
         raise ApiError(ERR_DEPENDENCY, "短信通道尚未接入，暂无法发送验证码", 503)
     code, cooldown = await sms_code_store.issue(payload.phone)
-    # 仅开发环境回显验证码（NF-06：生产绝不返回验证码本体）。
+    # 仅开发环境回显/记录验证码（NF-06：生产绝不返回或记录验证码本体）。
+    logger.info("开发环境短信验证码 %s -> %s", mask_phone(payload.phone), code)
     return ok({"cooldown": cooldown, "mockCode": code}, "验证码已发送")
 
 
