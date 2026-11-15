@@ -17,6 +17,19 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str = "dev-only-change-me-please-32bytes-min"
 
+    # ---- 日志 ----
+    # DEBUG 仅作为调试标记保留；SQL 日志由 SQL_ECHO 独立控制，避免开发默认刷屏。
+    log_level: str = "INFO"
+    log_format: str = "console"  # console（开发）| json（生产采集）
+    log_to_file: bool = False  # 生产建议 false，仅输出 stdout
+    log_dir: str = "logs"
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5
+    sql_echo: bool = False
+    access_log_enabled: bool = True
+    slow_request_ms: int = 2000
+    access_log_skip_paths: str = "/health/live,/health/ready,/favicon.ico"
+
     database_url: str = "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/neighinn_platform"
     db_pool_size: int = 10
     db_max_overflow: int = 20
@@ -58,6 +71,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+    @property
+    def access_log_skip_path_set(self) -> set[str]:
+        return {item.strip() for item in self.access_log_skip_paths.split(",") if item.strip()}
 
     # ---- 业务规则默认值（运行时以 parameter_items 参数为准，见 domain/enums.py） ----
     min_item_images: int = 3

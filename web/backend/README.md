@@ -79,11 +79,19 @@ uv run python run.py
 - 管理端 API：<http://127.0.0.1:5193/api/v1/admin>
 - OpenAPI / Swagger：<http://127.0.0.1:5193/docs>（双端契约完整可见）
 
+## 日志
+
+- 统一配置在 `src/core/logging.py`：开发用 `LOG_FORMAT=console`，生产用 `LOG_FORMAT=json`；默认仅输出 stdout，`LOG_TO_FILE=true` 时写 `logs/app.log` / `logs/error.log`（10 MB × 5）。
+- SQL 日志与 `DEBUG` 解耦：默认 `SQL_ECHO=false`；排查时临时设为 `true`，SQL 只输出一次且带 `traceId`。
+- 访问日志由应用中间件输出（`event=http_request`），uvicorn 自带 access log 已关闭；`/health/live`、`/health/ready` 不记录。
+- 所有日志自动注入 `traceId`（与响应头 `X-Trace-Id` 一致），并对密码、Token、手机号、身份证号脱敏。
+- 常用配置：`LOG_LEVEL`、`LOG_FORMAT`、`LOG_TO_FILE`、`SQL_ECHO`、`ACCESS_LOG`、`SLOW_REQUEST_MS`、`ACCESS_LOG_SKIP_PATHS`，详见 `.env.example`。
+
 ## 质量门槛
 
 ```bash
 uv run ruff check src tests run.py scripts
-uv run pytest -q            # 94 个测试（状态机/认证注册/认证上传/待办/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
+uv run pytest -q            # 99 个测试（状态机/认证注册/认证上传/待办/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
 ```
 
 ## 双端接线（联调）

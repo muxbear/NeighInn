@@ -87,6 +87,10 @@ class FailoverSessionStore:
         self._redis: RedisSessionStore | None = None
         self._active: SessionStore = self._fallback
 
+    @property
+    def backend_name(self) -> str:
+        return "redis" if self._active is self._redis else "memory"
+
     async def init(self) -> None:
         if not settings.redis_url:
             logger.warning("未配置 REDIS_URL，管理端会话使用进程内内存（重启失效）")

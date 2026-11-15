@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from contextvars import ContextVar
 from typing import Any
@@ -8,7 +9,18 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+logger = logging.getLogger(__name__)
+
 trace_id_ctx: ContextVar[str] = ContextVar("trace_id", default="")
+
+
+def _level_for_status(status: int) -> int:
+    """4xx 中仅认证/权限/限流升为 WARNING，其余按 INFO 记录，避免正常业务噪声。"""
+    if status >= 500:
+        return logging.ERROR
+    if status in {401, 403, 429}:
+        return logging.WARNING
+    return logging.INFO
 
 
 def current_trace_id() -> str:
@@ -70,7 +82,14 @@ def not_implemented(what: str) -> ApiError:
     return ApiError(ERR_NOT_IMPLEMENTED, f"{what} 尚未实现（Phase 0 契约骨架）", 501)
 
 
-async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
+async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
+    logger.log(
+        _level_for_status(exc.http_status),
+        "api_error code=%s status=%s path=%s message=%s",
+        exc.code, exc.http_status, request.url.path, exc.message,
+        extra={"event": "api_error", "code": exc.code, "status": exc.http_status,
+               "path": request.url.path},
+    )
     return JSONResponse(
         status_code=exc.http_status,
         content={"code": exc.code, "message": exc.message, "data": exc.data,
@@ -78,8 +97,14 @@ async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
     )
 
 
-async def http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     code_map = {404: ERR_NOT_FOUND, 405: ERR_PARAM, 401: ERR_UNAUTHORIZED, 403: ERR_FORBIDDEN}
+    logger.log(
+        _level_for_status(exc.status_code),
+        "http_error status=%s path=%s message=%s",
+        exc.status_code, request.url.path, exc.detail,
+        extra={"event": "http_error", "status": exc.status_code, "path": request.url.path},
+    )
     return JSONResponse(
         status_code=exc.status_code,
         content={"code": code_map.get(exc.status_code, ERR_INTERNAL),
@@ -87,7 +112,9 @@ async def http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONRes
     )
 
 
-async def unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("unhandled_error path=%s", request.url.path,
+                     extra={"event": "unhandled_error", "path": request.url.path})
     return JSONResponse(
         status_code=500,
         content={"code": ERR_INTERNAL, "message": "系统错误", "data": None,

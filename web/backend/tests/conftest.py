@@ -16,6 +16,10 @@ from sqlalchemy.pool import StaticPool
 # 测试固定使用进程内会话/验证码存储，避免依赖外部 Redis 或污染其数据。
 os.environ["REDIS_URL"] = ""
 os.environ["SMS_CODE_BACKEND"] = "memory"
+# 测试不写日志文件，并把日志级别压到 WARNING，避免用例输出淹没失败信息。
+os.environ["LOG_LEVEL"] = "WARNING"
+os.environ["LOG_TO_FILE"] = "false"
+os.environ["ACCESS_LOG"] = "false"
 
 from src.db.base import Base, get_db
 from src.db.seed import seed_if_empty

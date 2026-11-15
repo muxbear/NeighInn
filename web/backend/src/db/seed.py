@@ -246,9 +246,10 @@ PARAMETER_TREE: dict[str, list[tuple[str, str, str]]] = {
 HOT_KEYWORDS = ["儿童椅", "婴儿床", "绘本", "露营", "戴森", "免费领取"]
 
 
-async def seed_if_empty(session: AsyncSession) -> None:
+async def seed_if_empty(session: AsyncSession) -> dict[str, int] | None:
+    """初始化种子；已初始化返回 None，本次写入返回各领域数量摘要。"""
     if await session.scalar(select(AdminUser.id).limit(1)):
-        return
+        return None
 
     # 区划
     region_by_code: dict[str, Region] = {}
@@ -351,3 +352,14 @@ async def seed_if_empty(session: AsyncSession) -> None:
         session.add(HotKeyword(keyword=keyword, sort=sort, score=100 - sort))
 
     await session.commit()
+    return {
+        "regions": len(REGIONS),
+        "communities": len(COMMUNITIES),
+        "categories": sum(1 + len(children) for _, children in ITEM_CATEGORIES),
+        "dictionaries": len(DICTIONARIES),
+        "dictionaryItems": sum(len(items) for items in DICTIONARIES.values()),
+        "permissions": len(PERMISSIONS),
+        "roles": len(ROLE_BLUEPRINTS),
+        "parameterItems": sum(len(items) for items in PARAMETER_TREE.values()),
+        "hotKeywords": len(HOT_KEYWORDS),
+    }

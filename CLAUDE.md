@@ -35,7 +35,7 @@ NeighInn‌/                          # 根目录名末尾含 U+200C
 │   │   ├── src/domain/             # 业务枚举 + 8 个状态机
 │   │   ├── src/services/           # 认证/物品/AI 质检/订单/资金/参数/IM
 │   │   ├── alembic/                # 数据库迁移
-│   │   ├── tests/                  # 94 个测试
+│   │   ├── tests/                  # 99 个测试
 │   │   └── scripts/smoke_e2e.py    # 真实 HTTP 端到端冒烟
 │   ├── frontend/                   # Vue 3 + TypeScript + Pinia + Vite
 │   ├── docs/邻里小栈后台管理系统详细设计说明书.md
@@ -177,7 +177,8 @@ npm run dev
 - **验证码存储**：`SMS_CODE_BACKEND=redis`（推荐，重启/多副本不丢）/ `memory`；非 dev 环境未接短信通道时 `/auth/sms-code` 返回 50301。
 - **已实现**：46+ 张表与 Alembic 迁移；8 个状态机；认证（实名/业主证明/审核/冻结联动下架）；物品（发布校验/AI 质检 Mock 适配器/人工复核/快车道）；订单（三种交易方式/BR-08 一物一卖/验货双向确认）；资金（复式账本/托管/放款/退款/提现双人复核/纠纷资金处置）；内容（生活/喇叭/互助/评论审核）；社交（好友/私信 client_msg_id 幂等/内容安全）；通知（公告下发/任务投递/已读）；参数（发布即生效下发 AppConfig）；管理面（社区 CRUD/用户处置/角色权限/管理员账号/审计/导出/举报工作台）；WebSocket 推送。
 - **铁律**：状态变更只经 `src/domain/state.py`；金额一律整数分；余额只由 `ledger_entries` 推导；管理端路由默认 `require_permission`；写操作走幂等键；跨端一致性靠事件+缓存失效，不做双写。
-- **测试**：`cd web/backend && uv run pytest -q`（94 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
+- **测试**：`cd web/backend && uv run pytest -q`（99 个测试，覆盖 AC-01/02/05/06/08）；`uv run ruff check src tests run.py scripts`。
+- **日志**：统一由 `src/core/logging.py` 配置（开发 console / 生产 JSON，默认仅 stdout）；SQL 日志由 `SQL_ECHO` 独立控制，不再跟随 `DEBUG`；访问日志由应用中间件输出并自动注入 `traceId`，uvicorn 自带 access log 已关闭。
 - **双端接线**：移动端 `config/env.ts` → `CURRENT_ENV='local'` 指向 5193；Web 前端 Vite 代理 `/api` → 5193，页面通过 `src/api/compat.ts` 适配统一服务端契约。
 - **端到端冒烟**：`PYTHONIOENCODING=utf-8 uv run python scripts/smoke_e2e.py`（对运行中的 5193 执行 AC-01 全链路）。
 
@@ -260,7 +261,7 @@ npm run build
 
 **Web 管理端已完成第一版**：FastAPI + Vue 3 前后端可运行；登录/会话/CSRF、工作台、社区运营四页、公告、通知任务、社区运维、社区业主、住户认证审核与待办铃铛、用户、角色权限、资源管理、参数配置、审计日志、资金看板/流水/提现/对账/订单、纠纷调解、报事报修、投诉建议；PostgreSQL 种子数据、MinIO 私有桶上传与签名 URL、本地构建与 API 冒烟测试通过。**Redis 认证、RabbitMQ、真实支付/短信/Push/AI、2FA 界面、部分新增/编辑抽屉仍待补齐。**
 
-**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82+ 路径 + 管理端 148 路径）、认证/注册引导/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、94 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5193 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
+**统一服务端已交付 Phase 0–2 并迁移至 `web/backend`**：统一领域模型（46+ 表）、8 个状态机、双端契约（C 端 82+ 路径 + 管理端 148 路径）、认证/注册引导/物品+AI/订单/资金/内容/社交/通知/参数/管理面全链路真实实现、WebSocket 推送、99 个测试；移动端已切 `local` 环境指向统一服务端，Web 前端已代理到 5193 并经 `compat.ts` 适配。**待办**：真实渠道适配器（支付/短信/推送/实名/AI）、资源页面管理（sys_pages）、对账自动化、2FA 完整向导、Redis Pub/Sub 多副本 WS、性能与安全加固。
 
 **Git 现状**：
 

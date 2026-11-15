@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.config import settings
+from src.core.logging import configure_logging, mask_dsn
 from src.core.responses import (
     ApiError,
     api_error_handler,
@@ -23,21 +25,94 @@ from src.core.sessions import session_store
 from src.db.base import SessionLocal, init_db
 from src.db.seed import seed_if_empty
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger(__name__)
+
+_ACCESS_SKIP_PATHS = settings.access_log_skip_path_set
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 1)
+
+
+def _log_access(request: Request, status: int, duration_ms: float,
+                reason: str | None = None) -> None:
+    """应用级访问日志：uvicorn.access 已关闭，由这里统一输出。"""
+    if not settings.access_log_enabled or request.url.path in _ACCESS_SKIP_PATHS:
+        return
+    slow = duration_ms >= settings.slow_request_ms
+    if status >= 500:
+        level = logging.ERROR
+    elif status >= 400 or slow:
+        level = logging.WARNING
+    else:
+        level = logging.INFO
+    event = "http_slow" if slow and status < 400 else "http_request"
+    extra = {
+        "event": event,
+        "method": request.method,
+        "path": request.url.path,
+        "status": status,
+        "durationMs": duration_ms,
+        "clientIp": request.client.host if request.client else "-",
+    }
+    if reason:
+        extra["reason"] = reason
+    logger.log(level, event, extra=extra)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     from src.services.auth_service import sms_code_store
 
+    started_at = time.perf_counter()
+    logger.info(
+        "startup config env=%s sql_echo=%s db=%s redis=%s minio=%s scheduler=%s",
+        settings.app_env,
+        settings.sql_echo,
+        mask_dsn(settings.database_url),
+        "configured" if settings.redis_url else "memory",
+        settings.minio_endpoint,
+        settings.enable_scheduler,
+        extra={"event": "startup", "step": "config"},
+    )
+
+    step_at = time.perf_counter()
     await init_db()
+    logger.info("startup step=db durationMs=%.1f", _elapsed_ms(step_at),
+                extra={"event": "startup", "step": "db", "durationMs": _elapsed_ms(step_at)})
+
+    step_at = time.perf_counter()
     await session_store.init()
+    session_backend = getattr(session_store, "backend_name", "unknown")
+    logger.info("startup step=session_store backend=%s durationMs=%.1f",
+                session_backend, _elapsed_ms(step_at),
+                extra={"event": "startup", "step": "session_store",
+                       "backend": session_backend, "durationMs": _elapsed_ms(step_at)})
+
+    step_at = time.perf_counter()
     await sms_code_store.init()
+    sms_backend = getattr(sms_code_store, "backend_name", "unknown")
+    logger.info("startup step=sms_store backend=%s durationMs=%.1f",
+                sms_backend, _elapsed_ms(step_at),
+                extra={"event": "startup", "step": "sms_store",
+                       "backend": sms_backend, "durationMs": _elapsed_ms(step_at)})
+
     if settings.app_env == "dev":
         # 幂等种子：区划/社区/类目/字典/权限/角色/超管/参数/热词（生产用 alembic data migration）
+        step_at = time.perf_counter()
         async with SessionLocal() as session:
-            await seed_if_empty(session)
+            seed_summary = await seed_if_empty(session)
+        if seed_summary:
+            logger.info("startup step=seed mode=created %s durationMs=%.1f",
+                        seed_summary, _elapsed_ms(step_at),
+                        extra={"event": "startup", "step": "seed", "mode": "created",
+                               "durationMs": _elapsed_ms(step_at), **seed_summary})
+        else:
+            logger.info("startup step=seed mode=skipped durationMs=%.1f",
+                        _elapsed_ms(step_at),
+                        extra={"event": "startup", "step": "seed", "mode": "skipped",
+                               "durationMs": _elapsed_ms(step_at)})
 
     stop = asyncio.Event()
     tasks: list[asyncio.Task] = []
@@ -52,8 +127,15 @@ async def lifespan(_: FastAPI):
         logger.info("调度已启动：outbox=%ss timeout=%ss",
                     settings.outbox_interval_seconds, settings.timeout_interval_seconds)
 
+    logger.info("startup complete listen=%s:%s durationMs=%.1f",
+                settings.app_host, settings.app_port, _elapsed_ms(started_at),
+                extra={"event": "startup", "step": "complete",
+                       "listen": f"{settings.app_host}:{settings.app_port}",
+                       "durationMs": _elapsed_ms(started_at)})
     yield
 
+    shutdown_at = time.perf_counter()
+    logger.info("shutdown begin", extra={"event": "shutdown"})
     stop.set()
     for task in tasks:
         task.cancel()
@@ -61,6 +143,8 @@ async def lifespan(_: FastAPI):
         await asyncio.gather(*tasks, return_exceptions=True)
     await sms_code_store.close()
     await session_store.close()
+    logger.info("shutdown complete durationMs=%.1f", _elapsed_ms(shutdown_at),
+                extra={"event": "shutdown", "durationMs": _elapsed_ms(shutdown_at)})
 
 
 app = FastAPI(
@@ -87,6 +171,7 @@ app.add_middleware(
 async def request_context(request: Request, call_next):
     trace_id = request.headers.get("x-trace-id") or uuid.uuid4().hex[:16]
     trace_id_ctx.set(trace_id)
+    started_at = time.perf_counter()
     if (
         settings.auth_enforce_csrf
         and request.method not in {"GET", "HEAD", "OPTIONS"}
@@ -96,12 +181,18 @@ async def request_context(request: Request, call_next):
         cookie = request.cookies.get("ni_csrf")
         header = request.headers.get("x-csrf-token")
         if not cookie or not header or cookie != header:
+            _log_access(request, 403, _elapsed_ms(started_at), reason="csrf")
             return JSONResponse(
                 status_code=403,
                 content={"code": 40301, "message": "CSRF 校验失败", "data": None,
                          "traceId": trace_id},
             )
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        _log_access(request, 500, _elapsed_ms(started_at))
+        raise
+    _log_access(request, response.status_code, _elapsed_ms(started_at))
     response.headers["X-Trace-Id"] = trace_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -115,9 +206,18 @@ app.add_exception_handler(Exception, unhandled_error_handler)
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(_: Request, exc: RequestValidationError):
+async def validation_error_handler(request: Request, exc: RequestValidationError):
     from src.core.responses import current_trace_id
 
+    # 不记录原始 input，避免密码/手机号等被 Pydantic 错误上下文带进日志。
+    safe_errors = [
+        {"loc": list(item.get("loc", ())), "type": item.get("type"),
+         "msg": item.get("msg")}
+        for item in exc.errors()
+    ]
+    logger.warning("validation_error path=%s errors=%s", request.url.path, safe_errors,
+                   extra={"event": "validation_error", "path": request.url.path,
+                          "errors": safe_errors})
     return JSONResponse(
         status_code=400,
         content={"code": 40001, "message": "参数校验失败", "data": exc.errors(),

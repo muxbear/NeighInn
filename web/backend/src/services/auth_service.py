@@ -163,6 +163,10 @@ class FailoverSmsCodeStore:
         self._redis: RedisSmsCodeStore | None = None
         self._active: SmsCodeStore = self._fallback
 
+    @property
+    def backend_name(self) -> str:
+        return "redis" if self._active is self._redis else "memory"
+
     async def init(self) -> None:
         if settings.sms_code_backend.lower() != "redis":
             logger.info("短信验证码使用进程内存储（重启失效）")
