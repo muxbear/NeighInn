@@ -115,14 +115,9 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading parameter-page-heading">
-    <div><p>系统管理 / 参数配置</p><h1>参数配置</h1><span>以参数键组织多环境业务配置，统一管理参数项及生效状态</span></div>
-    <button class="primary-button" @click="creatingRoot = true"><Plus :size="17" />新建根节点</button>
-  </section>
-
   <section class="parameter-workspace">
     <aside class="parameter-tree-panel">
-      <div class="parameter-panel-heading"><div><strong>参数键</strong><span>{{ tree.length }} 个根节点</span></div><button @click="creatingRoot = true"><Plus :size="16" /></button></div>
+      <div class="parameter-panel-heading"><div><strong>参数键</strong><span>{{ tree.length }} 个根节点</span></div><button title="新建根节点" @click="creatingRoot = true"><Plus :size="16" /></button></div>
       <div class="parameter-tree-search"><Search :size="15" /><input v-model="treeQuery" placeholder="搜索参数键" /></div>
       <div v-if="creatingRoot" class="create-root-form" style="margin: 0 12px 8px; padding: 5px; display: flex; align-items: center; gap: 4px; border: 1px solid #cfc6ec; border-radius: 8px">
         <input v-model="rootName" placeholder="输入根节点名称" style="flex: 1; height: 25px; border: 0; font-size: var(--font-size-body)" @keyup.enter="addRoot" />

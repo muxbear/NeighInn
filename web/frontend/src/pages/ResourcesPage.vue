@@ -84,16 +84,14 @@ onMounted(loadTree)
 </script>
 
 <template>
-  <section class="page-heading list-heading resource-page-heading">
-    <div><p>系统管理 / 资源管理</p><h1>资源管理</h1><span>统一维护系统页面、菜单结构以及页面内可授权资源</span></div>
-    <button class="primary-button" @click="app.showToast('新增页面面板已准备就绪')"><Plus :size="17" />新增页面</button>
-  </section>
-
   <section class="resource-workspace">
     <aside class="resource-tree-panel">
       <div class="resource-panel-heading">
         <div class="resource-panel-title"><PanelLeft :size="17" /><div><strong>系统页面结构</strong><span>主区域与菜单页面</span></div></div>
-        <button title="更多操作"><MoreHorizontal :size="17" /></button>
+        <div class="resource-panel-actions">
+          <button @click="app.showToast('新增页面面板已准备就绪')"><Plus :size="15" />新增页面</button>
+          <button title="更多操作"><MoreHorizontal :size="17" /></button>
+        </div>
       </div>
       <div class="resource-tree-search"><Search :size="15" /><input v-model="treeQuery" placeholder="搜索菜单页面" /></div>
       <div class="resource-tree">

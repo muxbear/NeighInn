@@ -157,11 +157,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>社区管理 / 住户认证</p><h1>住户认证审核</h1><span>实名认证与住户认证审核队列；通过后账号与小区强绑定（BR-02）</span></div>
-    <button class="primary-button" @click="load"><ClipboardCheck :size="17" />刷新队列</button>
-  </section>
-
   <section class="summary-row">
     <div><span>待审核</span><strong>{{ summaryData.pending }}</strong><em class="warn">目标 SLA ≤ 24h</em></div>
     <div><span>实名认证待审</span><strong>{{ summaryData.pendingRealname }}</strong><em>独立审核</em></div>
@@ -180,6 +175,7 @@ onMounted(async () => {
         <button @click="cycleTypeFilter">
           <Filter :size="16" />{{ typeFilterLabel }}<ChevronDown :size="14" />
         </button>
+        <button class="primary-button" @click="load"><ClipboardCheck :size="16" />刷新队列</button>
       </div>
     </div>
     <div class="table-wrap">

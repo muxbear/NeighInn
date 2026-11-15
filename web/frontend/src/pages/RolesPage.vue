@@ -165,14 +165,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="page-heading list-heading role-page-heading">
-    <div><p>系统管理 / 角色权限</p><h1>角色权限</h1><span>管理角色成员，并按菜单页面和页面资源精细配置访问权限</span></div>
-    <button class="primary-button" @click="creating = true"><Plus :size="17" />新建角色</button>
-  </section>
-
   <section class="role-permission-workspace">
     <aside class="role-list-panel">
-      <div class="role-list-heading"><div><strong>角色列表</strong><span>{{ roles.length }} 个角色</span></div><button @click="creating = true"><Plus :size="16" /></button></div>
+      <div class="role-list-heading"><div><strong>角色列表</strong><span>{{ roles.length }} 个角色</span></div><button title="新建角色" @click="creating = true"><Plus :size="16" /></button></div>
       <div class="role-search"><Search :size="15" /><input v-model="roleQuery" placeholder="搜索角色名称或编码" /></div>
       <div v-if="creating" class="create-role-form" style="margin: 0 12px 8px; padding: 5px; display: flex; align-items: center; gap: 4px; border: 1px solid #cfc6ec; border-radius: 9px">
         <input v-model="newRoleName" autofocus placeholder="输入角色名称" style="flex: 1; border: 0; font-size: var(--font-size-body)" @keyup.enter="createRole" />

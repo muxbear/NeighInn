@@ -35,14 +35,10 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>系统管理 / 审计日志</p><h1>审计日志</h1><span>查询关键操作的操作人、时间、IP、前后快照与追踪号</span></div>
-    <button class="primary-button" @click="app.showToast('审计日志导出任务已创建')"><FileClock :size="17" />导出日志</button>
-  </section>
   <section class="table-panel">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索操作人、动作或追踪号…" @keyup.enter="load" /></div>
-      <div class="toolbar-actions"><button>近 7 天</button><button><MoreHorizontal :size="17" /></button></div>
+      <div class="toolbar-actions"><button>近 7 天</button><button><MoreHorizontal :size="17" /></button><button class="primary-button" @click="app.showToast('审计日志导出任务已创建')"><FileClock :size="16" />导出日志</button></div>
     </div>
     <div class="table-wrap">
       <table>

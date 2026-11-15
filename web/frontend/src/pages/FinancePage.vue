@@ -75,11 +75,6 @@ watch(() => route.params.tab, load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>资金与治理 / {{ meta.title }}</p><h1>{{ meta.title }}</h1><span>{{ meta.desc }}</span></div>
-    <button class="primary-button" @click="app.showToast(`${meta.action}已开始`)">{{ meta.action }}</button>
-  </section>
-
   <template v-if="tab === 'overview'">
     <section class="metric-grid">
       <div v-for="metric in overviewMetrics" :key="metric.label" class="metric-card">
@@ -112,10 +107,10 @@ watch(() => route.params.tab, load)
     </section>
   </template>
 
-  <section v-if="tab !== 'overview' || rows.length" class="table-panel" style="margin-top: 15px">
+  <section class="table-panel" style="margin-top: 15px">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" :placeholder="`搜索${meta.title}…`" @keyup.enter="load" /></div>
-      <div class="toolbar-actions"><button><Filter :size="16" />筛选<ChevronDown :size="14" /></button><button><MoreHorizontal :size="17" /></button></div>
+      <div class="toolbar-actions"><button><Filter :size="16" />筛选<ChevronDown :size="14" /></button><button><MoreHorizontal :size="17" /></button><button class="primary-button" @click="app.showToast(`${meta.action}已开始`)">{{ meta.action }}</button></div>
     </div>
     <div class="table-wrap">
       <table v-if="tab === 'transactions'">

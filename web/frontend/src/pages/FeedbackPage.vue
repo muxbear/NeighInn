@@ -45,14 +45,10 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>运营管理 / 投诉建议</p><h1>投诉建议</h1><span>受理居民意见，分级流转并跟踪处理满意度</span></div>
-    <button class="primary-button" @click="app.showToast('登记反馈面板已准备就绪')"><MessageCircleMore :size="17" />登记反馈</button>
-  </section>
   <section class="table-panel">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索反馈内容或提交人…" @keyup.enter="load" /></div>
-      <div class="toolbar-actions"><button>全部状态</button><button><MoreHorizontal :size="17" /></button></div>
+      <div class="toolbar-actions"><button>全部状态</button><button><MoreHorizontal :size="17" /></button><button class="primary-button" @click="app.showToast('登记反馈面板已准备就绪')"><MessageCircleMore :size="16" />登记反馈</button></div>
     </div>
     <div class="table-wrap">
       <table>

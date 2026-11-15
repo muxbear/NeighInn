@@ -52,10 +52,6 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>运营管理 / 通知任务</p><h1>通知任务</h1><span>统一管理站内信、短信、Push 和服务通知</span></div>
-    <button class="primary-button" @click="drawerOpen = true"><Plus :size="17" />新建通知</button>
-  </section>
   <section class="summary-row">
     <div><span>全部任务</span><strong>{{ total + 47 }}</strong><em>总量</em></div>
     <div><span>今日发送</span><strong>6</strong><em class="up">较昨日 +12%</em></div>
@@ -65,7 +61,7 @@ onMounted(load)
   <section class="table-panel">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索任务名称、渠道…" @keyup.enter="load" /></div>
-      <div class="toolbar-actions"><button><Filter :size="16" />筛选<ChevronDown :size="14" /></button><button><Settings2 :size="16" />列设置</button><button><MoreHorizontal :size="17" /></button></div>
+      <div class="toolbar-actions"><button><Filter :size="16" />筛选<ChevronDown :size="14" /></button><button><Settings2 :size="16" />列设置</button><button><MoreHorizontal :size="17" /></button><button class="primary-button" @click="drawerOpen = true"><Plus :size="16" />新建通知</button></div>
     </div>
     <div class="table-wrap">
       <table>

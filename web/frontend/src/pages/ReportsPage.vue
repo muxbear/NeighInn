@@ -57,10 +57,6 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>资金与治理 / 举报处理</p><h1>举报处理</h1><span>分类处理物品/用户/会话/留言/私信举报（W05-03）；处置联动下架与账号处罚</span></div>
-    <button class="primary-button" @click="load"><Flag :size="17" />刷新</button>
-  </section>
   <section class="table-panel">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索原因或详情…" @keyup.enter="load" /></div>
@@ -68,6 +64,7 @@ onMounted(load)
         <button @click="statusFilter = 'OPEN'; load()">待处理</button>
         <button @click="statusFilter = ''; load()">全部</button>
         <button><ShieldAlert :size="16" />高风险优先</button>
+        <button class="primary-button" @click="load"><Flag :size="16" />刷新</button>
       </div>
     </div>
     <div class="table-wrap">

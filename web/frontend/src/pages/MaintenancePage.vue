@@ -7,6 +7,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
 import { formatDateTime } from '@/utils/format'
+import { groupProvinces } from '@/utils/region'
 
 const app = useAppStore()
 const regionRoots = ref<any[]>([])
@@ -33,30 +34,6 @@ const STATUS_OPTIONS = [
   { value: 'PREPARING', label: '筹备中' },
   { value: 'SUSPENDED', label: '已停用' },
 ]
-
-const PROVINCE_GROUP_ORDER = ['直辖市', '省份', '自治区']
-const MUNICIPALITIES = ['北京市', '天津市', '上海市', '重庆市']
-const PROVINCE_PINYIN: Record<string, string> = {
-  北京市: 'beijing', 天津市: 'tianjin', 河北省: 'hebei', 山西省: 'shanxi',
-  内蒙古自治区: 'neimenggu', 辽宁省: 'liaoning', 吉林省: 'jilin',
-  黑龙江省: 'heilongjiang', 上海市: 'shanghai', 江苏省: 'jiangsu',
-  浙江省: 'zhejiang', 安徽省: 'anhui', 福建省: 'fujian', 江西省: 'jiangxi',
-  山东省: 'shandong', 河南省: 'henan', 湖北省: 'hubei', 湖南省: 'hunan',
-  广东省: 'guangdong', 广西壮族自治区: 'guangxi', 海南省: 'hainan',
-  重庆市: 'chongqing', 四川省: 'sichuan', 贵州省: 'guizhou', 云南省: 'yunnan',
-  西藏自治区: 'xizang', 陕西省: 'shaanxi', 甘肃省: 'gansu', 青海省: 'qinghai',
-  宁夏回族自治区: 'ningxia', 新疆维吾尔自治区: 'xinjiang',
-}
-
-function provinceCategory(name: string): string {
-  if (MUNICIPALITIES.includes(name)) return '直辖市'
-  if (name.endsWith('自治区')) return '自治区'
-  return '省份'
-}
-
-function provincePinyin(name: string): string {
-  return PROVINCE_PINYIN[name] || name
-}
 
 const formOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
@@ -121,22 +98,7 @@ async function ensureChildren(parent: any): Promise<any[]> {
 }
 
 const provinceNodes = computed(() => regionRoots.value)
-const provinceGroups = computed(() => {
-  const buckets: Record<string, any[]> = { 直辖市: [], 省份: [], 自治区: [] }
-  for (const province of provinceNodes.value) {
-    const category = provinceCategory(province.name)
-    if (!buckets[category]) buckets[category] = []
-    buckets[category].push(province)
-  }
-  return PROVINCE_GROUP_ORDER
-    .map((label) => ({
-      label,
-      provinces: (buckets[label] || [])
-        .slice()
-        .sort((a: any, b: any) => provincePinyin(a.name).localeCompare(provincePinyin(b.name))),
-    }))
-    .filter((group) => group.provinces.length)
-})
+const provinceGroups = computed(() => groupProvinces(regionRoots.value))
 const sortedProvinces = computed(() => provinceGroups.value.flatMap((group) => group.provinces))
 const currentProvince = computed(() =>
   provinceNodes.value.find((region: any) => region.name === selectedProvinceName.value),
@@ -654,14 +616,6 @@ onMounted(loadRegions)
 </script>
 
 <template>
-  <section class="page-heading list-heading community-maintenance-heading">
-    <div><p>社区管理 / 社区运维</p><h1>社区运维</h1><span>按全国行政区划统一维护城市、街道及社区基础信息</span></div>
-    <div class="heading-actions">
-      <button class="secondary-button" @click="openImport"><Upload :size="17" />批量导入</button>
-      <button class="primary-button" @click="openCreate"><Plus :size="17" />新增社区</button>
-    </div>
-  </section>
-
   <section class="community-maintenance-workspace">
     <aside class="geo-tree-panel">
       <div class="geo-panel-heading">

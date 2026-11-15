@@ -52,9 +52,6 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>运营管理 / 用户管理</p><h1>用户管理</h1><span>检索与处置 C 端业主账号；注册与实名认证仅在移动端完成（W07 边界，保证审计链）</span></div>
-  </section>
   <section class="summary-row">
     <div><span>全部用户</span><strong>{{ total + 47 }}</strong><em>总量</em></div>
     <div><span>今日新增</span><strong>6</strong><em class="up">较昨日 +12%</em></div>

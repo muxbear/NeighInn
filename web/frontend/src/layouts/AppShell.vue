@@ -34,7 +34,15 @@ const visibleGroups = computed(() =>
 )
 
 const allItems = computed<NavItem[]>(() => visibleGroups.value.flatMap((group) => group.items))
-const currentTitle = computed(() => allItems.value.find((item) => item.route === route.path)?.label || (route.meta.title as string) || '工作台')
+const currentNav = computed(() => {
+  for (const group of visibleGroups.value) {
+    const item = group.items.find((navItem) => navItem.route === route.path)
+    if (item) return { group: group.label, item }
+  }
+  return null
+})
+const currentGroupLabel = computed(() => currentNav.value?.group || '')
+const currentTitle = computed(() => currentNav.value?.item.label || (route.meta.title as string) || '工作台')
 const filteredCommands = computed(() => {
   const query = commandQuery.value.trim().toLowerCase()
   return allItems.value
@@ -167,8 +175,10 @@ watch(() => route.path, () => {
         <div class="topbar-left">
           <button class="menu-button" @click="app.toggleSidebar(true)"><Menu :size="21" /></button>
           <div class="breadcrumb">
-            <span>邻里小栈</span>
-            <ChevronRight :size="14" />
+            <template v-if="currentGroupLabel">
+              <span>{{ currentGroupLabel }}</span>
+              <ChevronRight :size="14" />
+            </template>
             <strong>{{ currentTitle }}</strong>
           </div>
         </div>

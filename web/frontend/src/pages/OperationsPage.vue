@@ -200,17 +200,6 @@ watch(() => app.currentCommunityId, load)
 </script>
 
 <template>
-  <section class="page-heading list-heading community-operation-heading">
-    <div>
-      <p>社区运营 / {{ config.title }}</p>
-      <h1>{{ config.title }}</h1>
-      <span>{{ config.description }}</span>
-    </div>
-    <button v-if="auth.hasPermission('community:broadcast:create')" class="primary-button" @click="create">
-      <Plus :size="17" />{{ config.create }}
-    </button>
-  </section>
-
   <section :class="['mobile-module-overview', config.tone]">
     <div class="mobile-module-identity">
       <span><component :is="config.icon" :size="21" /></span>
@@ -255,7 +244,7 @@ watch(() => app.currentCommunityId, load)
       <div>
         <button><Filter :size="16" />所属社区<ChevronDown :size="14" /></button>
         <button><SlidersHorizontal :size="16" />高级筛选</button>
-        <button class="primary-button" @click="create"><Plus :size="16" />{{ config.create }}</button>
+        <button v-if="auth.hasPermission('community:broadcast:create')" class="primary-button" @click="create"><Plus :size="16" />{{ config.create }}</button>
       </div>
     </div>
     <div v-if="selectedRows.length" class="batch-bar community-operation-batch">

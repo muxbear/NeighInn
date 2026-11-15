@@ -45,14 +45,10 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>运营管理 / 报事报修</p><h1>报事报修</h1><span>从上报、派单到回访的工单全生命周期管理</span></div>
-    <button class="primary-button" @click="app.showToast('新建工单面板已准备就绪')"><Wrench :size="17" />新建工单</button>
-  </section>
   <section class="table-panel">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索工单编号、事项或位置…" @keyup.enter="load" /></div>
-      <div class="toolbar-actions"><button>全部状态</button><button><MoreHorizontal :size="17" /></button></div>
+      <div class="toolbar-actions"><button>全部状态</button><button><MoreHorizontal :size="17" /></button><button class="primary-button" @click="app.showToast('新建工单面板已准备就绪')"><Wrench :size="16" />新建工单</button></div>
     </div>
     <div class="table-wrap">
       <table>

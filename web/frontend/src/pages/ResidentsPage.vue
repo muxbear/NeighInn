@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { Building2, ChevronDown, Filter, MapPin, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users, Home, X } from 'lucide-vue-next'
-import { residentApi } from '@/api'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Building2, ChevronDown, ChevronRight, Filter, Home, MapPin, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users, X } from 'lucide-vue-next'
+import { communityApi, residentApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
+import { groupProvinces, indexRegions, type RegionEntry, type RegionNode } from '@/utils/region'
 
 const app = useAppStore()
 const auth = useAuthStore()
@@ -16,7 +17,6 @@ const activeTab = ref('全部人员')
 const query = ref('')
 const page = ref(1)
 const total = ref(0)
-const communityOpen = ref(false)
 const drawerOpen = ref(false)
 const editing = ref<any>(null)
 const form = ref<any>({})
@@ -29,6 +29,43 @@ const summaryCards = computed(() => [
   { label: '家属与租户', value: summary.value.family, icon: UserRound, tone: 'green' },
   { label: '待完成认证', value: summary.value.pending, icon: ShieldCheck, tone: 'orange' },
 ])
+
+// 社区选择：与社区运维一致，按“省 → 市 → 区县 → 街道 → 社区”逐级定位。
+const pickerRoot = ref<HTMLElement | null>(null)
+const pickerOpen = ref(false)
+const pickerLoading = ref(false)
+const pickerError = ref('')
+const regionRoots = ref<RegionNode[]>([])
+const regionIndex = ref<Record<string, RegionEntry>>({})
+const pickerProvinceId = ref('')
+const pickerCityId = ref('')
+const pickerDistrictId = ref('')
+const pickerStreetId = ref('')
+const pickerCommunities = ref<any[]>([])
+const pickerCommunitiesLoading = ref(false)
+const pickerSearch = ref('')
+const pickerSearching = ref(false)
+const pickerSearchResults = ref<any[]>([])
+let regionTreePromise: Promise<void> | null = null
+let searchTimer: number | undefined
+let searchRequestId = 0
+let communitiesRequestId = 0
+
+const pickerProvinceGroups = computed(() => groupProvinces(regionRoots.value))
+const pickerProvince = computed(() => regionIndex.value[pickerProvinceId.value]?.node ?? null)
+const pickerCityNodes = computed<RegionNode[]>(() => pickerProvince.value?.children || [])
+const pickerDistrictNodes = computed<RegionNode[]>(() => regionIndex.value[pickerCityId.value]?.node.children || [])
+const pickerStreetNodes = computed<RegionNode[]>(() => regionIndex.value[pickerDistrictId.value]?.node.children || [])
+const pickerPathLabel = computed(() => {
+  const entry = pickerSelectionEntry()
+  if (!entry) return '请选择最末级社区后应用'
+  return [...entry.ancestors.map((node) => node.name), entry.node.name].join(' / ')
+})
+const currentCommunityPath = computed(() => {
+  const row = community.value
+  if (!row) return '按行政区划选择社区'
+  return communityPath(row) || row.address || '按行政区划选择社区'
+})
 
 function levelClass(level: string) {
   return { 普通用户: 'basic', 活跃用户: 'active', 社区达人: 'expert', 重点关怀: 'care' }[level] || 'basic'
@@ -50,11 +87,228 @@ async function load() {
   }
 }
 
-function switchCommunity(id: number) {
-  app.switchCommunity(id)
-  communityOpen.value = false
+function pickerSelectionEntry(): RegionEntry | null {
+  const ids = [pickerStreetId.value, pickerDistrictId.value, pickerCityId.value, pickerProvinceId.value]
+  for (const id of ids) {
+    const entry = id ? regionIndex.value[id] : undefined
+    if (entry) return entry
+  }
+  return null
+}
+
+/** 根据社区档案的区县 / 街道反查完整行政区划路径。 */
+function communityPath(row: any): string {
+  const district = row?.regionId ? regionIndex.value[String(row.regionId)] : undefined
+  if (!district) return row?.address || ''
+  const names = [...district.ancestors.map((node) => node.name), district.node.name]
+  const street = row?.streetId ? regionIndex.value[String(row.streetId)] : undefined
+  if (street && street.parentId === String(district.node.id)) names.push(street.node.name)
+  return names.join(' / ')
+}
+
+function ensureRegionTree(): Promise<void> {
+  if (regionRoots.value.length) return Promise.resolve()
+  if (regionTreePromise) return regionTreePromise
+  pickerLoading.value = true
+  pickerError.value = ''
+  regionTreePromise = communityApi.regionTree()
+    .then((roots) => {
+      regionRoots.value = roots as RegionNode[]
+      regionIndex.value = indexRegions(roots as RegionNode[])
+    })
+    .catch((exc: any) => {
+      pickerError.value = exc?.message || '行政区划加载失败'
+    })
+    .finally(() => {
+      pickerLoading.value = false
+      regionTreePromise = null
+    })
+  return regionTreePromise
+}
+
+function initPickerSelection() {
+  const row = community.value
+  const district = row?.regionId ? regionIndex.value[String(row.regionId)] : undefined
+  if (district && district.node.level === 'DISTRICT') {
+    pickerProvinceId.value = district.ancestors[0] ? String(district.ancestors[0].id) : ''
+    pickerCityId.value = district.ancestors[1] ? String(district.ancestors[1].id) : ''
+    pickerDistrictId.value = String(district.node.id)
+    const street = row?.streetId ? regionIndex.value[String(row.streetId)] : undefined
+    pickerStreetId.value = street && street.parentId === pickerDistrictId.value ? String(street.node.id) : ''
+    loadPickerCommunities()
+    return
+  }
+  // 社区未关联区划或区划未收录时，默认落到第一个省份 / 地市 / 区县，保证列表可用。
+  const firstProvince = pickerProvinceGroups.value[0]?.provinces[0]
+  pickerProvinceId.value = firstProvince ? String(firstProvince.id) : ''
+  const firstCity = firstProvince?.children?.[0]
+  pickerCityId.value = firstCity ? String(firstCity.id) : ''
+  const firstDistrict = firstCity?.children?.[0]
+  pickerDistrictId.value = firstDistrict ? String(firstDistrict.id) : ''
+  pickerStreetId.value = ''
+  if (firstDistrict) loadPickerCommunities()
+}
+
+function syncPickerSelection(row: any) {
+  const district = row?.regionId ? regionIndex.value[String(row.regionId)] : undefined
+  if (!district || district.node.level !== 'DISTRICT') return
+  pickerProvinceId.value = district.ancestors[0] ? String(district.ancestors[0].id) : ''
+  pickerCityId.value = district.ancestors[1] ? String(district.ancestors[1].id) : ''
+  pickerDistrictId.value = String(district.node.id)
+  const street = row?.streetId ? regionIndex.value[String(row.streetId)] : undefined
+  pickerStreetId.value = street && street.parentId === pickerDistrictId.value ? String(street.node.id) : ''
+}
+
+/** 逐级定位时把已选节点滚动到所在列的可见区域。 */
+function revealSelectedRegions() {
+  nextTick(() => {
+    const bodies = pickerRoot.value?.querySelectorAll<HTMLElement>('.community-picker-column-body')
+    bodies?.forEach((body) => {
+      const item = body.querySelector<HTMLElement>('.community-picker-item.selected, .community-picker-community.current')
+      if (!item) return
+      const bodyRect = body.getBoundingClientRect()
+      const itemRect = item.getBoundingClientRect()
+      if (itemRect.top < bodyRect.top) body.scrollTop -= bodyRect.top - itemRect.top
+      else if (itemRect.bottom > bodyRect.bottom) body.scrollTop += itemRect.bottom - bodyRect.bottom
+    })
+  })
+}
+
+async function togglePicker() {
+  if (pickerOpen.value) {
+    closePicker()
+    return
+  }
+  pickerOpen.value = true
+  pickerSearch.value = ''
+  pickerSearchResults.value = []
+  await ensureRegionTree()
+  if (!pickerOpen.value || !regionRoots.value.length) return
+  if (!pickerProvinceId.value) initPickerSelection()
+  revealSelectedRegions()
+}
+
+function closePicker() {
+  if (!pickerOpen.value) return
+  pickerOpen.value = false
+  clearPickerSearch()
+}
+
+async function loadPickerCommunities() {
+  if (!pickerDistrictId.value) {
+    pickerCommunities.value = []
+    return
+  }
+  const requestId = ++communitiesRequestId
+  pickerCommunitiesLoading.value = true
+  try {
+    const params: Record<string, any> = { regionId: pickerDistrictId.value, page: 1, pageSize: 50 }
+    if (pickerStreetId.value) params.streetId = pickerStreetId.value
+    const data = await communityApi.list(params)
+    if (requestId !== communitiesRequestId) return
+    pickerCommunities.value = data.items || []
+    revealSelectedRegions()
+  } catch (exc: any) {
+    if (requestId === communitiesRequestId) {
+      pickerCommunities.value = []
+      app.showToast(exc?.message || '社区列表加载失败')
+    }
+  } finally {
+    if (requestId === communitiesRequestId) pickerCommunitiesLoading.value = false
+  }
+}
+
+function selectPickerProvince(province: RegionNode) {
+  const id = String(province.id)
+  if (id === pickerProvinceId.value) return
+  pickerProvinceId.value = id
+  pickerCityId.value = ''
+  pickerDistrictId.value = ''
+  pickerStreetId.value = ''
+  pickerCommunities.value = []
+}
+
+function selectPickerCity(city: RegionNode) {
+  const id = String(city.id)
+  if (id === pickerCityId.value) return
+  pickerCityId.value = id
+  pickerDistrictId.value = ''
+  pickerStreetId.value = ''
+  pickerCommunities.value = []
+}
+
+function selectPickerDistrict(district: RegionNode) {
+  const id = String(district.id)
+  if (id === pickerDistrictId.value) return
+  pickerDistrictId.value = id
+  pickerStreetId.value = ''
+  loadPickerCommunities()
+}
+
+function selectPickerStreet(streetId: string) {
+  if (streetId === pickerStreetId.value) return
+  pickerStreetId.value = streetId
+  loadPickerCommunities()
+}
+
+function applyCommunity(row: any) {
+  const id = Number(row.id)
+  syncPickerSelection(row)
+  loadPickerCommunities()
+  pickerOpen.value = false
+  clearPickerSearch()
+  // 与社区运维一致：切换社区后重置身份页签与列表搜索。
+  activeTab.value = '全部人员'
+  query.value = ''
   page.value = 1
-  load()
+  if (id !== app.currentCommunityId) app.switchCommunity(id)
+  else load()
+}
+
+function onPickerSearchInput() {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  const keyword = pickerSearch.value.trim()
+  if (!keyword) {
+    searchRequestId += 1
+    pickerSearching.value = false
+    pickerSearchResults.value = []
+    return
+  }
+  pickerSearching.value = true
+  searchTimer = window.setTimeout(() => runPickerSearch(keyword), 250)
+}
+
+async function runPickerSearch(keyword: string) {
+  const requestId = ++searchRequestId
+  try {
+    const results = await communityApi.search(keyword)
+    if (requestId !== searchRequestId) return
+    pickerSearchResults.value = Array.isArray(results) ? results : []
+  } catch (exc: any) {
+    if (requestId === searchRequestId) {
+      pickerSearchResults.value = []
+      app.showToast(exc?.message || '社区搜索失败')
+    }
+  } finally {
+    if (requestId === searchRequestId) pickerSearching.value = false
+  }
+}
+
+function clearPickerSearch() {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  searchRequestId += 1
+  pickerSearch.value = ''
+  pickerSearchResults.value = []
+  pickerSearching.value = false
+}
+
+function onDocumentClick(event: MouseEvent) {
+  if (!pickerOpen.value) return
+  if (pickerRoot.value && !pickerRoot.value.contains(event.target as Node)) closePicker()
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closePicker()
 }
 
 function openCreate() {
@@ -100,30 +354,118 @@ async function remove(row: any) {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  document.addEventListener('click', onDocumentClick)
+  window.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('keydown', onKeydown)
+  if (searchTimer) window.clearTimeout(searchTimer)
+})
+
 watch(() => app.currentCommunityId, () => { page.value = 1; load() })
 </script>
 
 <template>
-  <section class="page-heading list-heading resident-page-heading">
-    <div><p>社区管理 / 社区业主</p><h1>社区业主</h1><span>维护社区业主、家属、租户及商务人员的身份与认证档案</span></div>
-  </section>
-
-  <section class="community-selector-card">
+  <section ref="pickerRoot" class="community-selector-card">
     <div class="community-selector-icon"><Building2 :size="21" /></div>
     <div><span>选择需要管理的社区</span><strong>当前社区人员档案</strong></div>
-    <button :class="['community-selector-trigger', { active: communityOpen }]" @click="communityOpen = !communityOpen">
+    <button :class="['community-selector-trigger', { active: pickerOpen }]" @click="togglePicker">
       <MapPin :size="16" />
-      <span><strong>{{ community?.name || '云栖里社区' }}</strong><em>浙江省 / 杭州市 / 西湖区 / 文新街道</em></span>
+      <span><strong>{{ community?.name || '选择社区' }}</strong><em>{{ currentCommunityPath }}</em></span>
       <ChevronDown :size="15" />
     </button>
-    <div class="community-selector-meta"><span>所在街道</span><strong>文新街道</strong></div>
-    <div class="community-selector-meta"><span>社区编码</span><strong>{{ community?.code || 'SQ3301060012' }}</strong></div>
-    <div v-if="communityOpen" class="notification-popover" style="top: 78px; left: 17px; right: 17px; width: auto; padding: 8px; z-index: 60">
-      <div style="display: flex; justify-content: space-between; padding: 8px 10px; color: #403b47; font-size: var(--font-size-body); font-weight: 600">选择社区<button @click="communityOpen = false"><X :size="16" /></button></div>
-      <button v-for="item in app.communities" :key="item.id" style="width: 100%; padding: 10px; display: flex; justify-content: space-between; border-radius: 8px; text-align: left; font-size: var(--font-size-body)" :style="{ background: Number(item.id) === app.currentCommunityId ? '#f1edfc' : 'transparent' }" @click="switchCommunity(Number(item.id))">
-        <span>{{ item.name }}</span><span style="color: #9995a1">{{ item.code }}</span>
-      </button>
+    <div class="community-selector-meta"><span>社区类型</span><strong>{{ community?.type || '商品房社区' }}</strong></div>
+    <div class="community-selector-meta"><span>社区编码</span><strong>{{ community?.code || '—' }}</strong></div>
+
+    <div v-if="pickerOpen" class="community-picker">
+      <div class="community-picker-head">
+        <div>
+          <strong>选择社区</strong>
+          <span>按行政区划逐级定位，或直接搜索社区</span>
+        </div>
+        <button class="community-picker-close" aria-label="关闭社区选择" @click="closePicker"><X :size="16" /></button>
+      </div>
+
+      <div class="community-picker-search">
+        <Search :size="16" />
+        <input v-model="pickerSearch" placeholder="搜索社区名称、编码或完整地址" @input="onPickerSearchInput" />
+        <button v-if="pickerSearch" class="community-picker-search-clear" aria-label="清空搜索" @click="clearPickerSearch"><X :size="14" /></button>
+      </div>
+
+      <div v-if="pickerSearch.trim()" class="community-picker-results">
+        <div class="community-picker-results-meta">{{ pickerSearching ? '正在搜索…' : `找到 ${pickerSearchResults.length} 个匹配社区` }}</div>
+        <button v-for="row in pickerSearchResults" :key="row.id" :class="['community-picker-result', { current: Number(row.id) === app.currentCommunityId }]" @click="applyCommunity(row)">
+          <span class="community-picker-result-icon"><Home :size="15" /></span>
+          <span class="community-picker-result-main">
+            <strong>{{ row.name }}</strong>
+            <em>{{ communityPath(row) || row.address || '未收录行政区划' }}</em>
+          </span>
+          <code>{{ row.code }}</code>
+          <ChevronRight :size="14" />
+        </button>
+        <div v-if="!pickerSearching && !pickerSearchResults.length" class="community-picker-empty">未找到匹配社区，请调整关键词</div>
+      </div>
+
+      <div v-else class="community-picker-columns">
+        <div class="community-picker-column">
+          <span class="community-picker-column-title">省 / 直辖市 / 自治区</span>
+          <div class="community-picker-column-body">
+            <div v-if="pickerLoading" class="community-picker-hint">正在加载全国行政区划…</div>
+            <div v-else-if="pickerError" class="community-picker-hint">{{ pickerError }}</div>
+            <template v-else>
+              <template v-for="group in pickerProvinceGroups" :key="group.label">
+                <em class="community-picker-group">{{ group.label }}</em>
+                <button v-for="province in group.provinces" :key="province.id" :class="['community-picker-item', { selected: pickerProvinceId === String(province.id) }]" @click="selectPickerProvince(province)">{{ province.name }}</button>
+              </template>
+            </template>
+          </div>
+        </div>
+        <div class="community-picker-column">
+          <span class="community-picker-column-title">地市</span>
+          <div class="community-picker-column-body">
+            <button v-for="city in pickerCityNodes" :key="city.id" :class="['community-picker-item', { selected: pickerCityId === String(city.id) }]" @click="selectPickerCity(city)">{{ city.name }}</button>
+            <div v-if="!pickerCityNodes.length" class="community-picker-hint">{{ pickerProvinceId ? '该省份暂无地市数据' : '请选择省份' }}</div>
+          </div>
+        </div>
+        <div class="community-picker-column">
+          <span class="community-picker-column-title">区县</span>
+          <div class="community-picker-column-body">
+            <button v-for="district in pickerDistrictNodes" :key="district.id" :class="['community-picker-item', { selected: pickerDistrictId === String(district.id) }]" @click="selectPickerDistrict(district)">{{ district.name }}</button>
+            <div v-if="!pickerDistrictNodes.length" class="community-picker-hint">{{ pickerCityId ? '该地市暂无区县数据' : '请选择地市' }}</div>
+          </div>
+        </div>
+        <div class="community-picker-column">
+          <span class="community-picker-column-title">街道</span>
+          <div class="community-picker-column-body">
+            <button :class="['community-picker-item', { selected: !pickerStreetId }]" @click="selectPickerStreet('')">全部街道</button>
+            <button v-for="street in pickerStreetNodes" :key="street.id" :class="['community-picker-item', { selected: pickerStreetId === String(street.id) }]" @click="selectPickerStreet(String(street.id))">{{ street.name }}</button>
+            <div v-if="!pickerDistrictId" class="community-picker-hint">请选择区县</div>
+            <div v-else-if="!pickerStreetNodes.length" class="community-picker-hint">该区县暂无街道数据，可选择全部街道</div>
+          </div>
+        </div>
+        <div class="community-picker-column">
+          <span class="community-picker-column-title">社区</span>
+          <div class="community-picker-column-body">
+            <div v-if="pickerCommunitiesLoading" class="community-picker-hint">正在加载社区…</div>
+            <template v-else>
+              <button v-for="row in pickerCommunities" :key="row.id" :class="['community-picker-community', { current: Number(row.id) === app.currentCommunityId }]" @click="applyCommunity(row)">
+                <span class="community-picker-community-icon"><Home :size="14" /></span>
+                <span class="community-picker-community-main"><strong>{{ row.name }}</strong><em>{{ row.address || row.code }}</em></span>
+              </button>
+              <div v-if="!pickerCommunities.length" class="community-picker-hint">{{ pickerDistrictId ? '该区划暂无社区' : '请选择区县' }}</div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="community-picker-foot">
+        <span>{{ pickerPathLabel }}</span>
+        <button @click="closePicker">取消</button>
+      </div>
     </div>
   </section>
 

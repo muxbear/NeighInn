@@ -101,14 +101,10 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>资金与治理 / 纠纷调解</p><h1>纠纷调解</h1><span>查看双方陈述与证据，出具处理结论，必要时冻结或划扣托管资金</span></div>
-    <button class="primary-button" @click="app.showToast('调解指引已打开')"><Gavel :size="17" />调解指引</button>
-  </section>
   <section class="table-panel">
     <div class="table-toolbar">
       <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索纠纷号、订单号或用户…" @keyup.enter="load" /></div>
-      <div class="toolbar-actions"><button><ShieldAlert :size="16" />高风险优先</button><button><MoreHorizontal :size="17" /></button></div>
+      <div class="toolbar-actions"><button><ShieldAlert :size="16" />高风险优先</button><button><MoreHorizontal :size="17" /></button><button class="primary-button" @click="app.showToast('调解指引已打开')"><Gavel :size="16" />调解指引</button></div>
     </div>
     <div class="table-wrap">
       <table>

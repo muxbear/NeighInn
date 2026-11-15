@@ -58,11 +58,6 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page-heading list-heading">
-    <div><p>运营管理 / 公告管理</p><h1>公告管理</h1><span>编辑、定时发布并置顶社区公告</span></div>
-    <button class="primary-button" @click="drawerOpen = true"><Plus :size="17" />发布公告</button>
-  </section>
-
   <section class="summary-row">
     <div v-for="item in summary" :key="item.label">
       <span>{{ item.label }}</span><strong>{{ item.value }}</strong>
@@ -77,6 +72,7 @@ onMounted(load)
         <button><Filter :size="16" />筛选<ChevronDown :size="14" /></button>
         <button><Settings2 :size="16" />列设置</button>
         <button><MoreHorizontal :size="17" /></button>
+        <button class="primary-button" @click="drawerOpen = true"><Plus :size="16" />发布公告</button>
       </div>
     </div>
     <div class="table-wrap">

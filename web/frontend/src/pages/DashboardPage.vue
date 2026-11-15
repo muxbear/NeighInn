@@ -61,16 +61,6 @@ function openTodo(item: any) {
   }
   router.push(item.route || '/dashboard')
 }
-const todayText = (() => {
-  const now = new Date()
-  const weekday = new Intl.DateTimeFormat('zh-CN', { weekday: 'long' }).format(now)
-  return `${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日 · ${weekday}`
-})()
-const greeting = computed(() => {
-  const hour = new Date().getHours()
-  return hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
-})
-
 async function load() {
   loading.value = true
   try {
@@ -96,16 +86,9 @@ watch(() => app.currentCommunityId, load)
 </script>
 
 <template>
-  <section class="page-heading">
-    <div>
-      <p>{{ todayText }}</p>
-      <h1>{{ greeting }}，{{ '夏木' }}</h1>
-      <span>社区运行平稳，今天有 {{ summary?.metrics?.todos ?? 0 }} 项事务等待处理。</span>
-    </div>
-    <div class="heading-actions">
-      <button class="secondary-button" @click="app.showToast('运营简报已生成')"><FileText :size="17" />生成简报</button>
-      <button class="primary-button" @click="router.push('/communication/notices')"><Plus :size="17" />发布公告</button>
-    </div>
+  <section class="dashboard-toolbar">
+    <button class="secondary-button" @click="app.showToast('运营简报已生成')"><FileText :size="17" />生成简报</button>
+    <button class="primary-button" @click="router.push('/communication/notices')"><Plus :size="17" />发布公告</button>
   </section>
 
   <section class="metric-grid">

@@ -43,9 +43,11 @@ export const dashboardApi = {
 // 区划为低频变更数据：省级节点缓存到 sessionStorage，子级缓存在内存；
 // 后端同时按父节点做 10 分钟进程内缓存，页面按需分级加载。
 const REGION_ROOTS_CACHE_KEY = 'ni_admin_region_roots_v2'
+const REGION_TREE_CACHE_KEY = 'ni_admin_region_tree_v2'
 const REGION_CHILDREN_CACHE_PREFIX = 'ni_admin_region_children_v2_'
 const REGION_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 let regionRootsMemory: any[] | null = null
+let regionTreeMemory: any[] | null = null
 const regionChildrenMemory = new Map<string, any[]>()
 
 function readCachedRegionRoots(): any[] | null {
@@ -66,6 +68,29 @@ function readCachedRegionRoots(): any[] | null {
 function writeCachedRegionRoots(roots: any[]): void {
   try {
     sessionStorage.setItem(REGION_ROOTS_CACHE_KEY, JSON.stringify({ at: Date.now(), roots }))
+  } catch {
+    // sessionStorage 不可用或超出配额时仅使用内存缓存
+  }
+}
+
+function readCachedRegionTree(): any[] | null {
+  try {
+    const raw = sessionStorage.getItem(REGION_TREE_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.at || !Array.isArray(parsed.tree) || Date.now() - parsed.at > REGION_CACHE_TTL_MS) {
+      sessionStorage.removeItem(REGION_TREE_CACHE_KEY)
+      return null
+    }
+    return parsed.tree
+  } catch {
+    return null
+  }
+}
+
+function writeCachedRegionTree(tree: any[]): void {
+  try {
+    sessionStorage.setItem(REGION_TREE_CACHE_KEY, JSON.stringify({ at: Date.now(), tree }))
   } catch {
     // sessionStorage 不可用或超出配额时仅使用内存缓存
   }
@@ -103,7 +128,18 @@ export const communityApi = {
   update: (id: number | string, payload: Dict) => http.put<any, any>(`/communities/${id}`, payload),
   remove: (id: number | string) => http.delete<any, any>(`/communities/${id}`),
   importRows: (payload: Dict) => http.post<any, any>('/communities/import', payload),
-  regionTree: () => http.get<any, any>('/regions/tree'),
+  regionTree: async (): Promise<any[]> => {
+    if (regionTreeMemory) return regionTreeMemory
+    const cached = readCachedRegionTree()
+    if (cached) {
+      regionTreeMemory = cached
+      return cached
+    }
+    const tree = await http.get<any, any>('/regions/tree')
+    regionTreeMemory = tree
+    writeCachedRegionTree(tree)
+    return tree
+  },
   regionRoots: async (): Promise<any[]> => {
     if (regionRootsMemory) return regionRootsMemory
     const cached = readCachedRegionRoots()
@@ -132,9 +168,11 @@ export const communityApi = {
   },
   clearRegionCache: (): void => {
     regionRootsMemory = null
+    regionTreeMemory = null
     regionChildrenMemory.clear()
     try {
       sessionStorage.removeItem(REGION_ROOTS_CACHE_KEY)
+      sessionStorage.removeItem(REGION_TREE_CACHE_KEY)
       const keys: string[] = []
       for (let index = 0; index < sessionStorage.length; index += 1) {
         const key = sessionStorage.key(index)
