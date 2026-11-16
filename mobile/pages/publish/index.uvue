@@ -372,13 +372,15 @@ import { APP_INFO } from '../../config/env'
 
 const appStore = useAppStore()
 const { toast, showToast } = useToast()
-const { prepareVideo } = useUpload()
+const { prepareVideo, uploadOne } = useUpload()
 
 const mode = ref<'item' | 'life'>('item')
 const step = ref(1)
 const stepLabels = ['物品信息', '确认发布', '审核上架']
 const submitting = ref(false)
 const editingId = ref('')
+// 编辑时服务端返回的是可直接展示的签名 URL，提交前需按 URL 还原为对象键，避免把临时 URL 写进媒体表。
+const imageKeyByUrl = ref<Record<string, string>>({})
 
 const EMPTY_DRAFT: ItemDraft = {
   images: [],
@@ -426,7 +428,15 @@ onLoad(async (options: any) => {
 async function loadItemForEdit(id: string): Promise<void> {
   try {
     const item = await itemService.getDetail(id)
-    draft.images = item.images && item.images.length ? item.images : item.image ? [item.image] : []
+    const urls = item.images && item.images.length ? item.images : item.image ? [item.image] : []
+    const keys = item.imageKeys && item.imageKeys.length ? item.imageKeys : urls
+    const keyByUrl: Record<string, string> = {}
+    urls.forEach((url, index) => {
+      const key = keys[index]
+      if (key) keyByUrl[url] = key
+    })
+    imageKeyByUrl.value = keyByUrl
+    draft.images = urls
     draft.title = item.title
     draft.tradeType = item.type
     draft.price = Number(item.price) > 0 ? String(item.price) : ''
@@ -561,6 +571,24 @@ function goNext(): void {
   step.value = 2
 }
 
+/**
+ * 端侧照片 → 媒体对象键：
+ * - 编辑时已存在的照片按原始对象键回传，避免把会过期的签名 URL 写回服务端；
+ * - 新增照片先上传到对象存储，再提交对象键。
+ */
+async function resolveImageKeys(): Promise<string[]> {
+  const keys: string[] = []
+  for (const image of draft.images) {
+    const existing = imageKeyByUrl.value[image]
+    if (existing) {
+      keys.push(existing)
+      continue
+    }
+    keys.push(await uploadOne(image, 'ITEM_IMAGE'))
+  }
+  return keys
+}
+
 async function submitItem(): Promise<void> {
   if (submitting.value) return
   const validation = validateItemDraft({ ...draft })
@@ -573,12 +601,13 @@ async function submitItem(): Promise<void> {
   }
   submitting.value = true
   try {
+    const payload = { ...draft, images: await resolveImageKeys() }
     let targetId = editingId.value
     if (editingId.value) {
-      await itemService.update(editingId.value, { ...draft })
+      await itemService.update(editingId.value, payload)
       await itemService.submit(editingId.value)
     } else {
-      const created = await itemService.publish({ ...draft })
+      const created = await itemService.publish(payload)
       targetId = created.id
       removeStorage(STORAGE_KEYS.draftItem)
     }

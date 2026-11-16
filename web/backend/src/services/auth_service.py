@@ -470,7 +470,9 @@ async def serialize_profile(db: AsyncSession, user: User) -> dict:
         "realnameStatus": auth["realname"]["status"],
         "ownerStatus": auth["owner"]["status"],
         "creditScore": user.credit_score,
-        "creditLevel": user.credit_level,
+        # 等级由分数实时推导，避免 users.credit_level 未随信用流水刷新导致端侧展示不一致。
+        "creditLevel": ("极好" if user.credit_score >= 90 else "良好" if user.credit_score >= 70
+                        else "一般" if user.credit_score >= 50 else "待提升"),
         "dealCount": 0,
         "communityName": community_name,
         "joinedDays": joined_days,

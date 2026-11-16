@@ -21,6 +21,7 @@ from src.core.responses import (
     ERR_PARAM,
     ApiError,
 )
+from src.core.storage import presign_download
 from src.db.models import (
     Community,
     Favorite,
@@ -37,6 +38,21 @@ from src.domain import enums as E
 from src.services.auth_service import bound_resident
 
 TRADE_LABEL = {E.TradeType.MONETARY: "出售", E.TradeType.FREE_GIFT: "免费", E.TradeType.BARTER: "互换"}
+# 公开物品图片签名 URL 有效期：覆盖列表缓存周期即可，避免端侧出现长期可直接访问的地址。
+PUBLIC_MEDIA_URL_TTL_MINUTES = 60 * 24 * 7
+
+
+def _public_media_url(object_key: str) -> str:
+    """对象键 → 端侧可直接加载的公开签名 URL；已经是 URL 的旧数据原样返回。"""
+    if not object_key:
+        return ""
+    if object_key.startswith(("http://", "https://", "data:", "blob:")):
+        return object_key
+    return presign_download(
+        object_key, settings.minio_bucket_public, minutes=PUBLIC_MEDIA_URL_TTL_MINUTES
+    ) or ""
+
+
 ZONE_TRADE = {"sale": E.TradeType.MONETARY, "gift": E.TradeType.FREE_GIFT, "swap": E.TradeType.BARTER}
 
 
@@ -197,7 +213,8 @@ async def serialize_item(
 ) -> dict:
     """移动端 Item（mobile/models/item.model.ts）。含距离与步行耗时（SRS 8.2）。"""
     media = await media_of(db, item.id)
-    images = [m.object_key for m in media if m.media_type == "IMAGE"]
+    image_keys = [m.object_key for m in media if m.media_type == "IMAGE"]
+    images = [_public_media_url(key) for key in image_keys]
     community = await db.get(Community, item.community_id)
 
     km = None
@@ -232,6 +249,7 @@ async def serialize_item(
         "time": _time_ago(item.published_at or item.created_at),
         "image": images[0] if images else "",
         "images": images,
+        "imageKeys": image_keys,
         "community": community.name if community else "",
         "barterExpect": item.barter_expect,
         "description": item.quality_desc or item.description,

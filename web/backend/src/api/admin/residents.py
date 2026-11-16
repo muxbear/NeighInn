@@ -168,12 +168,15 @@ async def _cert_detail(db: DbSession, cert: Certification) -> dict:
 
 async def _resident_row(db: DbSession, resident: Resident) -> dict:
     community = await db.get(Community, resident.community_id)
+    user = await db.get(User, resident.user_id) if resident.user_id else None
     return {
         "id": str(resident.id),
         "communityId": str(resident.community_id),
         "communityName": community.name if community else "",
         "userId": str(resident.user_id) if resident.user_id else "",
         "name": resident.name,
+        # 档案姓名来自住户认证/后台维护；nickname 为 App 展示昵称，二者分开返回便于前台核对。
+        "nickname": user.nickname if user else "",
         "gender": resident.gender,
         "phone": mask_phone(decrypt_field(resident.phone_enc)),
         "identity": resident.identity_type,
@@ -206,9 +209,12 @@ async def list_residents(
     if certification:
         stmt = stmt.where(Resident.certification_status == certification)
     if keyword:
-        stmt = stmt.where(or_(Resident.name.ilike(f"%{keyword}%"),
-                              Resident.building.ilike(f"%{keyword}%"),
-                              Resident.certification_no.ilike(f"%{keyword}%")))
+        stmt = stmt.outerjoin(User, Resident.user_id == User.id).where(or_(
+            Resident.name.ilike(f"%{keyword}%"),
+            User.nickname.ilike(f"%{keyword}%"),
+            Resident.building.ilike(f"%{keyword}%"),
+            Resident.certification_no.ilike(f"%{keyword}%"),
+        ))
     rows, total = await paginate(db, stmt.order_by(Resident.id.desc()), page, pageSize)
     return paginated([await _resident_row(db, row) for row in rows], page, pageSize, total)
 

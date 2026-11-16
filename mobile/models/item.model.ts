@@ -3,7 +3,18 @@ import type { PageQuery } from './common.model'
 export type TradeType = '出售' | '免费' | '互换'
 export type TradeTypeCode = 'MONETARY' | 'FREE_GIFT' | 'BARTER'
 export type ZoneKey = 'gift' | 'swap' | 'sale' | 'service'
-export type ItemStatus = 'DRAFT' | 'AUDITING' | 'ON_SALE' | 'RESERVED' | 'OFF_SHELF' | 'REJECTED' | 'SOLD'
+export type ItemStatus =
+  | 'DRAFT'
+  | 'AUDITING'
+  | 'AI_REJECTED'
+  | 'PENDING_REVIEW'
+  | 'REJECTED'
+  | 'ON_SALE'
+  | 'RESERVED'
+  | 'SOLD'
+  | 'GIFTED'
+  | 'OFF_SHELF'
+  | 'EXPIRED'
 
 export interface SellerSummary {
   id: string
@@ -30,6 +41,8 @@ export interface Item {
   time: string
   image: string
   images?: string[]
+  /** 图片对象键（用于编辑回传；images 为端侧可直接展示的签名 URL）。 */
+  imageKeys?: string[]
   community?: string
   gallery?: string[]
   barterExpect?: string

@@ -3,6 +3,7 @@
 import pytest
 from sqlalchemy import select
 
+from src.core.config import settings
 from src.db.models import FileObject
 from tests.conftest import C_BASE, bearer, register_user
 
@@ -33,7 +34,7 @@ async def test_upload_private_material_records_file_object(client, db_session, m
     data = resp.json()["data"]
     assert data["objectKey"].startswith("certifications/realname_id/")
     assert data["visibility"] == "private"
-    assert fake.calls and fake.calls[0][0] == "ni-private"
+    assert fake.calls and fake.calls[0][0] == settings.minio_bucket_private
 
     record = await db_session.scalar(
         select(FileObject).where(FileObject.object_key == data["objectKey"]))

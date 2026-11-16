@@ -36,31 +36,12 @@
             </view>
           </view>
           <text class="profile__user-meta">{{ communityName }} · 加入 {{ userStore.profile?.joinedDays || 0 }} 天</text>
-          <text class="profile__credit">{{ userStore.profile?.creditLevel || '信用良好' }} · {{ userStore.profile?.creditScore || 0 }} 分</text>
+          <view class="profile__credit-row" @click.stop="goCredit">
+            <text class="profile__credit">{{ creditLevel }} · {{ creditScore }} 分</text>
+            <ni-icon name="chevron" :size="9" state="tertiary" />
+          </view>
         </view>
         <ni-icon name="chevron" :size="17" state="tertiary" />
-      </view>
-
-      <view class="profile__stats">
-        <view class="profile__stat">
-          <text class="profile__stat-value">{{ stats.publishCount }}</text>
-          <text class="profile__stat-label">闲置发布</text>
-        </view>
-        <view class="profile__stat-divider" />
-        <view class="profile__stat">
-          <text class="profile__stat-value">{{ stats.lifeCount }}</text>
-          <text class="profile__stat-label">生活动态</text>
-        </view>
-        <view class="profile__stat-divider" />
-        <view class="profile__stat">
-          <text class="profile__stat-value">{{ stats.serviceCount }}</text>
-          <text class="profile__stat-label">互助服务</text>
-        </view>
-        <view class="profile__stat-divider" />
-        <view class="profile__stat">
-          <text class="profile__stat-value">{{ stats.creditScore }}</text>
-          <text class="profile__stat-label">信用分</text>
-        </view>
       </view>
     </view>
 
@@ -102,13 +83,6 @@
         </view>
       </view>
 
-      <credit-banner
-        :score="stats.creditScore"
-        :level="credit?.level || '信用极好'"
-        :desc="credit?.nextLevel || '完成交易、按时赴约、收到好评都能提升信用分'"
-        @detail="goCredit"
-      />
-
       <view class="profile__orders">
         <view class="profile__orders-head">
           <text class="profile__orders-title">我的订单</text>
@@ -142,7 +116,9 @@
         </view>
       </view>
 
-      <wallet-card :balance="wallet.balance" :escrow="wallet.escrow" @open="goWallet" />
+      <view class="profile__wallet">
+        <wallet-card :balance="wallet.balance" :escrow="wallet.escrow" @open="goWallet" />
+      </view>
 
       <view class="profile__menu">
         <view class="profile__menu-row" @click="goAuth">
@@ -239,6 +215,12 @@ const wallet = ref<WalletSummary>({ balance: 0, escrow: 0, withdrawable: 0 })
 
 const displayName = computed(() => userStore.profile?.nickname || '温暖的邻居')
 const communityName = computed(() => communityStore.current?.name || userStore.profile?.communityName || '阳光花园小区')
+const creditScore = computed(() => credit.value?.score ?? userStore.profile?.creditScore ?? stats.value.creditScore)
+const creditLevel = computed(() => {
+  if (credit.value?.level) return credit.value.level
+  const score = creditScore.value
+  return score >= 90 ? '极好' : score >= 70 ? '良好' : score >= 50 ? '一般' : '待提升'
+})
 const certificationMenuDesc = computed(() => {
   if (userStore.isRealnameVerified && userStore.isVerifiedOwner) return '实名与住户认证均已完成'
   if (userStore.isVerifiedOwner) return '住户认证已完成 · 实名待完成'
@@ -352,7 +334,7 @@ function goHelp(): void {
   background-color: $ni-color-page;
 }
 .profile__hero {
-  min-height: 260px;
+  min-height: 200px;
   padding: 17px 17px 22px;
   background-image: $ni-gradient-profile;
   position: relative;
@@ -452,34 +434,15 @@ function goHelp(): void {
   font-size: $ni-font-9;
   color: $ni-color-text-tertiary;
 }
-.profile__credit {
+.profile__credit-row {
   margin-top: 3px;
-  font-size: $ni-font-9;
-  color: $ni-color-credit-deep;
-}
-.profile__stats {
-  margin-top: 25px;
   flex-direction: row;
   align-items: center;
 }
-.profile__stat {
-  flex: 1;
-  align-items: center;
-}
-.profile__stat-value {
-  font-size: $ni-font-18;
-  font-weight: 700;
-  color: $ni-color-text-primary;
-}
-.profile__stat-label {
-  margin-top: 2px;
+.profile__credit {
   font-size: $ni-font-9;
-  color: $ni-color-text-tertiary;
-}
-.profile__stat-divider {
-  width: 1px;
-  height: 24px;
-  background-color: rgba(120, 95, 75, 0.12);
+  color: $ni-color-credit-deep;
+  margin-right: 1px;
 }
 .profile__body {
   padding: 0 14px 10px;
@@ -551,6 +514,9 @@ function goHelp(): void {
   border-radius: $ni-radius-16;
   background-color: $ni-color-white;
   box-shadow: $ni-shadow-card;
+}
+.profile__wallet {
+  margin-top: 11px;
 }
 .profile__orders-head {
   flex-direction: row;

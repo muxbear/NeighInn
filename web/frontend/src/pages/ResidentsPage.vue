@@ -488,7 +488,7 @@ watch(() => app.currentCommunityId, () => { page.value = 1; load() })
       </button>
     </div>
     <div class="resident-toolbar">
-      <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索姓名、手机号、房屋或认证编号…" @keyup.enter="load" /></div>
+      <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索姓名、昵称、房屋或认证编号…" @keyup.enter="load" /></div>
       <div>
         <button><Filter :size="16" />认证状态<ChevronDown :size="14" /></button>
         <button><Settings2 :size="16" />列设置</button>
@@ -500,7 +500,7 @@ watch(() => app.currentCommunityId, () => { page.value = 1; load() })
         <thead><tr><th>人员基本信息</th><th>身份类型</th><th>房屋 / 商铺</th><th>认证信息</th><th>用户级别</th><th>账号状态</th><th>加入时间</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="row in rows" :key="row.id">
-            <td><div class="resident-person-cell"><span>{{ row.name.charAt(0) }}</span><div><strong>{{ row.name }}</strong><em>{{ row.gender }} · {{ row.phone }}</em></div></div></td>
+            <td><div class="resident-person-cell"><span>{{ row.name.charAt(0) }}</span><div><strong>{{ row.name }}</strong><em>昵称：{{ row.nickname || '—' }}</em><em>{{ row.gender ? `${row.gender} · ${row.phone}` : row.phone }}</em></div></div></td>
             <td><span :class="['identity-tag', row.identity]">{{ row.identity }}</span></td>
             <td><div class="resident-house-cell"><strong>{{ row.building }}</strong><span>{{ row.relationship }}</span></div></td>
             <td><div class="resident-certification"><StatusBadge :value="row.certification" /><code>{{ row.certificationNo || '—' }}</code></div></td>

@@ -39,11 +39,22 @@
       <view v-else>
         <view v-for="item in filtered" :key="item.id" class="manage__item">
           <view class="manage__item-top" @click="goDetail(item.id)">
-            <image class="manage__item-image" :src="item.image" mode="aspectFill" />
+            <view class="manage__item-image-wrap">
+              <image
+                v-if="item.image && !failedImages[item.id]"
+                class="manage__item-image"
+                :src="item.image"
+                mode="aspectFill"
+                @error="onImageError(item.id)"
+              />
+              <view v-else class="manage__item-image manage__item-image--empty">
+                <ni-icon name="image" :size="20" state="tertiary" />
+              </view>
+            </view>
             <view class="manage__item-copy">
               <text class="manage__item-title" :lines="2">{{ item.title }}</text>
               <view class="manage__item-meta">
-                <ni-tag :type="statusTagType(item.status)" size="xs">{{ statusText(item.status) }}</ni-tag>
+                <ni-tag :type="statusTagType(item.status)" size="sm">{{ statusText(item.status) }}</ni-tag>
                 <text class="manage__item-condition">{{ item.condition }} · {{ item.category }}</text>
               </view>
               <view class="manage__item-price-row">
@@ -55,16 +66,16 @@
           </view>
 
           <view class="manage__actions">
-            <view class="manage__action" @click="editItem(item)">
+            <view v-if="canEdit(item.status)" class="manage__action" @click="editItem(item)">
               <text class="manage__action-text">编辑</text>
             </view>
             <view v-if="item.status === 'ON_SALE'" class="manage__action" @click="offShelf(item)">
               <text class="manage__action-text">下架</text>
             </view>
-            <view v-if="item.status === 'ON_SALE' || item.status === 'AUDITING'" class="manage__action" @click="renew(item)">
+            <view v-if="item.status === 'ON_SALE' || item.status === 'EXPIRED'" class="manage__action" @click="renew(item)">
               <text class="manage__action-text">续期</text>
             </view>
-            <view class="manage__action manage__action--danger" @click="remove(item)">
+            <view v-if="canDelete(item.status)" class="manage__action manage__action--danger" @click="remove(item)">
               <text class="manage__action-text manage__action-text--danger">删除</text>
             </view>
           </view>
@@ -90,38 +101,79 @@ const tabs = [
   { key: 'ALL', label: '全部' },
   { key: 'ON_SALE', label: '在售' },
   { key: 'AUDITING', label: '审核中' },
+  { key: 'REJECTED', label: '未通过' },
   { key: 'OFF_SHELF', label: '已下架' },
 ]
+// 每个物品必须且只归入一个筛选组，避免筛选后的数字相加小于“全部”。
+const TAB_STATUSES: Record<string, ItemStatus[]> = {
+  ON_SALE: ['ON_SALE', 'RESERVED'],
+  AUDITING: ['DRAFT', 'AUDITING', 'PENDING_REVIEW'],
+  REJECTED: ['AI_REJECTED', 'REJECTED'],
+  OFF_SHELF: ['OFF_SHELF', 'EXPIRED', 'SOLD', 'GIFTED'],
+}
 const activeTab = ref('ALL')
+const failedImages = ref<Record<string, boolean>>({})
 
 const filtered = computed(() => {
   if (activeTab.value === 'ALL') return itemStore.myItems
-  return itemStore.myItems.filter((item) => item.status === activeTab.value)
+  return itemStore.myItems.filter((item) => tabKeyOf(item.status) === activeTab.value)
 })
 
 onShow(() => {
+  failedImages.value = {}
   itemStore.fetchMyItems().catch(() => undefined)
 })
 
+function tabKeyOf(status?: ItemStatus): string {
+  if (!status) return 'OFF_SHELF'
+  for (const key of Object.keys(TAB_STATUSES)) {
+    if (TAB_STATUSES[key].includes(status)) return key
+  }
+  return 'OFF_SHELF'
+}
+
 function countOf(key: string): number {
   if (key === 'ALL') return itemStore.myItems.length
-  return itemStore.myItems.filter((item) => item.status === key).length
+  return itemStore.myItems.filter((item) => tabKeyOf(item.status) === key).length
+}
+
+function onImageError(id: string): void {
+  failedImages.value = { ...failedImages.value, [id]: true }
+}
+
+const STATUS_TEXT: Record<ItemStatus, string> = {
+  DRAFT: '草稿',
+  AUDITING: '质检中',
+  AI_REJECTED: '质检驳回',
+  PENDING_REVIEW: '待审核',
+  REJECTED: '已驳回',
+  ON_SALE: '在售',
+  RESERVED: '已预约',
+  SOLD: '已售出',
+  GIFTED: '已赠出',
+  OFF_SHELF: '已下架',
+  EXPIRED: '已过期',
 }
 
 function statusText(status?: ItemStatus): string {
-  if (status === 'AUDITING') return '审核中'
-  if (status === 'OFF_SHELF') return '已下架'
-  if (status === 'RESERVED') return '已被预约'
-  if (status === 'SOLD') return '已售出'
-  if (status === 'REJECTED') return '已驳回'
-  return '在售'
+  return status ? STATUS_TEXT[status] ?? '未知状态' : '未知状态'
 }
 
 function statusTagType(status?: ItemStatus): string {
-  if (status === 'AUDITING') return 'condition'
-  if (status === 'OFF_SHELF' || status === 'REJECTED') return 'neutral'
-  if (status === 'SOLD') return 'verified'
-  return 'gift'
+  if (status === 'ON_SALE') return 'sale'
+  if (status === 'RESERVED') return 'swap'
+  if (status === 'DRAFT' || status === 'AUDITING' || status === 'PENDING_REVIEW') return 'ai'
+  if (status === 'SOLD' || status === 'GIFTED') return 'verified'
+  return 'neutral'
+}
+
+// 与服务端编辑/删除守卫保持一致，避免按钮点进去才报“当前状态不可编辑”。
+function canEdit(status?: ItemStatus): boolean {
+  return status === 'DRAFT' || status === 'AI_REJECTED' || status === 'REJECTED'
+}
+
+function canDelete(status?: ItemStatus): boolean {
+  return status !== 'ON_SALE' && status !== 'RESERVED'
 }
 
 function goBack(): void {
@@ -279,10 +331,20 @@ function remove(item: Item): void {
   flex-direction: row;
   align-items: flex-start;
 }
-.manage__item-image {
+.manage__item-image-wrap {
   width: 72px;
   height: 72px;
   border-radius: 12px;
+  overflow: hidden;
+  background-color: #f3ede7;
+}
+.manage__item-image {
+  width: 72px;
+  height: 72px;
+}
+.manage__item-image--empty {
+  align-items: center;
+  justify-content: center;
   background-color: #f3ede7;
 }
 .manage__item-copy {
