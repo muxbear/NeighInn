@@ -120,6 +120,7 @@ export function normalizeOperationRow(module: string, row: any): any {
     owner: row.owner ?? row.seller ?? row.author ?? row.requester ?? '—',
     performance: row.performance
       ?? (stats.views !== undefined ? `${stats.views} 浏览 · ${stats.likes ?? 0} 赞` : '—'),
+    statusCode: row.status,
     status: mapStatus(row.status),
     updatedAt: fmtRelative(row.updatedAt ?? row.createdAt),
   }

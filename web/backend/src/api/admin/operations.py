@@ -23,6 +23,7 @@ from src.db.models import Community, Item, ItemAudit, ItemCategory, ItemMedia, U
 from src.db.models.common import utcnow
 from src.domain import enums as E
 from src.domain.state import item_sm
+from src.services.item_service import _public_media_url
 from src.services.notify_service import notify_user
 
 router = APIRouter(tags=["admin:operations"])
@@ -137,7 +138,8 @@ async def item_detail(item_id: int, admin: CurrentAdmin, db: DbSession):
         select(ItemMedia).where(ItemMedia.item_id == item.id)
         .order_by(ItemMedia.sort, ItemMedia.id))).scalars().all())
     row["media"] = [
-        {"objectKey": m.object_key, "mediaType": m.media_type, "sort": m.sort} for m in media
+        {"objectKey": m.object_key, "mediaType": m.media_type, "sort": m.sort,
+         "url": _public_media_url(m.object_key)} for m in media
     ]
     audits = list((await db.execute(
         select(ItemAudit).where(ItemAudit.item_id == item.id)

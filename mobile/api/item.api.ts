@@ -22,7 +22,20 @@ export function getHomeBundle(): Promise<HomeBundle> {
 }
 
 export function getItems(query: ItemQuery = {}): Promise<PageResult<Item>> {
-  return get<PageResult<Item>>(withQuery('/items', query))
+  return get<PageResult<Item>>(withQuery('/items', normalizeItemQuery(query)))
+}
+
+/**
+ * UI 哨兵值不能直接作为服务端筛选条件：
+ * - 类目「全部」表示不筛选；直接下发会被当成真实类目名，导致专属区列表恒为空；
+ * - 排序仅「价格从低到高」有服务端语义，其余中文排序标签走默认排序。
+ */
+function normalizeItemQuery(query: ItemQuery): Record<string, any> {
+  const next: Record<string, any> = { ...query }
+  if (next.category === '全部') delete next.category
+  if (next.sort === '价格从低到高') next.sort = 'price'
+  else if (next.sort !== 'price') delete next.sort
+  return next
 }
 
 export function getMyItems(page = 1, pageSize = 20): Promise<PageResult<Item>> {

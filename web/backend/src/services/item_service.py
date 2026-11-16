@@ -158,6 +158,9 @@ def validate_draft(db_categories: set[str], payload) -> None:
             f"照片需 {settings.min_item_images}–{settings.max_item_images} 张（含整体、细节、缺陷处，BR-05）",
             400,
         )
+    # blob:/file: 是端侧临时预览地址，刷新或换设备后立即失效；必须等上传完成拿对象键再提交。
+    if any(str(key).startswith(("blob:", "file:")) for key in payload.images):
+        raise ApiError(ERR_PARAM, "照片尚未上传完成，请重新选择照片并等待上传后再提交", 400)
 
 
 async def category_names(db: AsyncSession) -> set[str]:
@@ -277,14 +280,19 @@ async def _category_name(db: AsyncSession, category_id: int | None) -> str:
 
 
 def build_list_query(viewer_resident_community_id: int | None, query) -> list:
-    """列表筛选条件（M02：本小区 / 附近 / 专属区 / 类目 / 关键词 / 排序）。"""
+    """列表筛选条件（M02：本小区 / 附近 / 专属区 / 类目 / 关键词 / 排序）。
+
+    客户端把「全部」作为类目 Tab 的哨兵值时表示不筛选；兼容历史版本：
+    直接忽略该值，避免被当成真实类目名导致列表恒为空。
+    """
     conditions = [Item.status == E.ItemStatus.ON_SALE]
     if query.zone and query.zone in ZONE_TRADE:
         conditions.append(Item.trade_type == ZONE_TRADE[query.zone])
     if query.type and query.type in E.TradeType.ALL:
         conditions.append(Item.trade_type == query.type)
-    if query.category:
-        conditions.append(ItemCategory.name == query.category)
+    category = (query.category or "").strip()
+    if category and category not in ("全部", "all", "ALL"):
+        conditions.append(ItemCategory.name == category)
     if query.communityId:
         conditions.append(Item.community_id == query.communityId)
     elif not query.near and viewer_resident_community_id:

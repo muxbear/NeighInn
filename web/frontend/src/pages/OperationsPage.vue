@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Coffee, EyeOff, HandHeart, Megaphone, Pencil, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
+import { Coffee, EyeOff, HandHeart, Megaphone, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
 import { operationsApi } from '@/api'
+import { mapTradeType } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -75,21 +76,60 @@ const configs: Record<string, any> = {
   },
 }
 
+/**
+ * 页面 Tab 是中文标签，服务端状态机使用英文编码。
+ * 过滤条件必须下发编码，否则「待审核」等 Tab 永远查不到数据。
+ */
+const TAB_STATUS: Record<string, Record<string, string>> = {
+  broadcast: { 已发布: 'PUBLISHED', 待审核: 'PENDING_REVIEW', 定时发布: 'SCHEDULED', 已下架: 'OFFLINE' },
+  life: { 已发布: 'PUBLISHED', 草稿: 'DRAFT', 待审核: 'PENDING_REVIEW', 已下线: 'OFFLINE' },
+  help: { 待响应: 'OPEN', 匹配中: 'MATCHING', 进行中: 'IN_PROGRESS', 已完成: 'COMPLETED' },
+  items: { 在售: 'ON_SALE', 待审核: 'PENDING_REVIEW', 已售出: 'SOLD', 已下架: 'OFF_SHELF' },
+}
+
+const ITEM_OFFLINE_BLOCKED = ['SOLD', 'GIFTED', 'OFF_SHELF']
+const HELP_TERMINAL = ['COMPLETED', 'CLOSED']
+
 const module = computed(() => String(route.params.module || 'broadcast'))
 const config = computed(() => configs[module.value] || configs.broadcast)
 const tabs = computed(() => config.value.tabs)
 const filteredRows = computed(() => rows.value)
+const canCreate = computed(() => module.value === 'broadcast' && auth.hasPermission('community:broadcast:create'))
 
-function statusCount(tab: string) {
-  if (tab === '全部') return rows.value.length
-  return rows.value.filter((row) => row.status === tab).length
+const reviewOpen = ref(false)
+const reviewTarget = ref<any>(null)
+const reviewDetail = ref<any>(null)
+const reviewAudit = ref<any>(null)
+const reviewLoading = ref(false)
+const reviewSubmitting = ref(false)
+const reviewForm = ref({ decision: 'APPROVE', reason: '', recommend: false })
+const reviewDecisions = [
+  { value: 'APPROVE', label: '通过并上架' },
+  { value: 'REJECT', label: '驳回修改' },
+  { value: 'DOWNGRADE', label: '降级上架' },
+]
+
+function tabStatusCode(tab: string): string {
+  if (tab === '全部') return ''
+  return TAB_STATUS[module.value]?.[tab] ?? tab
+}
+
+function statusCount(tab: string): number | string {
+  if (tab === '全部') return activeTab.value === '全部' ? total.value : ''
+  if (activeTab.value === '全部') {
+    const code = tabStatusCode(tab)
+    return rows.value.filter((row) => row.statusCode === code).length
+  }
+  // 服务端已按当前 Tab 过滤，其他 Tab 的计数需要额外查询，不在本页猜测。
+  return tab === activeTab.value ? total.value : ''
 }
 
 async function load() {
   loading.value = true
   try {
     const params: any = { communityId: app.currentCommunityId, page: page.value, pageSize }
-    if (activeTab.value !== '全部') params.status = activeTab.value
+    const status = tabStatusCode(activeTab.value)
+    if (status) params.status = status
     if (query.value) params.keyword = query.value
     const data = await operationsApi.list(config.value.api, params)
     rows.value = data.items || []
@@ -136,6 +176,10 @@ async function save() {
 }
 
 async function review(row: any) {
+  if (module.value === 'items') {
+    await openReview(row)
+    return
+  }
   try {
     if (module.value === 'help') {
       await operationsApi.matchHelp(row.id)
@@ -146,6 +190,53 @@ async function review(row: any) {
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '操作失败')
+  }
+}
+
+/** 物品复核：打开详情抽屉，带 AI 质检报告与通过/驳回/降级结论。 */
+async function openReview(row: any) {
+  reviewTarget.value = row
+  reviewDetail.value = null
+  reviewAudit.value = null
+  reviewForm.value = { decision: 'APPROVE', reason: '', recommend: false }
+  reviewOpen.value = true
+  reviewLoading.value = true
+  try {
+    const [detail, audit] = await Promise.all([
+      operationsApi.itemDetail(row.id),
+      operationsApi.itemAudit(row.id).catch(() => null),
+    ])
+    reviewDetail.value = detail
+    reviewAudit.value = audit
+  } catch (exc: any) {
+    app.showToast(exc?.message || '物品详情加载失败')
+  } finally {
+    reviewLoading.value = false
+  }
+}
+
+async function submitReview() {
+  const target = reviewTarget.value
+  if (!target || reviewSubmitting.value) return
+  const { decision, reason, recommend } = reviewForm.value
+  if (decision === 'REJECT' && reason.trim().length < 5) {
+    app.showToast('驳回原因至少 5 个字（将通知卖家）')
+    return
+  }
+  reviewSubmitting.value = true
+  try {
+    await operationsApi.review('items', target.id, {
+      decision,
+      reason: reason.trim(),
+      recommend: decision === 'APPROVE' ? recommend : false,
+    })
+    reviewOpen.value = false
+    app.showToast(decision === 'REJECT' ? '已驳回并通知卖家' : '复核完成，物品已上架')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '复核失败')
+  } finally {
+    reviewSubmitting.value = false
   }
 }
 
@@ -174,14 +265,28 @@ function toggleRow(id: string) {
     : [...selectedRows.value, id]
 }
 
+/** 主操作只在服务端状态机允许的源状态下展示，避免点击后 40904。 */
+function canPrimaryAction(row: any): boolean {
+  if (module.value === 'help') return ['OPEN', 'MATCHING'].includes(row.statusCode)
+  if (module.value === 'items') return row.statusCode === 'PENDING_REVIEW'
+  return row.statusCode === 'PENDING_REVIEW'
+}
+
+function canOffline(row: any): boolean {
+  if (module.value === 'items') return !ITEM_OFFLINE_BLOCKED.includes(row.statusCode)
+  if (module.value === 'help') return !HELP_TERMINAL.includes(row.statusCode)
+  return ['PENDING_REVIEW', 'SCHEDULED', 'PUBLISHED'].includes(row.statusCode)
+}
+
 function rowActionIcon(row: any) {
   if (module.value === 'help') return HandHeart
-  return row.status === '待审核' ? ShieldCheck : Pencil
+  return ShieldCheck
 }
 
 function rowActionLabel(row: any) {
   if (module.value === 'help') return '人工撮合'
-  return row.status === '待审核' ? '审核内容' : '编辑内容'
+  if (module.value === 'items') return '审核物品'
+  return row.statusCode === 'PENDING_REVIEW' ? '审核内容' : '查看内容'
 }
 
 function rowOfflineLabel() {
@@ -225,7 +330,7 @@ watch(() => app.currentCommunityId, () => {
       </div>
       <div>
         <button><SlidersHorizontal :size="16" />高级筛选</button>
-        <button v-if="auth.hasPermission('community:broadcast:create')" class="primary-button" @click="create"><Plus :size="16" />{{ config.create }}</button>
+        <button v-if="canCreate" class="primary-button" @click="create"><Plus :size="16" />{{ config.create }}</button>
       </div>
     </div>
     <div v-if="selectedRows.length" class="batch-bar community-operation-batch">
@@ -257,12 +362,13 @@ watch(() => app.currentCommunityId, () => {
             <td>{{ row.updatedAt }}</td>
             <td>
               <div class="row-actions">
-                <button class="row-icon-button" :aria-label="rowActionLabel(row)" :data-tip="rowActionLabel(row)" @click="review(row)">
+                <button v-if="canPrimaryAction(row)" class="row-icon-button" :aria-label="rowActionLabel(row)" :data-tip="rowActionLabel(row)" @click="review(row)">
                   <component :is="rowActionIcon(row)" :size="15" />
                 </button>
-                <button class="row-icon-button danger" :aria-label="rowOfflineLabel()" :data-tip="rowOfflineLabel()" @click="offline(row)">
+                <button v-if="canOffline(row)" class="row-icon-button danger" :aria-label="rowOfflineLabel()" :data-tip="rowOfflineLabel()" @click="offline(row)">
                   <EyeOff :size="15" />
                 </button>
+                <span v-if="!canPrimaryAction(row) && !canOffline(row)" class="cell-ellipsis sm">—</span>
               </div>
             </td>
           </tr>
@@ -291,6 +397,101 @@ watch(() => app.currentCommunityId, () => {
     <template #footer>
       <button @click="drawerOpen = false">取消</button>
       <button class="primary-button" @click="save">提交</button>
+    </template>
+  </NiDrawer>
+
+  <NiDrawer
+    :open="reviewOpen"
+    :title="reviewTarget ? `物品复核 · ${reviewTarget.title}` : '物品复核'"
+    eyebrow="社区物品"
+    @close="reviewOpen = false"
+  >
+    <template v-if="reviewTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <ShieldCheck :size="18" style="color: #6852c5" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ reviewTarget.code }} · {{ reviewTarget.communityName }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ reviewTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="reviewTarget.status" />
+      </div>
+
+      <h4 class="section-title">物品信息</h4>
+      <div class="form-grid">
+        <label><span>发布人</span><input :value="reviewTarget.seller" disabled /></label>
+        <label><span>分类 / 成色</span><input :value="`${reviewTarget.category || '—'} · ${reviewTarget.condition || '—'}`" disabled /></label>
+        <label><span>交易方式</span><input :value="mapTradeType(reviewTarget.tradeType)" disabled /></label>
+        <label><span>价格</span><input :value="reviewTarget.price" disabled /></label>
+      </div>
+
+      <h4 class="section-title" style="margin-top: 20px">质量说明</h4>
+      <p style="color: #554761; font-size: var(--font-size-body); line-height: 1.7">
+        {{ reviewDetail?.qualityDesc || reviewTarget.subtitle || '—' }}
+      </p>
+
+      <h4 class="section-title" style="margin-top: 20px">实拍照片</h4>
+      <div v-if="reviewDetail?.media?.length" style="display: flex; flex-wrap: wrap; gap: 8px">
+        <template v-for="media in reviewDetail.media" :key="media.objectKey">
+          <a v-if="media.mediaType === 'IMAGE' && media.url" :href="media.url" target="_blank" rel="noopener">
+            <img :src="media.url" alt="物品照片" style="width: 76px; height: 76px; object-fit: cover; border: 1px solid #ebe9ef; border-radius: 8px" />
+          </a>
+        </template>
+      </div>
+      <p v-else style="color: #988da2; font-size: var(--font-size-body)">无照片</p>
+
+      <h4 class="section-title" style="margin-top: 20px">AI 质检报告</h4>
+      <p v-if="reviewLoading" style="color: #988da2">正在加载 AI 质检报告…</p>
+      <template v-else-if="reviewAudit">
+        <div class="form-grid">
+          <label><span>总体结论</span><input :value="reviewAudit.overall" disabled /></label>
+          <label><span>置信度</span><input :value="`${Math.round(Number(reviewAudit.confidence || 0) * 100)}%`" disabled /></label>
+        </div>
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px">
+          <div v-for="dimension in reviewAudit.dimensions || []" :key="dimension.name"
+            style="display: flex; gap: 10px; align-items: baseline; color: #554761; font-size: var(--font-size-body)">
+            <strong style="min-width: 84px">{{ dimension.name }}</strong>
+            <span>{{ dimension.score ?? (dimension.pass === false ? '未通过' : '通过') }}</span>
+            <em style="color: #958b9f; font-style: normal">
+              {{ (dimension.issues || dimension.conflicts || dimension.labels || []).join('；') || dimension.value || '正常' }}
+            </em>
+          </div>
+        </div>
+        <p v-if="reviewAudit.risks?.length" style="margin-top: 8px; color: #c08a35; font-size: var(--font-size-caption)">
+          风险：{{ reviewAudit.risks.join('；') }}
+        </p>
+        <p v-if="reviewAudit.suggestions?.length" style="margin-top: 4px; color: #958b9f; font-size: var(--font-size-caption)">
+          改进建议：{{ reviewAudit.suggestions.join('；') }}
+        </p>
+      </template>
+      <p v-else style="color: #988da2; font-size: var(--font-size-body)">暂无 AI 质检记录</p>
+
+      <h4 class="section-title" style="margin-top: 20px">复核结论</h4>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button v-for="option in reviewDecisions" :key="option.value"
+          :class="{ 'primary-button': reviewForm.decision === option.value }"
+          @click="reviewForm.decision = option.value">
+          {{ option.label }}
+        </button>
+      </div>
+      <label class="full" style="display: block; margin-top: 12px">
+        <span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">
+          复核备注{{ reviewForm.decision === 'REJECT' ? '（驳回必填，≥5 字，将通知卖家）' : '（选填）' }}
+        </span>
+        <textarea v-model="reviewForm.reason" style="width: 100%; min-height: 72px"
+          placeholder="例如：照片无法看清瑕疵处，请补充特写照片后重新提交" />
+      </label>
+      <label v-if="reviewForm.decision === 'APPROVE'" style="display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #554761">
+        <input v-model="reviewForm.recommend" type="checkbox" />
+        <span>加入热门推荐位</span>
+      </label>
+    </template>
+    <template #footer>
+      <button @click="reviewOpen = false">取消</button>
+      <button class="primary-button" :disabled="reviewSubmitting" @click="submitReview">
+        {{ reviewSubmitting ? '提交中…' : '提交复核结论' }}
+      </button>
     </template>
   </NiDrawer>
 </template>

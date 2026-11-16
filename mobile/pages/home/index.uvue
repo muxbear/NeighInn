@@ -351,6 +351,8 @@ onShow(() => {
   socialStore.fetchConversations().catch(() => undefined)
   notificationStore.fetchUnread().catch(() => undefined)
   userStore.refreshProfile().catch(() => undefined)
+  // 已有缓存时后台静默刷新：审核通过/新发布的物品回到首页即可见，无需等待缓存过期或手动下拉。
+  if (itemStore.homeFeed) itemStore.fetchHome(true).catch(() => undefined)
 })
 
 onPullDownRefresh(async () => {

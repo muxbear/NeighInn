@@ -197,6 +197,8 @@ export const operationsApi = {
   overview: (module: string) => http.get<any, any>('/operations/overview', { params: { module } }),
   list: async (module: string, params: Dict = {}) => mapItems(await http.get<any, any>(`/${module}`, { params }), (row) => normalizeOperationRow(module, row)),
   create: (module: string, payload: Dict) => http.post<any, any>(`/${module}`, payload),
+  itemDetail: (id: number | string) => http.get<any, any>(`/items/${id}`),
+  itemAudit: (id: number | string) => http.get<any, any>(`/items/${id}/ai-audit`),
   review: (module: string, id: number | string, payload: Dict = { decision: 'APPROVE' }) =>
     http.post<any, any>(`/${module}/${id}/review`, payload),
   offline: (module: string, id: number | string) => http.post<any, any>(`/${module}/${id}/offline`),

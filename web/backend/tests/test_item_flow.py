@@ -14,6 +14,7 @@ from tests.conftest import (
     admin_login,
     bearer,
     create_draft,
+    create_on_sale_item,
     register_user,
     submit_item,
     verified_user,
@@ -422,3 +423,38 @@ async def test_category_management(client):
     dup = await client.post(f"{ADMIN_BASE}/item-categories",
                             json={"name": "二手图书专区"}, headers=csrf)
     assert dup.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_zone_category_all_sentinel_does_not_filter(client):
+    """UI 哨兵「全部」不能作为类目名精确匹配（移动端专属区默认 Tab）。"""
+    seller = await verified_user(client, "13911110019")
+    csrf = await admin_login(client)
+    item_id = await create_on_sale_item(
+        client, csrf, seller["token"], tradeType="FREE_GIFT", priceCents=0,
+        category="母婴用品")
+    resp = await client.get(f"{C_BASE}/items",
+                            params={"zone": "gift", "category": "全部"},
+                            headers=bearer(seller["token"]))
+    assert resp.status_code == 200
+    assert any(row["id"] == item_id for row in resp.json()["data"]["items"])
+
+    # 真实类目仍然精确过滤
+    other = await client.get(f"{C_BASE}/items",
+                             params={"zone": "gift", "category": "图书"},
+                             headers=bearer(seller["token"]))
+    assert all(row["id"] != item_id for row in other.json()["data"]["items"])
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_blob_preview_images(client):
+    """端侧 blob:/file: 临时预览地址不是有效对象键，必须重新上传。"""
+    seller = await verified_user(client, "13911110020")
+    resp = await client.post(f"{C_BASE}/items", json={
+        "title": "端侧临时地址物品", "tradeType": "MONETARY", "priceCents": 100,
+        "qualityDesc": "质量说明超过二十个字的描述文本内容",
+        "images": ["blob:http://localhost:5191/a", "a.jpg", "b.jpg"],
+        "condition": "九九新",
+    }, headers=bearer(seller["token"]))
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 40001
