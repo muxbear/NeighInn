@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Building2, ChevronDown, ChevronRight, Filter, Home, MapPin, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users, X } from 'lucide-vue-next'
+import { Building2, ChevronDown, ChevronRight, Filter, Home, MapPin, Pencil, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users, X } from 'lucide-vue-next'
 import { communityApi, residentApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -315,8 +315,8 @@ function openCreate() {
   editing.value = null
   form.value = {
     communityId: app.currentCommunityId, name: '', gender: '女', phone: '', identity: '业主',
-    building: '', relationship: '房屋产权人', certification: '未认证', certificationNo: '—',
-    level: '普通用户', status: '正常', joinedAt: '2025-03-20',
+    building: '', relationship: '房屋产权人', certification: '未认证', certificationNo: '',
+    level: '普通用户', status: '正常',
   }
   drawerOpen.value = true
 }
@@ -332,9 +332,14 @@ async function save() {
     app.showToast('请填写人员姓名')
     return
   }
+  const payload: any = { ...form.value }
+  // 列表返回的为脱敏手机号；未重新输入时不提交，避免覆盖真实号码。
+  if (editing.value && String(payload.phone || '').includes('*')) delete payload.phone
+  // 加入时间不在表单中维护，避免把列表展示值（含占位符）回写成业务数据。
+  delete payload.joinedAt
   try {
-    if (editing.value) await residentApi.update(editing.value.id, form.value)
-    else await residentApi.create(form.value)
+    if (editing.value) await residentApi.update(editing.value.id, payload)
+    else await residentApi.create(payload)
     drawerOpen.value = false
     app.showToast(editing.value ? '人员信息已更新' : '人员档案已创建')
     await load()
@@ -498,10 +503,27 @@ watch(() => app.currentCommunityId, () => { page.value = 1; load() })
             <td><div class="resident-person-cell"><span>{{ row.name.charAt(0) }}</span><div><strong>{{ row.name }}</strong><em>{{ row.gender }} · {{ row.phone }}</em></div></div></td>
             <td><span :class="['identity-tag', row.identity]">{{ row.identity }}</span></td>
             <td><div class="resident-house-cell"><strong>{{ row.building }}</strong><span>{{ row.relationship }}</span></div></td>
-            <td><div class="resident-certification"><StatusBadge :value="row.certification" /><code>{{ row.certificationNo }}</code></div></td>
+            <td><div class="resident-certification"><StatusBadge :value="row.certification" /><code>{{ row.certificationNo || '—' }}</code></div></td>
             <td><span :class="['resident-level', levelClass(row.level)]">{{ row.level }}</span></td>
             <td><StatusBadge :value="row.status" /></td><td>{{ row.joinedAt }}</td>
-            <td><button class="row-action" @click="openEdit(row)">编辑</button><button class="row-more" @click="remove(row)"><Trash2 :size="15" /></button></td>
+            <td>
+              <div class="resident-actions">
+                <button
+                  v-if="auth.hasPermission('community:resident:update')"
+                  class="row-icon-button"
+                  aria-label="编辑人员档案"
+                  data-tip="编辑人员档案"
+                  @click="openEdit(row)"
+                ><Pencil :size="15" /></button>
+                <button
+                  v-if="auth.hasPermission('community:resident:update')"
+                  class="row-icon-button danger"
+                  aria-label="删除人员档案"
+                  data-tip="删除人员档案"
+                  @click="remove(row)"
+                ><Trash2 :size="15" /></button>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -527,10 +549,10 @@ watch(() => app.currentCommunityId, () => { page.value = 1; load() })
     </div>
     <h4 class="section-title" style="margin-top: 24px">认证与等级</h4>
     <div class="form-grid">
-      <label><span>认证状态</span><select v-model="form.certification"><option>已认证</option><option>待审核</option><option>未认证</option><option>认证驳回</option></select></label>
+      <label><span>认证状态</span><select v-model="form.certification"><option>已认证</option><option>待审核</option><option>待补充</option><option>已驳回</option><option>未认证</option><option>已冻结</option><option>已撤销</option></select></label>
       <label><span>认证编号</span><input v-model="form.certificationNo" /></label>
       <label><span>用户级别</span><select v-model="form.level"><option>普通用户</option><option>活跃用户</option><option>社区达人</option><option>重点关怀</option></select></label>
-      <label><span>账号状态</span><select v-model="form.status"><option>正常</option><option>已停用</option></select></label>
+      <label><span>账号状态</span><select v-model="form.status"><option>正常</option><option>已停用</option><option>已离开</option></select></label>
     </div>
     <template #footer><button @click="drawerOpen = false">取消</button><button class="primary-button" @click="save">保存档案</button></template>
   </NiDrawer>

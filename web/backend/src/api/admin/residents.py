@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -11,13 +14,14 @@ from src.core.idempotency import complete_idempotency, guard_idempotency
 from src.core.permissions import require_permission
 from src.core.responses import (
     ERR_BIZ_RULE,
+    ERR_CONFLICT,
     ERR_NOT_FOUND,
     ERR_PARAM,
     ApiError,
     ok,
     paginated,
 )
-from src.core.security import decrypt_field, hmac_index, mask_phone
+from src.core.security import decrypt_field, encrypt_field, hmac_index, mask_phone
 from src.core.storage import presign_download
 from src.db.models import Certification, Community, Item, Resident, User
 from src.db.models.common import utcnow
@@ -31,6 +35,87 @@ AuditPerm = Depends(require_permission("community:resident:audit"))
 
 IDENTITY_MAP = {"owner": "业主", "tenant": "租户", "family": "家属", "business": "商务人员"}
 TYPE_LABEL = {"REALNAME": "实名认证", "OWNER_PROOF": "住户认证"}
+
+# 档案编辑沿用页面中文标签，服务端统一转换为领域编码（SRS 8.3 统一契约）。
+IDENTITY_ALIASES = {
+    **{label: label for label in IDENTITY_MAP.values()},
+    **IDENTITY_MAP,
+}
+CERT_STATUS_ALIASES = {
+    "未认证": "UNVERIFIED", "UNVERIFIED": "UNVERIFIED",
+    "待审核": "PENDING", "审核中": "PENDING", "PENDING": "PENDING",
+    "已认证": "VERIFIED", "认证通过": "VERIFIED", "VERIFIED": "VERIFIED",
+    "认证驳回": "REJECTED", "已驳回": "REJECTED", "REJECTED": "REJECTED",
+    "待补充": "SUPPLEMENT", "SUPPLEMENT": "SUPPLEMENT",
+    "已冻结": "FROZEN", "已冻结认证": "FROZEN", "FROZEN": "FROZEN",
+    "已撤销": "REVOKED", "REVOKED": "REVOKED",
+}
+CERT_STATUS_LABEL = {
+    "UNVERIFIED": "未认证", "PENDING": "待审核", "VERIFIED": "已认证",
+    "REJECTED": "认证驳回", "SUPPLEMENT": "待补充",
+    "FROZEN": "已冻结", "REVOKED": "已撤销",
+}
+RESIDENT_STATUS_ALIASES = {
+    "正常": "ACTIVE", "ACTIVE": "ACTIVE",
+    "已停用": "FROZEN", "停用": "FROZEN", "已冻结": "FROZEN", "FROZEN": "FROZEN",
+    "已离开": "LEFT", "LEFT": "LEFT",
+}
+GENDERS = {"男", "女", ""}
+LEVELS = {"普通用户", "活跃用户", "社区达人", "重点关怀"}
+PHONE_PATTERN = re.compile(r"^1\d{10}$")
+
+
+class ResidentIn(BaseModel):
+    communityId: int | None = None
+    name: str = ""
+    gender: str = "女"
+    phone: str = ""
+    identity: str = "业主"
+    building: str = ""
+    relationship: str = ""
+    certification: str = "未认证"
+    certificationNo: str = ""
+    level: str = "普通用户"
+    status: str = "正常"
+    joinedAt: str | None = None
+
+
+def _normalize_choice(raw: str, aliases: dict[str, str], field: str) -> str:
+    value = (raw or "").strip()
+    resolved = aliases.get(value) or aliases.get(value.upper())
+    if not resolved:
+        raise ApiError(ERR_PARAM, f"{field}不合法", 400)
+    return resolved
+
+
+def _normalize_phone(raw: str, *, allow_masked: bool) -> str | None:
+    """返回 None 表示未提交有效手机号（编辑时传入脱敏号码视为不修改）。"""
+    value = (raw or "").strip()
+    if allow_masked and "*" in value:
+        return None
+    if not value:
+        return ""
+    if not PHONE_PATTERN.match(value):
+        raise ApiError(ERR_PARAM, "手机号格式不正确（11 位大陆手机号）", 400)
+    return value
+
+
+def _parse_joined_at(raw: str | None) -> datetime:
+    if not raw:
+        return utcnow()
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d")
+    except ValueError as exc:
+        raise ApiError(ERR_PARAM, "加入时间格式不正确（YYYY-MM-DD）", 400) from exc
+
+
+def _validate_profile_text(payload: ResidentIn) -> None:
+    if len(payload.building.strip()) > 128:
+        raise ApiError(ERR_PARAM, "房屋 / 商铺最多 128 字", 400)
+    if len(payload.relationship.strip()) > 64:
+        raise ApiError(ERR_PARAM, "与房屋关系最多 64 字", 400)
+    if len(payload.certificationNo.strip()) > 32:
+        raise ApiError(ERR_PARAM, "认证编号最多 32 字", 400)
 
 
 # ---------------------------------------------------------------- 序列化
@@ -152,6 +237,185 @@ async def resident_detail(resident_id: int, admin: CurrentAdmin, db: DbSession):
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
     return ok(await _resident_row(db, resident))
+
+
+# ---------------------------------------------------------------- 业主档案（新增 / 编辑 / 删除）
+
+async def _assert_unique_phone(db: DbSession, community_id: int, phone_hash: str,
+                               exclude_id: int | None = None) -> None:
+    """同一社区内手机号唯一，避免同一住户重复建档（后台详设 5.6.1）。"""
+    if not phone_hash:
+        return
+    stmt = select(Resident.id).where(
+        Resident.community_id == community_id, Resident.phone_hash == phone_hash)
+    if exclude_id is not None:
+        stmt = stmt.where(Resident.id != exclude_id)
+    if await db.scalar(stmt):
+        raise ApiError(ERR_CONFLICT, "该手机号在本社区已存在人员档案", 409)
+
+
+async def _match_user_id(db: DbSession, phone_hash: str) -> int | None:
+    if not phone_hash:
+        return None
+    return await db.scalar(select(User.id).where(User.phone_hash == phone_hash))
+
+
+@router.post("/residents",
+             dependencies=[Depends(require_permission("community:resident:create"))])
+async def create_resident(payload: ResidentIn, request: Request,
+                          admin: CurrentAdmin, db: DbSession):
+    name = payload.name.strip()
+    if not name:
+        raise ApiError(ERR_PARAM, "人员姓名必填", 400)
+    if len(name) > 64:
+        raise ApiError(ERR_PARAM, "人员姓名最多 64 字", 400)
+    if not payload.communityId:
+        raise ApiError(ERR_PARAM, "请选择所属社区", 400)
+    community = await db.get(Community, payload.communityId)
+    if not community:
+        raise ApiError(ERR_PARAM, "所属社区不存在", 400)
+
+    gender = payload.gender.strip()
+    if gender not in GENDERS:
+        raise ApiError(ERR_PARAM, "性别不合法", 400)
+    identity = _normalize_choice(payload.identity, IDENTITY_ALIASES, "身份类型")
+    cert_status = _normalize_choice(payload.certification, CERT_STATUS_ALIASES, "认证状态")
+    status = _normalize_choice(payload.status, RESIDENT_STATUS_ALIASES, "账号状态")
+    level = payload.level.strip() or "普通用户"
+    if level not in LEVELS:
+        raise ApiError(ERR_PARAM, "用户级别不合法", 400)
+    _validate_profile_text(payload)
+
+    phone = _normalize_phone(payload.phone, allow_masked=False) or ""
+    phone_hash = hmac_index(phone) if phone else ""
+    await _assert_unique_phone(db, community.id, phone_hash)
+
+    resident = Resident(
+        user_id=await _match_user_id(db, phone_hash),
+        community_id=community.id, name=name, gender=gender,
+        phone_enc=encrypt_field(phone), phone_hash=phone_hash,
+        identity_type=identity, building=payload.building.strip(),
+        relationship=payload.relationship.strip(),
+        certification_status=cert_status,
+        certification_no=payload.certificationNo.strip(),
+        level=level, status=status, joined_at=_parse_joined_at(payload.joinedAt),
+    )
+    db.add(resident)
+    await db.flush()
+    if resident.certification_status == "VERIFIED" and not resident.certification_no:
+        resident.certification_no = f"YZ{resident.id:08d}"
+    await write_audit(db, request, actor=admin, action="resident.create",
+                      resource_type="resident", resource_id=resident.id,
+                      before=None, after=await _resident_row(db, resident))
+    await db.commit()
+    return ok(await _resident_row(db, resident), "人员档案已创建")
+
+
+@router.put("/residents/{resident_id}",
+            dependencies=[Depends(require_permission("community:resident:update"))])
+async def update_resident(resident_id: int, payload: ResidentIn, request: Request,
+                          admin: CurrentAdmin, db: DbSession):
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    fields = payload.model_fields_set
+    before = await _resident_row(db, resident)
+
+    if "communityId" in fields and payload.communityId \
+            and payload.communityId != resident.community_id:
+        raise ApiError(ERR_PARAM, "人员档案不可跨社区迁移，请在目标社区新建档案", 400)
+
+    if "name" in fields:
+        name = payload.name.strip()
+        if not name:
+            raise ApiError(ERR_PARAM, "人员姓名必填", 400)
+        if len(name) > 64:
+            raise ApiError(ERR_PARAM, "人员姓名最多 64 字", 400)
+        resident.name = name
+
+    if "gender" in fields:
+        gender = payload.gender.strip()
+        if gender not in GENDERS:
+            raise ApiError(ERR_PARAM, "性别不合法", 400)
+        resident.gender = gender
+
+    if "phone" in fields:
+        phone = _normalize_phone(payload.phone, allow_masked=True)
+        if phone is not None and phone != decrypt_field(resident.phone_enc):
+            phone_hash = hmac_index(phone) if phone else ""
+            await _assert_unique_phone(db, resident.community_id, phone_hash,
+                                       exclude_id=resident.id)
+            resident.phone_enc = encrypt_field(phone)
+            resident.phone_hash = phone_hash
+            if resident.user_id is None:
+                resident.user_id = await _match_user_id(db, phone_hash)
+
+    if "identity" in fields:
+        resident.identity_type = _normalize_choice(
+            payload.identity, IDENTITY_ALIASES, "身份类型")
+    if "building" in fields:
+        resident.building = payload.building.strip()
+    if "relationship" in fields:
+        resident.relationship = payload.relationship.strip()
+    if "level" in fields:
+        level = payload.level.strip()
+        if level and level not in LEVELS:
+            raise ApiError(ERR_PARAM, "用户级别不合法", 400)
+        resident.level = level or resident.level
+    if "status" in fields and payload.status.strip():
+        resident.status = _normalize_choice(
+            payload.status, RESIDENT_STATUS_ALIASES, "账号状态")
+    if "certification" in fields and payload.certification.strip():
+        target = _normalize_choice(payload.certification, CERT_STATUS_ALIASES, "认证状态")
+        current = CERT_STATUS_ALIASES.get(resident.certification_status,
+                                          resident.certification_status)
+        if target != current:
+            if not certification_sm.can_fire(current, target):
+                current_label = CERT_STATUS_LABEL.get(current, current)
+                raise ApiError(
+                    ERR_BIZ_RULE,
+                    f"认证状态不能从「{current_label}」直接改为"
+                    f"「{CERT_STATUS_LABEL.get(target, target)}」，请通过认证审核流程处理",
+                    422,
+                )
+            resident.certification_status = certification_sm.fire(current, target)
+        else:
+            resident.certification_status = current
+    if "certificationNo" in fields:
+        resident.certification_no = payload.certificationNo.strip()
+    if "joinedAt" in fields and payload.joinedAt:
+        resident.joined_at = _parse_joined_at(payload.joinedAt)
+
+    _validate_profile_text(payload)
+    if resident.certification_status == "VERIFIED" and not resident.certification_no:
+        resident.certification_no = f"YZ{resident.id:08d}"
+    await write_audit(db, request, actor=admin, action="resident.update",
+                      resource_type="resident", resource_id=resident.id,
+                      before=before, after=await _resident_row(db, resident))
+    await db.commit()
+    return ok(await _resident_row(db, resident), "人员信息已更新")
+
+
+@router.delete("/residents/{resident_id}",
+               dependencies=[Depends(require_permission("community:resident:update"))])
+async def delete_resident(resident_id: int, request: Request,
+                          admin: CurrentAdmin, db: DbSession):
+    """删除人员档案；已关联的认证审核单保留历史，仅解除档案引用。"""
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    before = await _resident_row(db, resident)
+    certs = (await db.execute(
+        select(Certification).where(Certification.resident_id == resident.id)
+    )).scalars().all()
+    for cert in certs:
+        cert.resident_id = None
+    await db.delete(resident)
+    await write_audit(db, request, actor=admin, action="resident.delete",
+                      resource_type="resident", resource_id=resident_id,
+                      before=before, after=None)
+    await db.commit()
+    return ok({"id": str(resident_id)}, "人员档案已删除")
 
 
 # ---------------------------------------------------------------- 认证审核队列（W02）

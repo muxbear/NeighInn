@@ -125,12 +125,17 @@ export function normalizeOperationRow(module: string, row: any): any {
   }
 }
 
+// 住户档案的账号状态与资金托管状态语义不同：FROZEN 展示为「已停用」。
+const RESIDENT_STATUS_LABELS: Record<string, string> = {
+  ACTIVE: '正常', FROZEN: '已停用', LEFT: '已离开',
+}
+
 export function normalizeResident(row: any): any {
   return {
     ...row,
     certification: mapStatus(row.certification ?? row.certificationStatus),
     certificationStatus: row.certificationStatus ?? row.certification,
-    status: mapStatus(row.status),
+    status: RESIDENT_STATUS_LABELS[row.status] ?? mapStatus(row.status),
     joinedAt: row.joinedAt || '—',
   }
 }
