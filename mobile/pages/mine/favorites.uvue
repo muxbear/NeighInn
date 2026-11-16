@@ -63,7 +63,7 @@
 
         <view v-else>
           <view v-if="life.length === 0" class="favorites__empty">
-            <ni-empty icon="image" title="还没有收藏的生活动态" desc="喜欢邻居记录的生活，点个赞再收藏吧" action-text="去生活频道" @action="goLife" />
+            <ni-empty icon="image" title="还没有收藏的生活动态" desc="喜欢邻居记录的生活，点个赞再收藏吧" action-text="去小区生活" @action="goLife" />
           </view>
           <view v-else>
             <life-post-card

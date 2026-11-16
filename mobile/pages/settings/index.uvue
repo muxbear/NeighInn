@@ -56,7 +56,7 @@
           icon="megaphone"
           icon-state="gold"
           title="小区动态"
-          desc="喇叭站、生活频道与社区通知"
+          desc="喇叭站、小区生活与社区通知"
           show-switch
           :switch-value="notificationStore.settings.communityEnabled"
           @switch="toggleCommunity"
@@ -194,7 +194,7 @@ function openBlacklist(): void {
 function openContentSafety(): void {
   uni.showModal({
     title: '社区内容与安全',
-    content: '平台对生活频道、服务互助、留言与私信进行内容安全审核。如遇不良信息，可在详情页举报。',
+    content: '平台对小区生活、邻里互助、留言与私信进行内容安全审核。如遇不良信息，可在详情页举报。',
     showCancel: false,
     confirmText: '我知道了',
   })

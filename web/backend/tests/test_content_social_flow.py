@@ -38,7 +38,7 @@ async def test_life_publish_review_visibility(client, db_session):
     assert resp.status_code == 200, resp.text
     post_id = resp.json()["data"]["id"]
 
-    # 待审核内容对生活频道不可见
+    # 待审核内容对小区生活不可见
     feed = (await client.get(f"{C_BASE}/life/posts", headers=bearer(buyer["token"]))).json()["data"]
     assert all(post["id"] != post_id for post in feed["items"])
 

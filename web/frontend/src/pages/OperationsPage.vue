@@ -70,7 +70,7 @@ const configs: Record<string, any> = {
   life: {
     api: 'life-posts', title: '社区生活', tone: 'life', icon: Coffee,
     ownerLabel: '内容归属小区', scopeNote: '生活内容仅展示所选小区',
-    description: '运营社区生活频道、便民指南、探店内容和专题推荐', create: '新建内容',
+    description: '运营小区生活、便民指南、探店内容和专题推荐', create: '新建内容',
     tabs: ['全部', '已发布', '草稿', '待审核', '已下线'],
     metrics: [
       { label: '频道内容', value: '248', note: '覆盖 8 个分类' },

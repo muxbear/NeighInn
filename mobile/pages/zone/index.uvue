@@ -143,13 +143,13 @@
 
         <view v-if="services.length > 0" class="zone__load-more" @click="loadMore">
           <view class="zone__load-line" />
-          <text class="zone__load-text">{{ serviceHasMore ? '继续向下滑动，加载更多' : '服务互助信息都在这里了' }}</text>
+          <text class="zone__load-text">{{ serviceHasMore ? '继续向下滑动，加载更多' : '邻里互助信息都在这里了' }}</text>
           <view class="zone__load-line" />
         </view>
 
         <view class="zone__safety">
           <ni-icon name="shield" :size="15" state="gold" />
-          <text class="zone__safety-text">服务互助请在小区公共区域进行，涉及上门服务请提前在物业登记。</text>
+          <text class="zone__safety-text">邻里互助请在小区公共区域进行，涉及上门服务请提前在物业登记。</text>
         </view>
       </view>
     </template>
@@ -301,7 +301,7 @@ function goPublish(): void {
   uni.navigateTo({ url: '/pages/publish/index' })
 }
 function openServicePublish(): void {
-  showToast('服务互助发布将在后续版本开放')
+  showToast('邻里互助发布将在后续版本开放')
 }
 function goItem(id: string): void {
   uni.navigateTo({ url: `/pages/item/detail?id=${id}` })

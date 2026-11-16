@@ -41,7 +41,7 @@
     </view>
 
     <view v-if="groups.length === 0" class="friends__empty">
-      <ni-empty icon="friend" title="还没有邻居好友" desc="在物品详情或生活频道认识同小区的邻居吧" action-text="去首页" @action="goHome" />
+      <ni-empty icon="friend" title="还没有邻居好友" desc="在物品详情或小区生活认识同小区的邻居吧" action-text="去首页" @action="goHome" />
     </view>
 
     <view v-else class="friends__list">

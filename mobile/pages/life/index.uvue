@@ -7,7 +7,7 @@
         <view class="life__nav-button" @click="goBack">
           <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
         </view>
-        <text class="life__nav-title">生活频道</text>
+        <text class="life__nav-title">小区生活</text>
         <view class="life__nav-button" @click="goSearch">
           <ni-icon name="search" :size="18" state="secondary" />
         </view>

@@ -70,7 +70,6 @@
       <view class="home__zones">
         <view class="home__zones-head">
           <view class="home__zones-copy">
-            <text class="home__zones-kicker">阳光花园邻里生活圈</text>
             <text class="home__zones-title">今天想去哪里？</text>
           </view>
           <text class="home__zones-count">{{ community.itemCount }}件 · {{ community.serviceCount }}服务</text>
@@ -132,7 +131,7 @@
       <view class="home__hot">
         <ni-section-header
           kicker="邻居们都在看"
-          title="最近热门商品"
+          title="小区淘宝"
           action-text="查看更多"
           @action="goZone('sale')"
         />
@@ -151,7 +150,7 @@
           </view>
         </view>
         <view v-if="hotItems.length === 0" class="home__section-empty">
-          <ni-empty icon="box" title="还没有热门商品" desc="去发布一件闲置，让邻居们看到吧" />
+          <ni-empty icon="box" title="还没有商品" desc="去发布一件闲置，让邻居们看到吧" />
         </view>
       </view>
 
@@ -160,7 +159,7 @@
           <ni-section-header
             kicker="身边有人需要你"
             title="邻里互助"
-            action-text="进入服务互助"
+            action-text="进入邻里互助"
             @action="goZone('service')"
           />
         </view>
@@ -200,7 +199,7 @@
       <view class="home__life">
         <ni-section-header
           kicker="记录身边真实生活"
-          title="生活频道"
+          title="小区生活"
           action-text="查看全部"
           size="lg"
           @action="goLife"
@@ -236,7 +235,7 @@
           />
         </view>
         <view v-if="filteredLifePosts.length === 0" class="home__section-empty">
-          <ni-empty icon="image" title="这个分类还没有动态" desc="去生活频道看看邻居们的最新记录" />
+          <ni-empty icon="image" title="这个分类还没有动态" desc="去小区生活看看邻居们的最新记录" />
         </view>
 
         <view class="home__life-more" hover-class="home__life-more--pressed" @click="goLife">
@@ -586,13 +585,7 @@ async function onLifeLike(post: any): Promise<void> {
 .home__zones-copy {
   flex: 1;
 }
-.home__zones-kicker {
-  font-size: $ni-font-9;
-  color: #a17a64;
-  font-weight: 600;
-}
 .home__zones-title {
-  margin-top: 3px;
   font-size: $ni-font-18;
   font-weight: 700;
   color: $ni-color-text-primary;

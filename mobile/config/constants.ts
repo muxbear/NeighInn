@@ -44,11 +44,11 @@ export const ZONES: ZoneConfig[] = [
   },
   {
     key: 'service',
-    name: '服务互助',
+    name: '邻里互助',
     label: '邻里帮忙',
     icon: 'friend',
     tone: 'service',
-    title: '阳光花园 · 服务互助',
+    title: '阳光花园 · 邻里互助',
     subtitle: '接送、照看、陪伴，需要时邻居就在身边',
     description: '邻里互助、陪伴与共享服务都在这里',
   },

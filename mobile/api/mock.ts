@@ -268,7 +268,7 @@ function buildHome(): HomeBundle {
       { key: 'gift', name: '物品赠与', count: onSale.filter((item) => item.type === '免费').length },
       { key: 'swap', name: '物品交换', count: onSale.filter((item) => item.type === '互换').length },
       { key: 'sale', name: '闲置赚米', count: onSale.filter((item) => item.type === '出售').length },
-      { key: 'service', name: '服务互助', count: state.servicePosts.length },
+      { key: 'service', name: '邻里互助', count: state.servicePosts.length },
     ],
     broadcasts: clone(state.broadcasts),
     hotItems: clone(onSale.slice(0, 10)),
@@ -647,7 +647,7 @@ async function route(
     return { success: true }
   }
 
-  // ---------------- 生活频道 ----------------
+  // ---------------- 小区生活 ----------------
   if (path === '/life/posts' && method === 'GET') {
     const category = query.category ?? ''
     let list = [...state.lifePosts]
@@ -708,7 +708,7 @@ async function route(
     return clone(post)
   }
 
-  // ---------------- 服务互助 ----------------
+  // ---------------- 邻里互助 ----------------
   if (path === '/services' && method === 'GET') {
     const kind = query.kind ?? ''
     const category = query.category ?? ''

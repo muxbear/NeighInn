@@ -34,7 +34,7 @@ class Broadcast(Entity):
 
 
 class LifePost(Entity):
-    """社区生活动态（M02/M 生活频道：小区风景/邻里日常/个人风采/萌宠生活）。"""
+    """社区生活动态（M02/M 小区生活：小区风景/邻里日常/个人风采/萌宠生活）。"""
 
     __tablename__ = "life_posts"
 

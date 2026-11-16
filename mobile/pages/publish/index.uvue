@@ -342,7 +342,7 @@
       <view class="publish__bottom-space" />
       <view class="publish__footer">
         <ni-button type="primary" size="lg" block :loading="lifeSubmitting" @tap="submitLife">
-          发布到生活频道
+          发布到小区生活
         </ni-button>
         <view class="publish__agreement">
           <text class="publish__agreement-text">发布即表示同意</text>

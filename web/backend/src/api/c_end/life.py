@@ -62,7 +62,7 @@ async def _row(db: DbSession, post: LifePost, viewer=None) -> dict:
 async def life_posts(user: CurrentUser, db: DbSession,
                      category: str | None = Query(default=None),
                      page: int = Query(default=1), pageSize: int = Query(default=20)):
-    """生活频道：仅已发布内容对本小区可见。"""
+    """小区生活：仅已发布内容对本小区可见。"""
     resident = await bound_resident(db, user.id)
     stmt = select(LifePost).where(LifePost.status == "PUBLISHED")
     if resident:
@@ -104,7 +104,7 @@ async def publish_life(payload: PublishLifeIn, user: CurrentUser, db: DbSession)
     )
     db.add(post)
     await db.commit()
-    return ok(await _row(db, post, user), "已提交审核，通过后将在生活频道展示")
+    return ok(await _row(db, post, user), "已提交审核，通过后将在小区生活展示")
 
 
 @router.get("/life/posts/{post_id}")

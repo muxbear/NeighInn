@@ -159,7 +159,7 @@
     </view>
 
     <view v-else class="ldetail__error">
-      <ni-empty icon="image" title="动态不存在或已删除" desc="去看看其他邻居的生活记录吧" action-text="返回生活频道" @action="goLife" />
+      <ni-empty icon="image" title="动态不存在或已删除" desc="去看看其他邻居的生活记录吧" action-text="返回小区生活" @action="goLife" />
     </view>
 
     <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="100" />
@@ -190,7 +190,7 @@ const commentSubmitting = ref(false)
 const images = computed(() => post.value?.images ?? [])
 
 onShareAppMessage(() => ({
-  title: post.value?.title ?? '邻里小栈 · 生活频道',
+  title: post.value?.title ?? '邻里小栈 · 小区生活',
   path: `/pages/life/detail?id=${postId.value}`,
   imageUrl: post.value?.cover ?? '',
 }))
