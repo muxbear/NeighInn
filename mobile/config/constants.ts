@@ -65,18 +65,18 @@ export const TRADE_TYPES: Array<{ value: TradeType; label: string; desc: string;
   { value: '互换', label: '互换', desc: '以物换物，各取所需', icon: 'swap' },
 ]
 
+// 与统一服务端 /categories（SRS M02-01/M03-01）保持一致，避免发布时类目/成色校验失败。
 export const ITEM_CATEGORIES = [
   '家具家电',
   '母婴用品',
-  '数码产品',
-  '服饰鞋包',
-  '图书文具',
+  '数码',
+  '图书',
+  '服饰',
   '运动户外',
-  '家居日用',
   '其他',
 ]
 
-export const ITEM_CONDITIONS = ['全新', '九成新', '八成新', '七成新', '六成新及以下']
+export const ITEM_CONDITIONS = ['全新', '九九新', '轻微使用痕迹', '明显使用痕迹', '有功能缺陷']
 
 export const LIFE_CATEGORIES = ['全部', '小区风景', '邻里日常', '个人风采', '萌宠生活'] as const
 

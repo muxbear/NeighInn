@@ -63,12 +63,25 @@ function buildHeaders(options: RequestOptions): Record<string, string> {
   return headers
 }
 
+function parseResponseBody(raw: any): any {
+  if (typeof raw !== 'string') return raw
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
 function unwrap<T>(response: any, traceId: string): T {
   const status = response?.statusCode ?? 0
+  const body = parseResponseBody(response?.data)
+  // 统一服务端在 4xx/5xx 时同样返回 { code, message, traceId }，必须优先展示业务提示，
+  // 否则参数校验、认证、业务规则等失败都会被误报为「网络请求失败」。
   if (status < 200 || status >= 300) {
-    throw new ApiError(status === 0 ? 50000 : status, '网络请求失败', traceId, status)
+    const code = Number(body?.code) || (status === 0 ? 50000 : status)
+    const message = body?.message || ERROR_MESSAGES[code] || '网络请求失败'
+    throw new ApiError(code, message, body?.traceId || traceId, status)
   }
-  const body = response?.data
   if (!body || typeof body !== 'object') {
     throw new ApiError(50000, ERROR_MESSAGES[50000], traceId, status)
   }

@@ -7,7 +7,7 @@
 import pytest
 from sqlalchemy import select
 
-from src.db.models import AppNotification, Item
+from src.db.models import AppNotification, Favorite, Item, ViewHistory
 from tests.conftest import (
     ADMIN_BASE,
     C_BASE,
@@ -374,9 +374,10 @@ async def test_distance_endpoint(client):
 
 
 @pytest.mark.asyncio
-async def test_off_shelf_and_delete_guards(client):
-    """上架中不可直接删除；下架后可删除。"""
+async def test_off_shelf_and_delete_guards(client, db_session):
+    """上架中不可直接删除；下架后可删除，并清理浏览足迹/收藏引用。"""
     seller = await verified_user(client, "13911110017")
+    buyer = await verified_user(client, "13911110018", community_id=2)
     item_id = await create_draft(client, seller["token"])
     await submit_item(client, seller["token"], item_id)
     csrf = await admin_login(client)
@@ -386,11 +387,25 @@ async def test_off_shelf_and_delete_guards(client):
     bad = await client.delete(f"{C_BASE}/items/{item_id}", headers=bearer(seller["token"]))
     assert bad.status_code == 422
 
+    fav = await client.post(f"{C_BASE}/items/{item_id}/favorite",
+                            headers=bearer(buyer["token"]))
+    assert fav.status_code == 200
+
     off = await client.post(f"{C_BASE}/items/{item_id}/off-shelf",
                             headers=bearer(seller["token"]))
     assert off.status_code == 200
+    # 卖家查看自己的物品会写入浏览足迹（外键引用 items.id），删除必须一并清理。
+    detail = await client.get(f"{C_BASE}/items/{item_id}", headers=bearer(seller["token"]))
+    assert detail.status_code == 200
+
     delete = await client.delete(f"{C_BASE}/items/{item_id}", headers=bearer(seller["token"]))
     assert delete.status_code == 200
+    item_pk = int(item_id)
+    assert await db_session.scalar(
+        select(ViewHistory.id).where(ViewHistory.item_id == item_pk)) is None
+    assert await db_session.scalar(
+        select(Favorite.id).where(Favorite.target_type == "ITEM",
+                                  Favorite.target_id == item_pk)) is None
 
 
 @pytest.mark.asyncio

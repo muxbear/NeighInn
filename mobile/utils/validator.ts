@@ -46,16 +46,16 @@ export function validateItemDraft(draft: ItemDraft): ValidationResult {
   if (draft.images && draft.images.length > 12) {
     errors.images = '最多上传 12 张照片'
   }
-  if (!draft.title || !draft.title.trim()) {
-    errors.title = '请填写物品标题'
+  if (textLength(draft.title?.trim() ?? '') < 2) {
+    errors.title = '标题需 2–30 个字'
   } else if (textLength(draft.title) > 30) {
     errors.title = '标题最多 30 字'
   }
   if (draft.tradeType === '出售' && !isPrice(draft.price)) {
     errors.price = '请填写有效价格（0.01–999999）'
   }
-  if (draft.tradeType === '互换' && !draft.barterExpect.trim()) {
-    errors.barterExpect = '请填写期望交换的物品'
+  if (draft.tradeType === '互换' && textLength(draft.barterExpect?.trim() ?? '') < 2) {
+    errors.barterExpect = '请填写期望交换的物品（至少 2 个字）'
   }
   if (!draft.category) {
     errors.category = '请选择物品分类'

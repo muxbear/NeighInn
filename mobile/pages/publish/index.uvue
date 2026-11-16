@@ -213,14 +213,6 @@
           </view>
         </view>
 
-        <view class="publish__confirm-actions">
-          <view class="publish__back" @click="step = 1">
-            <text class="publish__back-text">返回修改</text>
-          </view>
-          <ni-button type="primary" size="lg" block :loading="submitting" @tap="submitItem">
-            确认提交
-          </ni-button>
-        </view>
       </view>
 
       <view class="publish__bottom-space" />
@@ -234,16 +226,22 @@
         >
           下一步，确认发布
         </ni-button>
-        <ni-button
-          v-else
-          type="primary"
-          size="lg"
-          block
-          :loading="submitting"
-          @tap="submitItem"
-        >
-          确认提交，进入 AI 质检
-        </ni-button>
+        <view v-else class="publish__footer-actions">
+          <view class="publish__back" @click="step = 1">
+            <text class="publish__back-text">返回修改</text>
+          </view>
+          <view class="publish__footer-primary">
+            <ni-button
+              type="primary"
+              size="lg"
+              block
+              :loading="submitting"
+              @tap="submitItem"
+            >
+              确认提交，进入 AI 质检
+            </ni-button>
+          </view>
+        </view>
         <view class="publish__agreement">
           <text class="publish__agreement-text">发布即表示同意</text>
           <text class="publish__agreement-link" @click="openPublishRule">《发布规范》</text>
@@ -469,6 +467,9 @@ function restoreDraft(): void {
   if (!saved) return
   const hasContent = saved.title || (saved.images && saved.images.length)
   if (!hasContent) return
+  // 兼容历史草稿：旧版类目/成色与服务端枚举不一致，直接提交会被校验拒绝。
+  if (saved.category && !ITEM_CATEGORIES.includes(saved.category)) saved.category = ''
+  if (saved.condition && !ITEM_CONDITIONS.includes(saved.condition)) saved.condition = ''
   Object.assign(draft, saved)
   showToast('已恢复上次未完成的草稿')
 }
@@ -1047,11 +1048,13 @@ function openPublishRule(): void {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.publish__confirm-actions {
+.publish__footer-actions {
   width: 100%;
   flex-direction: row;
   align-items: center;
-  margin-top: 18px;
+}
+.publish__footer-primary {
+  flex: 1;
 }
 .publish__back {
   width: 96px;

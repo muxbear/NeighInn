@@ -10,7 +10,17 @@ from src.api.utils import paginate
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession, OptionalUser
 from src.core.responses import ERR_BIZ_RULE, ERR_PARAM, ApiError, ok, paginated
-from src.db.models import Favorite, Item, ItemAudit, ItemCategory, ItemComment, ItemMedia, User
+from src.db.models import (
+    Favorite,
+    Item,
+    ItemAudit,
+    ItemCategory,
+    ItemComment,
+    ItemMedia,
+    Order,
+    User,
+    ViewHistory,
+)
 from src.db.models.common import utcnow
 from src.domain import enums as E
 from src.domain.state import item_sm
@@ -297,9 +307,16 @@ async def delete_item(item_id: int, user: CurrentUser, db: DbSession):
     svc.assert_owner(item, user)
     if item.status in (E.ItemStatus.ON_SALE, E.ItemStatus.RESERVED):
         raise ApiError(ERR_BIZ_RULE, "上架中或交易中的物品请先下架再删除", 422)
+    has_order = await db.scalar(select(Order.id).where(Order.item_id == item.id).limit(1))
+    if has_order:
+        raise ApiError(ERR_BIZ_RULE, "物品已有交易记录，为保障交易凭证不可删除", 422)
     await db.execute(delete(ItemMedia).where(ItemMedia.item_id == item.id))
     await db.execute(delete(ItemComment).where(ItemComment.item_id == item.id))
     await db.execute(delete(ItemAudit).where(ItemAudit.item_id == item.id))
+    # 浏览足迹/收藏通过外键或目标引用关联物品，需一并清理，避免删除时报外键错误。
+    await db.execute(delete(ViewHistory).where(ViewHistory.item_id == item.id))
+    await db.execute(delete(Favorite).where(
+        Favorite.target_type == "ITEM", Favorite.target_id == item.id))
     await db.delete(item)
     await db.commit()
     return ok({"success": True}, "已删除")

@@ -19,7 +19,7 @@ const validDraft: ItemDraft = {
   tradeType: '出售',
   price: '268',
   barterExpect: '',
-  condition: '九成新',
+  condition: '轻微使用痕迹',
   category: '家具家电',
   qualityDesc: '家中自用，保养良好，没有磕碰，功能一切正常。',
 }

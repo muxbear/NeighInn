@@ -536,7 +536,7 @@ async function route(
       title: String(body.title ?? '未命名物品'),
       price: body.price ?? 0,
       type: body.tradeType ?? '出售',
-      condition: body.condition ?? '九成新',
+      condition: body.condition ?? '轻微使用痕迹',
       distance: '约 120m',
       walk: '步行2分',
       time: state.user.communityName,
@@ -1191,8 +1191,8 @@ async function route(
   }
   if (path === '/categories' && method === 'GET') {
     return {
-      itemCategories: ['家具家电', '母婴用品', '数码产品', '服饰鞋包', '图书文具', '运动户外', '家居日用', '其他'],
-      conditions: ['全新', '九成新', '八成新', '七成新', '六成新及以下'],
+      itemCategories: ['家具家电', '母婴用品', '数码', '图书', '服饰', '运动户外', '其他'],
+      conditions: ['全新', '九九新', '轻微使用痕迹', '明显使用痕迹', '有功能缺陷'],
       lifeCategories: ['小区风景', '邻里日常', '个人风采', '萌宠生活'],
       serviceCategories: ['接送照看', '宠物照看', '学习陪伴', '邻里活动', '维修安装', '其他'],
     }
