@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronDown, ChevronRight, Coffee, Filter, HandHeart, Megaphone, MoreHorizontal, Plus, Search, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
+import { Coffee, HandHeart, Megaphone, MoreHorizontal, Plus, Search, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
 import { operationsApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
+import CommunityFilterBar from '@/components/CommunityFilterBar.vue'
 
 const route = useRoute()
 const app = useAppStore()
@@ -25,7 +26,8 @@ const form = ref({ title: '', subtitle: '', owner: '社区运营 · 李知夏', 
 
 const configs: Record<string, any> = {
   broadcast: {
-    api: 'broadcasts', title: '社区喇叭', mobileTitle: '小区喇叭站', tone: 'broadcast', icon: Megaphone,
+    api: 'broadcasts', title: '社区喇叭', tone: 'broadcast', icon: Megaphone,
+    ownerLabel: '喇叭归属小区', scopeNote: '喇叭列表仅展示所选小区',
     description: '运营社区即时播报、邻里话题、重要提醒和互动内容', create: '发布喇叭',
     tabs: ['全部', '已发布', '待审核', '定时发布', '已下架'],
     metrics: [
@@ -34,14 +36,10 @@ const configs: Record<string, any> = {
       { label: '今日互动', value: '1,286', note: '评论与点赞' },
       { label: '内容触达率', value: '82.4%', note: '近 7 日 +3.2%' },
     ],
-    previews: [
-      { title: '今晚中心广场有露天电影', meta: '刚刚 · 186 人互动' },
-      { title: '3 栋电梯临时检修提醒', meta: '42 分钟前 · 重要' },
-      { title: '社区设施期待投票', meta: '328 人参与' },
-    ],
   },
   items: {
-    api: 'items', title: '社区物品', mobileTitle: '最近热门商品', tone: 'items', icon: ShoppingBag,
+    api: 'items', title: '社区物品', tone: 'items', icon: ShoppingBag,
+    ownerLabel: '物品归属小区', scopeNote: '物品列表仅展示所选小区',
     description: '管理邻里闲置物品、热门推荐、商品审核及交易状态', create: '新增物品',
     tabs: ['全部', '在售', '待审核', '已售出', '已下架'],
     metrics: [
@@ -50,14 +48,10 @@ const configs: Record<string, any> = {
       { label: '本周成交', value: '86', note: '成交额 ¥12,680' },
       { label: '热门推荐位', value: '8 / 12', note: '剩余 4 个展位' },
     ],
-    previews: [
-      { title: '九成新儿童平衡车', meta: '¥128 · 18 人想要' },
-      { title: '露营折叠椅两把', meta: '¥90 · 热门' },
-      { title: '儿童绘本 30 册', meta: '¥60 · 12 人想要' },
-    ],
   },
   help: {
-    api: 'help-requests', title: '邻里互助', mobileTitle: '邻里互助', tone: 'help', icon: HandHeart,
+    api: 'help-requests', title: '邻里互助', tone: 'help', icon: HandHeart,
+    ownerLabel: '互助归属小区', scopeNote: '互助列表仅展示所选小区',
     description: '管理居民求助、邻里响应、撮合履约及互助信用评价', create: '代发互助',
     tabs: ['全部', '待响应', '匹配中', '进行中', '已完成'],
     metrics: [
@@ -66,14 +60,10 @@ const configs: Record<string, any> = {
       { label: '本周完成', value: '126', note: '完成率 94.6%' },
       { label: '互助信用分', value: '96.2', note: '社区平均分' },
     ],
-    previews: [
-      { title: '帮忙照看两小时宠物', meta: '3 人响应 · 120m' },
-      { title: '需要借用家用梯子', meta: '进行中 · 已匹配' },
-      { title: '下午帮忙搬两箱书', meta: '刚刚 · 待响应' },
-    ],
   },
   life: {
-    api: 'life-posts', title: '社区生活', mobileTitle: '生活频道', tone: 'life', icon: Coffee,
+    api: 'life-posts', title: '社区生活', tone: 'life', icon: Coffee,
+    ownerLabel: '内容归属小区', scopeNote: '生活内容仅展示所选小区',
     description: '运营社区生活频道、便民指南、探店内容和专题推荐', create: '新建内容',
     tabs: ['全部', '已发布', '草稿', '待审核', '已下线'],
     metrics: [
@@ -81,11 +71,6 @@ const configs: Record<string, any> = {
       { label: '今日阅读', value: '6,328', note: '较昨日 +14.8%', attention: true },
       { label: '待审核', value: '9', note: '含 3 条商户投稿' },
       { label: '内容收藏率', value: '12.6%', note: '近 7 日 +1.9%' },
-    ],
-    previews: [
-      { title: '春日赏花地图', meta: '周末去哪 · 328 收藏' },
-      { title: '周边早餐店红榜', meta: '邻里探店 · 热门' },
-      { title: '旧衣回收点位指南', meta: '便民指南' },
     ],
   },
 }
@@ -196,31 +181,14 @@ watch(() => route.params.module, () => {
   page.value = 1
   load()
 })
-watch(() => app.currentCommunityId, load)
+watch(() => app.currentCommunityId, () => {
+  page.value = 1
+  load()
+})
 </script>
 
 <template>
-  <section :class="['mobile-module-overview', config.tone]">
-    <div class="mobile-module-identity">
-      <span><component :is="config.icon" :size="21" /></span>
-      <div>
-        <em>移动版首页运营位</em>
-        <h2>{{ config.mobileTitle }}</h2>
-        <p>数据由“{{ config.title }}”模块实时同步至邻里小栈移动端</p>
-      </div>
-    </div>
-    <div class="mobile-module-preview">
-      <div v-for="(item, index) in config.previews" :key="item.title">
-        <span>{{ index + 1 }}</span>
-        <p><strong>{{ item.title }}</strong><em>{{ item.meta }}</em></p>
-      </div>
-    </div>
-    <div class="mobile-module-state">
-      <span><i />展位正常</span>
-      <strong>自动同步</strong>
-      <button @click="app.showToast('移动端展位配置已打开')">展位配置<ChevronRight :size="13" /></button>
-    </div>
-  </section>
+  <CommunityFilterBar :owner-label="config.ownerLabel" :scope-note="config.scopeNote" />
 
   <section class="community-operation-metrics">
     <div v-for="metric in config.metrics" :key="metric.label">
@@ -242,7 +210,6 @@ watch(() => app.currentCommunityId, load)
         <input v-model="query" :placeholder="`搜索${config.title}标题、发布人或分类…`" @keyup.enter="load" />
       </div>
       <div>
-        <button><Filter :size="16" />所属社区<ChevronDown :size="14" /></button>
         <button><SlidersHorizontal :size="16" />高级筛选</button>
         <button v-if="auth.hasPermission('community:broadcast:create')" class="primary-button" @click="create"><Plus :size="16" />{{ config.create }}</button>
       </div>
