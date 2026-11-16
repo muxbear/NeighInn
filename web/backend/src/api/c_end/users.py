@@ -26,8 +26,12 @@ async def get_profile(user: CurrentUser, db: DbSession):
 
 @router.put("/users/me")
 async def update_profile(payload: ProfileIn, user: CurrentUser, db: DbSession):
-    if payload.nickname:
-        user.nickname = payload.nickname[:24]
+    if payload.nickname is not None:
+        user.nickname = payload.nickname.strip()[:24]
+    if payload.email is not None:
+        user.email = payload.email.strip()[:128]
+    if payload.bio is not None:
+        user.bio = payload.bio.strip()[:500]
     await db.commit()
     return ok(await svc.serialize_profile(db, user), "资料已更新")
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Coffee, HandHeart, Megaphone, MoreHorizontal, Plus, Search, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
+import { Coffee, EyeOff, HandHeart, Megaphone, Pencil, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
 import { operationsApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -174,6 +174,20 @@ function toggleRow(id: string) {
     : [...selectedRows.value, id]
 }
 
+function rowActionIcon(row: any) {
+  if (module.value === 'help') return HandHeart
+  return row.status === '待审核' ? ShieldCheck : Pencil
+}
+
+function rowActionLabel(row: any) {
+  if (module.value === 'help') return '人工撮合'
+  return row.status === '待审核' ? '审核内容' : '编辑内容'
+}
+
+function rowOfflineLabel() {
+  return module.value === 'help' ? '关闭互助' : '下架内容'
+}
+
 onMounted(load)
 watch(() => route.params.module, () => {
   activeTab.value = '全部'
@@ -233,19 +247,23 @@ watch(() => app.currentCommunityId, () => {
             <td>
               <div class="operation-content-cell">
                 <span :class="config.tone"><component :is="config.icon" :size="16" /></span>
-                <div><strong>{{ row.title }}</strong><em>{{ row.code }} · {{ row.subtitle }}</em></div>
+                <div><strong :title="row.title">{{ row.title }}</strong><em :title="row.subtitle">{{ row.code }} · {{ row.subtitle }}</em></div>
               </div>
             </td>
-            <td>{{ row.owner }}</td>
-            <td><span class="operation-category">{{ row.category }}</span></td>
-            <td><span class="operation-performance">{{ row.performance }}</span></td>
+            <td><span class="cell-ellipsis md" :title="row.owner">{{ row.owner }}</span></td>
+            <td><span class="operation-category cell-ellipsis sm" :title="row.category">{{ row.category }}</span></td>
+            <td><span class="operation-performance cell-ellipsis md" :title="row.performance">{{ row.performance }}</span></td>
             <td><StatusBadge :value="row.status" /></td>
             <td>{{ row.updatedAt }}</td>
             <td>
-              <button class="row-action" @click="review(row)">
-                {{ module === 'help' ? '撮合' : row.status === '待审核' ? '审核' : '编辑' }}
-              </button>
-              <button class="row-more" @click="offline(row)"><MoreHorizontal :size="17" /></button>
+              <div class="row-actions">
+                <button class="row-icon-button" :aria-label="rowActionLabel(row)" :data-tip="rowActionLabel(row)" @click="review(row)">
+                  <component :is="rowActionIcon(row)" :size="15" />
+                </button>
+                <button class="row-icon-button danger" :aria-label="rowOfflineLabel()" :data-tip="rowOfflineLabel()" @click="offline(row)">
+                  <EyeOff :size="15" />
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>

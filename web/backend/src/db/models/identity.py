@@ -20,6 +20,9 @@ class User(Entity):
     phone_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     nickname: Mapped[str] = mapped_column(String(64), default="")
     avatar_key: Mapped[str] = mapped_column(String(255), default="")
+    # 资料补充：邮箱与个人描述（移动端 UserProfile M07；后台业主档案独立列展示）。
+    email: Mapped[str] = mapped_column(String(128), default="")
+    bio: Mapped[str] = mapped_column(Text, default="")
     gender: Mapped[str] = mapped_column(String(8), default="")
     # ACTIVE / FROZEN / CANCELLED（注销后匿名化，BR-10）
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)

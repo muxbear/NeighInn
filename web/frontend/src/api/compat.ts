@@ -135,6 +135,7 @@ export function normalizeResident(row: any): any {
     ...row,
     certification: mapStatus(row.certification ?? row.certificationStatus),
     certificationStatus: row.certificationStatus ?? row.certification,
+    realnameStatusLabel: mapStatus(row.realnameStatus),
     status: RESIDENT_STATUS_LABELS[row.status] ?? mapStatus(row.status),
     joinedAt: row.joinedAt || '—',
   }

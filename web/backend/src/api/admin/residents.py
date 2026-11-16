@@ -166,9 +166,49 @@ async def _cert_detail(db: DbSession, cert: Certification) -> dict:
     return row
 
 
+def _credit_level(score: int) -> str:
+    if score >= 90:
+        return "极好"
+    if score >= 70:
+        return "良好"
+    if score >= 50:
+        return "一般"
+    return "待提升"
+
+
+def _cert_brief(cert: Certification) -> dict:
+    return {
+        "id": str(cert.id),
+        "type": cert.type,
+        "status": cert.status,
+        "submittedAt": int(cert.submitted_at.timestamp() * 1000) if cert.submitted_at else 0,
+    }
+
+
+async def _latest_certifications(db: DbSession, user_id: int) -> dict[str, Certification]:
+    """取用户最近一次实名认证 / 业主认证审核单，供档案页查看认证照片。"""
+    rows = list((await db.execute(
+        select(Certification).where(
+            Certification.user_id == user_id,
+            Certification.type.in_(["REALNAME", "OWNER_PROOF"]),
+        ).order_by(Certification.submitted_at.desc(), Certification.id.desc())
+    )).scalars().all())
+    latest: dict[str, Certification] = {}
+    for cert in rows:
+        latest.setdefault(cert.type, cert)
+    return latest
+
+
 async def _resident_row(db: DbSession, resident: Resident) -> dict:
     community = await db.get(Community, resident.community_id)
     user = await db.get(User, resident.user_id) if resident.user_id else None
+    latest_certs = await _latest_certifications(db, resident.user_id) if resident.user_id else {}
+    realname_cert = latest_certs.get("REALNAME")
+    owner_cert = latest_certs.get("OWNER_PROOF")
+    phone_raw = decrypt_field(resident.phone_enc)
+    if not phone_raw and user:
+        phone_raw = decrypt_field(user.phone_enc)
+    phone = mask_phone(phone_raw) if phone_raw else ""
     return {
         "id": str(resident.id),
         "communityId": str(resident.community_id),
@@ -177,8 +217,16 @@ async def _resident_row(db: DbSession, resident: Resident) -> dict:
         "name": resident.name,
         # 档案姓名来自住户认证/后台维护；nickname 为 App 展示昵称，二者分开返回便于前台核对。
         "nickname": user.nickname if user else "",
+        "avatarKey": user.avatar_key if user else "",
+        "email": user.email if user else "",
+        "bio": user.bio if user else "",
+        "creditScore": user.credit_score if user else 0,
+        "creditLevel": _credit_level(user.credit_score) if user else "",
+        "realnameStatus": user.realname_status if user else "UNVERIFIED",
+        "realnameCert": _cert_brief(realname_cert) if realname_cert else None,
+        "ownerCert": _cert_brief(owner_cert) if owner_cert else None,
         "gender": resident.gender,
-        "phone": mask_phone(decrypt_field(resident.phone_enc)),
+        "phone": phone,
         "identity": resident.identity_type,
         "building": resident.building,
         "relationship": resident.relationship,

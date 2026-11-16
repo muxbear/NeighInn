@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Building2, ChevronDown, Filter, Home, Pencil, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users } from 'lucide-vue-next'
-import { residentApi } from '@/api'
+import { Building2, Camera, ChevronDown, Filter, Home, Pencil, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users, X } from 'lucide-vue-next'
+import { certificationsApi, residentApi } from '@/api'
+import { fmtDateTime, mapStatus } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -21,6 +22,16 @@ const drawerOpen = ref(false)
 const editing = ref<any>(null)
 const form = ref<any>({})
 
+// 认证材料查看：点击身份认证 / 业主认证状态徽标后加载签名 URL 照片。
+const certViewerOpen = ref(false)
+const certViewerLoading = ref(false)
+const certViewerError = ref('')
+const certViewerTitle = ref('')
+const certViewerData = ref<any>(null)
+const certPhotoErrors = ref<Record<string, boolean>>({})
+
+const AVATAR_TONES = ['violet', 'blue', 'green', 'orange', 'plum', 'teal']
+
 const tabs = ['全部人员', '业主', '家属', '租户', '商务人员']
 const community = computed(() => app.currentCommunity)
 const summaryCards = computed(() => [
@@ -29,10 +40,6 @@ const summaryCards = computed(() => [
   { label: '家属与租户', value: summary.value.family, icon: UserRound, tone: 'green' },
   { label: '待完成认证', value: summary.value.pending, icon: ShieldCheck, tone: 'orange' },
 ])
-
-function levelClass(level: string) {
-  return { 普通用户: 'basic', 活跃用户: 'active', 社区达人: 'expert', 重点关怀: 'care' }[level] || 'basic'
-}
 
 async function load() {
   try {
@@ -98,6 +105,55 @@ async function remove(row: any) {
   }
 }
 
+function avatarTone(row: any) {
+  const key = String(row.avatarKey || row.nickname || row.name || '')
+  let hash = 0
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0
+  }
+  return AVATAR_TONES[hash % AVATAR_TONES.length]
+}
+
+function avatarText(row: any) {
+  return (row.nickname || row.name || '?').charAt(0)
+}
+
+function certOf(row: any, kind: 'realname' | 'owner') {
+  return kind === 'realname' ? row.realnameCert : row.ownerCert
+}
+
+async function openCertViewer(row: any, kind: 'realname' | 'owner') {
+  const cert = certOf(row, kind)
+  if (!cert?.id) {
+    app.showToast(kind === 'realname' ? '该人员暂无身份认证记录' : '该人员暂无业主认证记录')
+    return
+  }
+  certViewerTitle.value = `${kind === 'realname' ? '身份认证' : '业主认证'} · ${row.name}`
+  certViewerOpen.value = true
+  certViewerLoading.value = true
+  certViewerError.value = ''
+  certViewerData.value = null
+  certPhotoErrors.value = {}
+  try {
+    certViewerData.value = await certificationsApi.detail(cert.id)
+  } catch (exc: any) {
+    certViewerError.value = exc?.message || '认证材料加载失败'
+  } finally {
+    certViewerLoading.value = false
+  }
+}
+
+function closeCertViewer() {
+  certViewerOpen.value = false
+  certViewerData.value = null
+  certViewerError.value = ''
+  certPhotoErrors.value = {}
+}
+
+function onCertPhotoError(objectKey: string) {
+  certPhotoErrors.value = { ...certPhotoErrors.value, [objectKey]: true }
+}
+
 onMounted(load)
 watch(() => app.currentCommunityId, () => {
   // 与社区运维一致：切换社区后重置身份页签与列表搜索。
@@ -134,17 +190,51 @@ watch(() => app.currentCommunityId, () => {
     </div>
     <div class="table-wrap resident-table-wrap">
       <table class="resident-table">
-        <thead><tr><th>人员基本信息</th><th>身份类型</th><th>房屋 / 商铺</th><th>认证信息</th><th>用户级别</th><th>账号状态</th><th>加入时间</th><th>操作</th></tr></thead>
+        <thead>
+          <tr>
+            <th>头像</th><th>姓名</th><th>昵称</th><th>身份类型</th><th>房屋 / 商铺</th><th>信用</th>
+            <th>身份认证</th><th>业主认证</th><th>手机号</th><th>邮箱</th><th>个人描述</th><th>账号状态</th><th>加入时间</th><th>操作</th>
+          </tr>
+        </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.id">
-            <td><div class="resident-person-cell"><span>{{ row.name.charAt(0) }}</span><div><strong>{{ row.name }}</strong><em>昵称：{{ row.nickname || '—' }}</em><em>{{ row.gender ? `${row.gender} · ${row.phone}` : row.phone }}</em></div></div></td>
-            <td><span :class="['identity-tag', row.identity]">{{ row.identity }}</span></td>
-            <td><div class="resident-house-cell"><strong>{{ row.building }}</strong><span>{{ row.relationship }}</span></div></td>
-            <td><div class="resident-certification"><StatusBadge :value="row.certification" /><code>{{ row.certificationNo || '—' }}</code></div></td>
-            <td><span :class="['resident-level', levelClass(row.level)]">{{ row.level }}</span></td>
-            <td><StatusBadge :value="row.status" /></td><td>{{ row.joinedAt }}</td>
             <td>
-              <div class="resident-actions">
+              <span :class="['resident-avatar', avatarTone(row)]" :title="row.nickname || row.name">{{ avatarText(row) }}</span>
+            </td>
+            <td><span class="cell-ellipsis sm" :title="row.name">{{ row.name }}</span></td>
+            <td><span class="cell-ellipsis sm" :title="row.nickname || '—'">{{ row.nickname || '—' }}</span></td>
+            <td><span :class="['identity-tag', row.identity]">{{ row.identity }}</span></td>
+            <td><div class="resident-house-cell" :title="row.building || '—'"><strong>{{ row.building || '—' }}</strong><span>{{ row.relationship || '' }}</span></div></td>
+            <td><div class="resident-credit"><strong>{{ row.creditScore ?? '—' }}</strong><em v-if="row.creditLevel">{{ row.creditLevel }}</em></div></td>
+            <td>
+              <button
+                class="cert-status-button"
+                :class="{ clickable: !!row.realnameCert?.id }"
+                :title="row.realnameCert?.id ? '查看身份认证照片' : '暂无身份认证材料'"
+                @click="openCertViewer(row, 'realname')"
+              >
+                <StatusBadge :value="row.realnameStatusLabel || '未认证'" />
+                <Camera v-if="row.realnameCert?.id" :size="12" />
+              </button>
+            </td>
+            <td>
+              <button
+                class="cert-status-button"
+                :class="{ clickable: !!row.ownerCert?.id }"
+                :title="row.ownerCert?.id ? '查看业主认证照片' : '暂无业主认证材料'"
+                @click="openCertViewer(row, 'owner')"
+              >
+                <StatusBadge :value="row.certification" />
+                <Camera v-if="row.ownerCert?.id" :size="12" />
+              </button>
+            </td>
+            <td>{{ row.phone || '—' }}</td>
+            <td><span class="cell-ellipsis md" :title="row.email || '—'">{{ row.email || '—' }}</span></td>
+            <td><span class="cell-ellipsis lg" :title="row.bio || '—'">{{ row.bio || '—' }}</span></td>
+            <td><StatusBadge :value="row.status" /></td>
+            <td>{{ row.joinedAt }}</td>
+            <td>
+              <div class="row-actions">
                 <button
                   v-if="auth.hasPermission('community:resident:update')"
                   class="row-icon-button"
@@ -168,6 +258,45 @@ watch(() => app.currentCommunityId, () => {
     </div>
     <div class="resident-table-footer"><span>共 {{ total }} 条人员档案</span><div><button disabled>上一页</button><button class="current">1</button><button>下一页</button></div></div>
   </section>
+
+  <div v-if="certViewerOpen" class="modal-backdrop" @click.self="closeCertViewer">
+    <div class="modal-card cert-photo-modal">
+      <header class="cert-photo-head">
+        <div>
+          <strong>{{ certViewerTitle }}</strong>
+          <span v-if="certViewerData">{{ mapStatus(certViewerData.status) }} · 提交于 {{ fmtDateTime(certViewerData.submittedAt) }}</span>
+        </div>
+        <button class="cert-photo-close" aria-label="关闭认证照片" @click="closeCertViewer"><X :size="17" /></button>
+      </header>
+      <div class="modal-body">
+        <div v-if="certViewerLoading" class="cert-photo-hint">正在加载认证材料…</div>
+        <div v-else-if="certViewerError" class="cert-photo-hint error">{{ certViewerError }}</div>
+        <template v-else-if="certViewerData">
+          <div v-if="(certViewerData.materials || []).length" class="cert-photo-grid">
+            <a
+              v-for="material in certViewerData.materials"
+              :key="material.objectKey"
+              class="cert-photo-card"
+              :href="material.signedUrl || undefined"
+              target="_blank"
+              rel="noopener"
+            >
+              <img
+                v-if="material.signedUrl && !certPhotoErrors[material.objectKey]"
+                :src="material.signedUrl"
+                :alt="material.label"
+                @error="onCertPhotoError(material.objectKey)"
+              />
+              <div v-else class="cert-photo-missing">{{ material.signedUrl ? '图片加载失败，请检查 MinIO 地址' : '签名 URL 生成失败' }}</div>
+              <span>{{ material.label }}</span>
+            </a>
+          </div>
+          <EmptyState v-else title="暂无认证照片" description="该认证单未上传材料" />
+        </template>
+      </div>
+      <footer><button @click="closeCertViewer">关闭</button></footer>
+    </div>
+  </div>
 
   <NiDrawer :open="drawerOpen" :title="editing ? form.name : '新增社区人员'" :eyebrow="editing ? '维护档案' : '新建档案'" @close="drawerOpen = false">
     <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 18px">
