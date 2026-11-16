@@ -30,7 +30,8 @@ class User(Entity):
     realname_status: Mapped[str] = mapped_column(String(16), default="UNVERIFIED", index=True)
     # 注册引导：NEW（刚建号）/ PROFILE_COMPLETED（资料已完善或跳过）/ COMPLETED（引导完成）。
     # 存量用户迁移时回填 COMPLETED，避免升级后被强制拉去注册。
-    onboarding_status: Mapped[str] = mapped_column(String(16), default="COMPLETED", index=True)
+    # 注意：PROFILE_COMPLETED 长 17，列宽必须 ≥17（PostgreSQL 会严格校验 varchar 长度）。
+    onboarding_status: Mapped[str] = mapped_column(String(32), default="COMPLETED", index=True)
     # 注册时选择的意向小区：用于内容推荐/业主认证预选，业主证明通过后才写 Resident 正式绑定。
     intent_community_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("communities.id"), index=True

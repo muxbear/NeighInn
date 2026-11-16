@@ -154,19 +154,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 开发环境允许私网 IP 的移动端 H5 来源（真机/局域网调试）；生产环境仅使用显式白名单。
-_origin_regex = settings.cors_origin_regex if settings.app_env == "dev" else ""
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_origin_regex=_origin_regex or None,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     trace_id = request.headers.get("x-trace-id") or uuid.uuid4().hex[:16]
@@ -189,15 +176,33 @@ async def request_context(request: Request, call_next):
             )
     try:
         response = await call_next(request)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - 全局兜底必须捕获全部异常才能返回统一错误体
+        # 在中间件内部兜底，确保 500 响应也会经过外层 CORSMiddleware（见下方顺序说明），
+        # 否则浏览器会因缺少 CORS 头把 500 报成「网络连接失败」而非真实错误。
         _log_access(request, 500, _elapsed_ms(started_at))
-        raise
-    _log_access(request, response.status_code, _elapsed_ms(started_at))
+        response = await unhandled_error_handler(request, exc)
+    else:
+        _log_access(request, response.status_code, _elapsed_ms(started_at))
     response.headers["X-Trace-Id"] = trace_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
+
+
+# 开发环境允许私网 IP 的移动端 H5 来源（真机/局域网调试）；生产环境仅使用显式白名单。
+# 注意：必须最后添加，使 CORSMiddleware 位于 request_context 外层；Starlette 后添加的
+# 中间件更靠外，这样即使 request_context 生成 500 响应也能补上 CORS 头。
+_origin_regex = settings.cors_origin_regex if settings.app_env == "dev" else ""
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_origin_regex=_origin_regex or None,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 app.add_exception_handler(ApiError, api_error_handler)

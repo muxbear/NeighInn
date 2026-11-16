@@ -162,6 +162,16 @@ async def test_complete_registration_skip_and_validation(client):
     assert resp.json()["data"]["onboardingStatus"] == "PROFILE_COMPLETED"
 
 
+def test_onboarding_status_column_fits_all_values():
+    """PostgreSQL 严格校验 varchar 长度：PROFILE_COMPLETED 必须装得下。
+
+    SQLite 测试库不校验长度，需显式守护列宽，避免再次出现「完成注册」500。
+    """
+    values = ("NEW", "PROFILE_COMPLETED", "COMPLETED")
+    column = User.__table__.c.onboarding_status
+    assert column.type.length >= max(len(value) for value in values)
+
+
 @pytest.mark.asyncio
 async def test_cancelled_account_has_seven_day_cooldown(client, db_session):
     phone = "13955550007"

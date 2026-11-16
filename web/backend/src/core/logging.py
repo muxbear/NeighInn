@@ -186,6 +186,24 @@ class JsonFormatter(_RedactingFormatter):
 _configured = False
 
 
+def _ensure_utf8_streams() -> None:
+    """Windows 控制台默认 GBK，日志中出现项目路径的 U+200C 等字符时会抛
+    UnicodeEncodeError，进而打断异常响应（客户端表现为「网络连接失败」）。
+    统一改为 UTF-8 + backslashreplace，保证日志写入异常不会冒泡到业务请求。"""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding in {"", "utf8", "utf8mb4"}:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            # 捕获型 stdout（测试/IDE）可能不支持 reconfigure，保持原样即可。
+            continue
+
+
 def configure_logging(*, force: bool = False, log_to_file: bool | None = None) -> None:
     """初始化统一日志配置；可重复调用（默认只生效一次）。
 
@@ -196,6 +214,8 @@ def configure_logging(*, force: bool = False, log_to_file: bool | None = None) -
     global _configured
     if _configured and not force:
         return
+
+    _ensure_utf8_streams()
 
     level = settings.log_level.upper()
     use_json = settings.log_format.lower() == "json"
