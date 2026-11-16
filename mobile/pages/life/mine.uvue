@@ -1,0 +1,513 @@
+<template>
+  <scroll-view class="lmine" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="lmine__header">
+      <ni-status-bar />
+      <view class="lmine__glow" />
+      <view class="lmine__nav">
+        <view class="lmine__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="lmine__nav-title">我的生活动态</text>
+        <view class="lmine__nav-button lmine__nav-button--publish" @click="goPublish">
+          <ni-icon name="plus" :size="18" state="active" />
+        </view>
+      </view>
+
+      <view class="lmine__intro">
+        <view class="lmine__intro-icon">
+          <ni-icon name="image" :size="22" state="white" />
+        </view>
+        <view class="lmine__intro-copy">
+          <text class="lmine__intro-title">记录与审核进度</text>
+          <text class="lmine__intro-desc">待审核内容通过后会出现在小区生活和首页</text>
+        </view>
+        <view class="lmine__intro-count">
+          <text class="lmine__intro-count-value">{{ posts.length }}</text>
+          <text class="lmine__intro-count-label">条记录</text>
+        </view>
+      </view>
+    </view>
+
+    <scroll-view class="lmine__tabs-scroll" scroll-x :show-scrollbar="false">
+      <view class="lmine__tabs">
+        <view
+          v-for="filter in filters"
+          :key="filter"
+          class="lmine__tab"
+          :class="{ 'lmine__tab--active': activeFilter === filter }"
+          @click="selectFilter(filter)"
+        >
+          <text class="lmine__tab-text" :class="{ 'lmine__tab-text--active': activeFilter === filter }">{{ filter }}</text>
+        </view>
+      </view>
+    </scroll-view>
+
+    <view class="lmine__body">
+      <view v-if="loading && posts.length === 0" class="lmine__loading">
+        <ni-skeleton :rows="4" :avatar="false" />
+      </view>
+
+      <view v-else-if="filteredPosts.length === 0" class="lmine__empty">
+        <ni-empty
+          icon="image"
+          :title="activeFilter === '全部' ? '还没有发布生活动态' : `没有${activeFilter}的内容`"
+          desc="记录小区里的风景、日常与萌宠，和邻居分享"
+          action-text="去发布"
+          @action="goPublish"
+        />
+      </view>
+
+      <view v-else class="lmine__list">
+        <view
+          v-for="post in filteredPosts"
+          :key="post.id"
+          class="lmine__card"
+          hover-class="lmine__card--pressed"
+          @click="openPost(post)"
+        >
+          <view class="lmine__thumb-wrap">
+            <image v-if="post.type !== 'video'" class="lmine__thumb" :src="imageSrc(post)" mode="aspectFill" @error="markFailed(post)" />
+            <view v-else class="lmine__thumb-video">
+              <ni-icon name="play" :size="22" state="white" :filled="true" />
+              <text class="lmine__thumb-video-text">短视频</text>
+            </view>
+            <view v-if="post.type === 'video'" class="lmine__thumb-play">
+              <ni-icon name="play" :size="12" state="white" :filled="true" />
+            </view>
+          </view>
+          <view class="lmine__card-copy">
+            <view class="lmine__card-head">
+              <text class="lmine__card-title" :lines="2">{{ post.title }}</text>
+              <view class="lmine__status" :class="statusClass(post)">
+                <text class="lmine__status-text" :class="statusTextClass(post)">{{ statusText(post) }}</text>
+              </view>
+            </view>
+            <text class="lmine__card-desc" :lines="2">{{ post.description || '暂无描述' }}</text>
+            <view class="lmine__meta">
+              <text class="lmine__meta-text">{{ post.category }} · {{ post.time }}</text>
+              <view class="lmine__stats">
+                <ni-icon name="eye" :size="11" state="tertiary" />
+                <text class="lmine__stat-text">{{ post.views }}</text>
+                <ni-icon name="heart" :size="11" state="tertiary" />
+                <text class="lmine__stat-text">{{ post.likes }}</text>
+                <ni-icon name="message" :size="11" state="tertiary" />
+                <text class="lmine__stat-text">{{ post.comments }}</text>
+              </view>
+            </view>
+          </view>
+          <ni-icon name="chevron" :size="13" state="tertiary" />
+        </view>
+      </view>
+
+      <view v-if="posts.length > 0" class="lmine__end">
+        <view class="lmine__end-line" />
+        <text class="lmine__end-text">{{ hasMore ? '上拉加载更多' : '已经到底啦' }}</text>
+        <view class="lmine__end-line" />
+      </view>
+    </view>
+
+    <view class="lmine__bottom-space" />
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
+import type { LifePost } from '../../models'
+import { lifeService } from '../../services/life.service'
+import { useToast } from '../../composables/useToast'
+import { ERROR_IMAGE } from '../../utils/image'
+
+const { toast, showToast } = useToast()
+
+const posts = ref<LifePost[]>([])
+const loading = ref(false)
+const activeFilter = ref('全部')
+const page = ref(1)
+const hasMore = ref(true)
+const failedIds = ref<string[]>([])
+const filters = ['全部', '待审核', '已发布', '已驳回', '已下线']
+
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: '草稿',
+  PENDING_REVIEW: '待审核',
+  PUBLISHED: '已发布',
+  REJECTED: '已驳回',
+  OFFLINE: '已下线',
+}
+
+const filteredPosts = computed(() => {
+  if (activeFilter.value === '全部') return posts.value
+  return posts.value.filter((post) => statusText(post) === activeFilter.value)
+})
+
+onLoad(() => {
+  load(true)
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await load(true)
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+})
+
+onReachBottom(() => {
+  if (hasMore.value && !loading.value) load(false)
+})
+
+async function load(refresh: boolean): Promise<void> {
+  if (loading.value) return
+  loading.value = true
+  const targetPage = refresh ? 1 : page.value + 1
+  try {
+    const result = await lifeService.getMinePosts(targetPage, 20)
+    posts.value = targetPage === 1 ? result.list : [...posts.value, ...result.list]
+    page.value = targetPage
+    hasMore.value = result.hasMore
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+}
+
+function selectFilter(filter: string): void {
+  activeFilter.value = filter
+}
+
+function statusText(post: LifePost): string {
+  return post.statusLabel || STATUS_LABELS[post.status || ''] || '待审核'
+}
+
+function statusClass(post: LifePost): string {
+  const status = post.status || 'PENDING_REVIEW'
+  if (status === 'PUBLISHED') return 'lmine__status--published'
+  if (status === 'REJECTED') return 'lmine__status--rejected'
+  if (status === 'OFFLINE') return 'lmine__status--offline'
+  return 'lmine__status--pending'
+}
+
+function statusTextClass(post: LifePost): string {
+  const status = post.status || 'PENDING_REVIEW'
+  if (status === 'PUBLISHED') return 'lmine__status-text--published'
+  if (status === 'REJECTED') return 'lmine__status-text--rejected'
+  if (status === 'OFFLINE') return 'lmine__status-text--offline'
+  return 'lmine__status-text--pending'
+}
+
+function imageSrc(post: LifePost): string {
+  if (failedIds.value.indexOf(post.id) >= 0) return ERROR_IMAGE
+  return post.cover || post.images[0] || ERROR_IMAGE
+}
+
+function markFailed(post: LifePost): void {
+  if (failedIds.value.indexOf(post.id) < 0) {
+    failedIds.value = [...failedIds.value, post.id]
+  }
+}
+
+function openPost(post: LifePost): void {
+  if (post.status === 'PUBLISHED') {
+    uni.navigateTo({ url: `/pages/life/detail?id=${post.id}` })
+    return
+  }
+  showToast(`当前状态：${statusText(post)}，审核通过后可在小区生活查看`)
+}
+
+function goPublish(): void {
+  uni.navigateTo({ url: '/pages/publish/index?mode=life' })
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/profile/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.lmine {
+  flex: 1;
+  background-color: $ni-color-page;
+}
+.lmine__header {
+  padding-left: 15px;
+  padding-right: 15px;
+  padding-bottom: 16px;
+  background-image: linear-gradient(150deg, #fff5ed 0%, #fffaf5 58%, #faf8f5 100%);
+  position: relative;
+  overflow: hidden;
+}
+.lmine__glow {
+  position: absolute;
+  top: -80px;
+  right: -50px;
+  width: 210px;
+  height: 210px;
+  border-radius: 105px;
+  background-color: rgba(255, 179, 122, 0.2);
+}
+.lmine__nav {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.lmine__nav-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.8);
+  align-items: center;
+  justify-content: center;
+}
+.lmine__nav-button--publish {
+  background-color: $ni-color-primary-bg;
+}
+.lmine__nav-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.lmine__intro {
+  min-height: 76px;
+  padding: 13px 14px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-18;
+  background-color: rgba(255, 255, 255, 0.78);
+  box-shadow: $ni-shadow-sm;
+}
+.lmine__intro-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  background-image: linear-gradient(135deg, #ff9a62 0%, #ffb866 100%);
+  align-items: center;
+  justify-content: center;
+}
+.lmine__intro-copy {
+  flex: 1;
+  margin-left: 11px;
+}
+.lmine__intro-title {
+  font-size: $ni-font-15;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.lmine__intro-desc {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.lmine__intro-count {
+  align-items: center;
+  margin-left: 8px;
+}
+.lmine__intro-count-value {
+  font-size: $ni-font-22;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
+}
+.lmine__intro-count-label {
+  font-size: 8px;
+  color: $ni-color-text-tertiary;
+}
+.lmine__tabs-scroll {
+  height: 50px;
+  background-color: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #f0ece8;
+}
+.lmine__tabs {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 15px;
+  padding-right: 15px;
+  height: 50px;
+}
+.lmine__tab {
+  height: 28px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 9px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 7px;
+}
+.lmine__tab--active {
+  background-image: $ni-gradient-brand;
+}
+.lmine__tab-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.lmine__tab-text--active {
+  color: #ffffff;
+  font-weight: 700;
+}
+.lmine__body {
+  padding: 13px 14px 8px;
+}
+.lmine__loading {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.lmine__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.lmine__list {
+  width: 100%;
+}
+.lmine__card {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  border: $ni-border-card;
+  box-shadow: $ni-shadow-card;
+}
+.lmine__card--pressed {
+  opacity: 0.92;
+}
+.lmine__thumb-wrap {
+  width: 86px;
+  height: 86px;
+  border-radius: $ni-radius-12;
+  overflow: hidden;
+  position: relative;
+  background-color: #f0ece8;
+}
+.lmine__thumb {
+  width: 100%;
+  height: 100%;
+}
+.lmine__thumb-video {
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background-image: linear-gradient(135deg, #5c4a43 0%, #2f2825 100%);
+}
+.lmine__thumb-video-text {
+  margin-top: 4px;
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.82);
+}
+.lmine__thumb-play {
+  position: absolute;
+  left: 31px;
+  top: 31px;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: rgba(25, 22, 20, 0.5);
+  align-items: center;
+  justify-content: center;
+}
+.lmine__card-copy {
+  flex: 1;
+  margin-left: 10px;
+  margin-right: 6px;
+}
+.lmine__card-head {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.lmine__card-title {
+  flex: 1;
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+  margin-right: 6px;
+}
+.lmine__status {
+  height: 20px;
+  padding-left: 7px;
+  padding-right: 7px;
+  border-radius: 7px;
+  align-items: center;
+  justify-content: center;
+}
+.lmine__status--pending {
+  background-color: $ni-color-service-bg-2;
+}
+.lmine__status--published {
+  background-color: $ni-color-gift-bg;
+}
+.lmine__status--rejected {
+  background-color: #fdeaea;
+}
+.lmine__status--offline {
+  background-color: $ni-color-fill-2;
+}
+.lmine__status-text {
+  font-size: $ni-font-8;
+  font-weight: 600;
+}
+.lmine__status-text--pending {
+  color: $ni-color-service-deep;
+}
+.lmine__status-text--published {
+  color: $ni-color-gift-deep;
+}
+.lmine__status-text--rejected {
+  color: #c9525e;
+}
+.lmine__status-text--offline {
+  color: $ni-color-text-tertiary;
+}
+.lmine__card-desc {
+  margin-top: 4px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.lmine__meta {
+  margin-top: 7px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.lmine__meta-text {
+  font-size: 8px;
+  color: $ni-color-text-tertiary;
+}
+.lmine__stats {
+  flex-direction: row;
+  align-items: center;
+}
+.lmine__stat-text {
+  margin-left: 2px;
+  margin-right: 6px;
+  font-size: 8px;
+  color: $ni-color-text-tertiary;
+}
+.lmine__end {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding-top: 10px;
+  padding-bottom: 6px;
+}
+.lmine__end-line {
+  width: 25px;
+  height: 1px;
+  background-color: #e5ded8;
+}
+.lmine__end-text {
+  margin-left: 10px;
+  margin-right: 10px;
+  font-size: $ni-font-9;
+  color: #b2aaa4;
+}
+.lmine__bottom-space {
+  height: 24px;
+}
+</style>

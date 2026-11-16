@@ -372,7 +372,7 @@ import { APP_INFO } from '../../config/env'
 
 const appStore = useAppStore()
 const { toast, showToast } = useToast()
-const { prepareVideo, uploadOne } = useUpload()
+const { prepareVideo, uploadOne, uploadMany } = useUpload()
 
 const mode = ref<'item' | 'life'>('item')
 const step = ref(1)
@@ -648,16 +648,22 @@ async function submitLife(): Promise<void> {
   }
   lifeSubmitting.value = true
   try {
+    // 相册/相机返回的是本地临时路径，必须先上传到对象存储，
+    // 服务端只保存对象键，展示时再签发可访问 URL。
+    showToast('正在上传媒体文件…')
+    const media = lifeMediaType.value === 'video'
+      ? [await uploadOne(lifeVideo.value, 'LIFE_VIDEO')]
+      : await uploadMany(lifeImages.value, 'PUBLIC_IMAGE')
     await lifeService.publish({
       mediaType: lifeMediaType.value,
-      media: lifeMediaType.value === 'video' ? [lifeVideo.value] : lifeImages.value,
+      media,
       title: lifeTitle.value.trim(),
       description: lifeDescription.value.trim(),
       category: lifeCategory.value as any,
     })
-    showToast('生活动态已发布')
+    showToast('生活动态已提交审核')
     setTimeout(() => {
-      uni.switchTab({ url: '/pages/home/index' })
+      uni.navigateTo({ url: '/pages/life/mine' })
     }, 500)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '发布失败', 'alert')

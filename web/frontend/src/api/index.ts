@@ -198,10 +198,13 @@ export const operationsApi = {
   list: async (module: string, params: Dict = {}) => mapItems(await http.get<any, any>(`/${module}`, { params }), (row) => normalizeOperationRow(module, row)),
   create: (module: string, payload: Dict) => http.post<any, any>(`/${module}`, payload),
   itemDetail: (id: number | string) => http.get<any, any>(`/items/${id}`),
+  lifeDetail: (id: number | string) => http.get<any, any>(`/life-posts/${id}`),
   itemAudit: (id: number | string) => http.get<any, any>(`/items/${id}/ai-audit`),
   itemCategories: () => http.get<any, any>('/item-categories'),
   updateItem: (id: number | string, payload: Dict) => http.put<any, any>(`/items/${id}`, payload),
   deleteItem: (id: number | string) => http.delete<any, any>(`/items/${id}`),
+  updateLife: (id: number | string, payload: Dict) => http.put<any, any>(`/life-posts/${id}`, payload),
+  deleteLife: (id: number | string) => http.delete<any, any>(`/life-posts/${id}`),
   review: (module: string, id: number | string, payload: Dict = { decision: 'APPROVE' }) =>
     http.post<any, any>(`/${module}/${id}/review`, payload),
   // 物品下架接口强制要求 reason（FastAPI 请求体缺失会返回 422 参数校验失败）
@@ -312,6 +315,18 @@ export const certificationsApi = {
   },
   removeMaterial: (residentId: number | string, type: 'REALNAME' | 'OWNER_PROOF', objectKey: string) =>
     http.delete<any, any>(`/residents/${residentId}/certifications/${type}/materials`, { params: { objectKey } }),
+}
+
+export const filesApi = {
+  /** 管理端公开媒体上传（生活内容配图/短视频），返回 objectKey 与可访问 URL。 */
+  uploadMedia: (file: File, scene: 'LIFE_IMAGE' | 'LIFE_VIDEO' | 'PUBLIC_IMAGE' = 'LIFE_IMAGE') => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('scene', scene)
+    return http.post<any, any>('/files/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }
 
 export const reportsApi = {

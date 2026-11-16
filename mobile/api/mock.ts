@@ -274,7 +274,9 @@ function buildHome(): HomeBundle {
     hotItems: clone(onSale.slice(0, 10)),
     serviceHelp: clone(help),
     serviceOffer: clone(offer),
-    lifePosts: clone(state.lifePosts.slice(0, 10)),
+    lifePosts: clone(state.lifePosts
+      .filter((post) => !post.status || post.status === 'PUBLISHED')
+      .slice(0, 10)),
     notificationUnread: unreadNotificationCount(),
   }
 }
@@ -650,7 +652,8 @@ async function route(
   // ---------------- 小区生活 ----------------
   if (path === '/life/posts' && method === 'GET') {
     const category = query.category ?? ''
-    let list = [...state.lifePosts]
+    // 仅已发布内容出现在小区生活；无 status 的历史 Mock 数据视为已发布。
+    let list = state.lifePosts.filter((item) => !item.status || item.status === 'PUBLISHED')
     if (category && category !== '全部') list = list.filter((item) => item.category === category)
     list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     return pageResult(list, query)
@@ -670,13 +673,24 @@ async function route(
       avatarClass: 'orange',
       area: `阳光花园 · ${state.user.address.split(' ')[1] ?? '3号楼'}`,
       time: '刚刚',
-      views: 1,
+      status: 'PENDING_REVIEW',
+      statusLabel: '待审核',
+      views: 0,
       likes: 0,
       comments: 0,
       createdAt: Date.now(),
     }
     state.lifePosts.unshift(post)
     return post
+  }
+  if (segments[0] === 'life' && segments[1] === 'posts' && segments[2] === 'mine' && method === 'GET') {
+    const list = state.lifePosts.map((item) => ({
+      ...item,
+      status: item.status ?? 'PUBLISHED',
+      statusLabel: item.statusLabel ?? '已发布',
+    }))
+    list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    return pageResult(list, query)
   }
   if (segments[0] === 'life' && segments[1] === 'posts' && segments[3] === 'like' && method === 'POST') {
     const post = state.lifePosts.find((item) => item.id === segments[2])

@@ -19,39 +19,27 @@ from src.core.responses import (
     ok,
 )
 from src.core.storage import extension, get_minio, presign_download
+from src.core.upload import (
+    EXT_BY_TYPE,
+    IMAGE_TYPES,
+    MAX_IMAGE_UPLOAD_BYTES,
+    MAX_VIDEO_UPLOAD_BYTES,
+    VIDEO_TYPES,
+    detect_content_type,
+)
 from src.db.models import FileObject
 
 router = APIRouter(tags=["c:uploads"])
 logger = logging.getLogger(__name__)
 
-# 认证材料、纠纷证据一律私有桶；公开图片可走公共桶。
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+# 认证材料、纠纷证据一律私有桶；公开图片/生活短视频可走公共桶。
 SCENE_TYPES: dict[str, tuple[set[str], str]] = {
     "REALNAME_ID": (IMAGE_TYPES, "private"),
     "OWNER_PROOF": (IMAGE_TYPES | {"application/pdf"}, "private"),
     "ITEM_IMAGE": (IMAGE_TYPES, "public"),
     "PUBLIC_IMAGE": (IMAGE_TYPES, "public"),
+    "LIFE_VIDEO": (VIDEO_TYPES, "public"),
 }
-EXT_BY_TYPE = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "application/pdf": ".pdf",
-}
-
-
-def _detect_content_type(head: bytes) -> str:
-    """按文件头识别类型，不能只信任客户端 Content-Type（NF-06）。"""
-    if head.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if head.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
-        return "image/webp"
-    if head.startswith(b"%PDF-"):
-        return "application/pdf"
-    return ""
 
 
 @router.post("/uploads")
@@ -72,13 +60,20 @@ async def upload_file(
     content = await file.read()
     if not content:
         raise ApiError(ERR_PARAM, "上传文件为空", 400)
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise ApiError(ERR_FILE_TOO_LARGE, "单个文件不能超过 10MB", 413)
+    max_bytes = MAX_VIDEO_UPLOAD_BYTES if allowed == VIDEO_TYPES else MAX_IMAGE_UPLOAD_BYTES
+    if len(content) > max_bytes:
+        limit_mb = max_bytes // (1024 * 1024)
+        raise ApiError(ERR_FILE_TOO_LARGE, f"单个文件不能超过 {limit_mb}MB", 413)
 
-    detected = _detect_content_type(content[:16])
+    detected = detect_content_type(content[:16])
     if detected not in allowed:
-        raise ApiError(ERR_PARAM, "仅支持 JPG / PNG / WebP 图片" if "application/pdf" not in allowed
-                       else "仅支持 JPG / PNG / WebP 图片或 PDF 文件", 400)
+        if allowed == VIDEO_TYPES:
+            message = "仅支持 MP4 / MOV / WebM 短视频"
+        elif "application/pdf" in allowed:
+            message = "仅支持 JPG / PNG / WebP 图片或 PDF 文件"
+        else:
+            message = "仅支持 JPG / PNG / WebP 图片"
+        raise ApiError(ERR_PARAM, message, 400)
     # 以文件头识别结果为准；不信任客户端 multipart 声明的 Content-Type，
     # 避免 App/小程序端把图片统一标成 octet-stream 时误拒。
     original_name = file.filename or f"upload{EXT_BY_TYPE.get(detected, extension(''))}"

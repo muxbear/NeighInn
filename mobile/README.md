@@ -71,7 +71,7 @@ npm run icons        # 重新生成图标与内置头像资源
 
 ```
 App.uvue / main.ts / pages.json / manifest.json / uni.scss
-pages/                  39 个页面（主包 + trade/social/pay 等分包）
+pages/                  40 个页面（主包 + trade/social/pay 等分包）
 components/             40 个 ni-* 基础组件与业务组件
 composables/            useAuth / useIM / usePay / useUpload / useAudit / useToast ...
 services/               业务服务层（含 ws.service 长连接封装）

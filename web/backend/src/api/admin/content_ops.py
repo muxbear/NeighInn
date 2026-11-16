@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 
-from src.api.utils import paginate
+from src.api.utils import epoch_ms, paginate
 from src.core.audit import write_audit, write_outbox
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.permissions import require_permission
@@ -15,13 +15,16 @@ from src.core.responses import (
     ok,
     paginated,
 )
+from src.core.storage import public_media_url
 from src.db.models import (
     Broadcast,
     Community,
+    Favorite,
     HelpRequest,
     HelpResponse,
     Item,
     ItemComment,
+    LifeComment,
     LifePost,
     User,
 )
@@ -305,18 +308,39 @@ async def close_help(help_id: int, payload: dict, request: Request,
 
 # ---------------------------------------------------------------- 社区生活
 
+class LifePostUpdateIn(BaseModel):
+    """后台编辑生活内容：仅传需要变更的字段，未传字段保持原值。"""
+
+    title: str | None = None
+    category: str | None = None
+    description: str | None = None
+    media: list[str] | None = None
+    coverKey: str | None = None
+    mediaType: str | None = None
+
+
 async def _life_row(db: DbSession, post: LifePost) -> dict:
     community = await db.get(Community, post.community_id)
     author = await db.get(User, post.author_id)
+    media_keys = [str(key) for key in (post.media or []) if key]
+    media = [public_media_url(key) for key in media_keys]
+    cover_key = post.cover_key or (media_keys[0] if media_keys else "")
+    media_label = "短视频" if post.media_type == "VIDEO" else "照片集"
     return {
-        "id": str(post.id), "title": post.title, "category": post.category,
+        "id": str(post.id), "code": f"LIFE-{post.id:04d}",
+        "title": post.title, "category": post.category,
+        "subtitle": f"{media_label} · {len(media_keys)} 个媒体",
         "status": post.status, "author": author.nickname if author else "",
-        "authorId": str(post.author_id), "media": post.media or [],
-        "cover": post.cover_key, "description": post.description,
+        "authorId": str(post.author_id),
+        "media": media, "mediaKeys": media_keys, "mediaType": post.media_type,
+        "cover": public_media_url(cover_key), "coverKey": cover_key,
+        "description": post.description,
         "stats": post.stats or {},
         "communityId": str(post.community_id),
         "communityName": community.name if community else "",
-        "publishedAt": int(post.published_at.timestamp() * 1000) if post.published_at else 0,
+        "createdAt": epoch_ms(post.created_at),
+        "updatedAt": epoch_ms(post.updated_at),
+        "publishedAt": epoch_ms(post.published_at),
     }
 
 
@@ -343,6 +367,76 @@ async def life_post_detail(post_id: int, admin: CurrentAdmin, db: DbSession):
     if not post:
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
     return ok(await _life_row(db, post))
+
+
+@router.put("/life-posts/{post_id}",
+            dependencies=[Depends(require_permission("community:life:update"))])
+async def update_life_post(post_id: int, payload: LifePostUpdateIn, request: Request,
+                           admin: CurrentAdmin, db: DbSession):
+    """后台编辑生活内容（详设 7.5.7）：正文元数据可改，媒体文件与作者保持不变。"""
+    post = await db.get(LifePost, post_id)
+    if not post:
+        raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+
+    title = payload.title.strip() if payload.title is not None else post.title
+    if not (2 <= len(title) <= 30):
+        raise ApiError(ERR_PARAM, "标题需 2–30 个字", 400)
+
+    category = payload.category.strip() if payload.category is not None else post.category
+    if not (1 <= len(category) <= 32):
+        raise ApiError(ERR_PARAM, "分类需 1–32 个字", 400)
+
+    description = (payload.description.strip() if payload.description is not None
+                   else post.description)
+    if len(description) > 500:
+        raise ApiError(ERR_PARAM, "正文最多 500 个字", 400)
+
+    media_keys = [str(key) for key in (post.media or []) if key]
+    if payload.media is not None:
+        media_keys = []
+        for raw_key in payload.media:
+            key = str(raw_key).strip()
+            if key and key not in media_keys:
+                media_keys.append(key)
+        if not media_keys:
+            raise ApiError(ERR_PARAM, "请至少保留一张图片或一个视频", 400)
+
+    media_type = payload.mediaType or post.media_type
+    if payload.media is not None and payload.mediaType is None:
+        # 未显式指定媒体类型时按原类型与媒体数量推断。
+        media_type = ("VIDEO" if post.media_type == "VIDEO" and len(media_keys) == 1
+                      else "GALLERY")
+    if media_type not in ("VIDEO", "GALLERY"):
+        raise ApiError(ERR_PARAM, "媒体类型不合法", 400)
+    if media_type == "VIDEO" and len(media_keys) != 1:
+        raise ApiError(ERR_PARAM, "短视频动态只能包含一个视频", 400)
+    if media_type == "GALLERY" and len(media_keys) > 12:
+        raise ApiError(ERR_PARAM, "图文动态最多保留 12 个媒体", 400)
+
+    cover_key = post.cover_key
+    if payload.coverKey is not None:
+        cover_key = payload.coverKey.strip()
+        if cover_key and cover_key not in media_keys:
+            raise ApiError(ERR_PARAM, "封面必须使用当前内容的媒体文件", 400)
+    if not cover_key or cover_key not in media_keys:
+        cover_key = media_keys[0] if media_keys else ""
+
+    before = {"title": post.title, "category": post.category,
+              "description": post.description, "coverKey": post.cover_key,
+              "media": list(post.media or []), "mediaType": post.media_type}
+    post.title = title
+    post.category = category
+    post.description = description
+    post.media = media_keys
+    post.cover_key = cover_key
+    post.media_type = media_type
+    await write_audit(db, request, actor=admin, action="life.update",
+                      resource_type="life_post", resource_id=post.id,
+                      before=before, after={"title": title, "category": category,
+                                            "coverKey": cover_key, "media": media_keys,
+                                            "mediaType": media_type})
+    await db.commit()
+    return ok(await _life_row(db, post), "内容已更新")
 
 
 @router.post("/life-posts/{post_id}/review",
@@ -391,6 +485,29 @@ async def offline_life_post(post_id: int, payload: dict, request: Request,
                       before=before, after={"status": post.status, "reason": reason})
     await db.commit()
     return ok(await _life_row(db, post), "内容已下线")
+
+
+@router.delete("/life-posts/{post_id}",
+               dependencies=[Depends(require_permission("community:life:delete"))])
+async def delete_life_post(post_id: int, request: Request,
+                           admin: CurrentAdmin, db: DbSession):
+    """删除生活内容：评论与收藏一并清理，审计日志保留删除前快照。"""
+    post = await db.get(LifePost, post_id)
+    if not post:
+        raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+    before = await _life_row(db, post)
+    author_id, title = post.author_id, post.title
+    await db.execute(delete(LifeComment).where(LifeComment.post_id == post.id))
+    await db.execute(delete(Favorite).where(Favorite.target_type == "LIFE",
+                                            Favorite.target_id == post.id))
+    await db.delete(post)
+    await notify_user(db, author_id, category="COMMUNITY", title="生活动态已被删除",
+                      description=f"「{title}」已被平台删除", icon="alert", tag="审核")
+    await write_audit(db, request, actor=admin, action="life.delete",
+                      resource_type="life_post", resource_id=post_id,
+                      before=before, after=None)
+    await db.commit()
+    return ok({"id": str(post_id)}, "内容已删除")
 
 
 # ---------------------------------------------------------------- 评论治理（W05-03 关联）

@@ -33,7 +33,8 @@ def get_minio() -> Minio | None:
 
 def extension(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
-    return suffix if suffix in {".jpg", ".jpeg", ".png", ".webp", ".pdf", ".mp4", ".xlsx", ".csv"} else ".bin"
+    return suffix if suffix in {".jpg", ".jpeg", ".png", ".webp", ".pdf", ".mp4",
+                                ".mov", ".webm", ".xlsx", ".csv"} else ".bin"
 
 
 def presign_upload(filename: str, scene: str, content_type: str) -> dict | None:
@@ -62,3 +63,23 @@ def presign_download(object_key: str, bucket: str | None = None, minutes: int = 
     except (S3Error, Urllib3Error, OSError, ValueError) as exc:
         logger.warning("签名 URL 生成失败（对象可能不存在或服务不可用）：%s", exc)
         return None
+
+
+PUBLIC_MEDIA_URL_TTL_MINUTES = 60 * 24 * 7
+
+
+def public_media_url(object_key: str | None,
+                     minutes: int = PUBLIC_MEDIA_URL_TTL_MINUTES) -> str:
+    """对象键 → 公共桶可访问 URL；已是 HTTP(S) 地址时原样返回。
+
+    移动端发布时提交对象键，读取时必须签名成人可访问的 URL，
+    否则 ``<image>`` 会把对象键当相对路径请求 404。
+    """
+    key = str(object_key or "").strip()
+    if not key:
+        return ""
+    if key.startswith(("http://", "https://")):
+        return key
+    return presign_download(
+        key, settings.minio_bucket_public, minutes=minutes
+    ) or key

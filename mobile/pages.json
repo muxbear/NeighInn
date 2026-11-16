@@ -216,6 +216,14 @@
           }
         },
         {
+          "path": "mine",
+          "style": {
+            "navigationStyle": "custom",
+            "enablePullDownRefresh": true,
+            "backgroundColor": "#FAF8F5"
+          }
+        },
+        {
           "path": "detail",
           "style": {
             "navigationStyle": "custom",

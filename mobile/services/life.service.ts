@@ -8,6 +8,11 @@ export const lifeService = {
     return lifeApi.getLifePosts({ category, page, pageSize })
   },
 
+  /** 我的生活动态（含待审核/已驳回等状态），用于「我的」页查看审核进度。 */
+  getMinePosts(page = 1, pageSize = 20): Promise<PageResult<LifePost>> {
+    return lifeApi.getMyLifePosts(page, pageSize)
+  },
+
   getDetail(id: string): Promise<LifePost> {
     return lifeApi.getLifePost(id)
   },

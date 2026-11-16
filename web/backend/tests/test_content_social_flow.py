@@ -6,8 +6,9 @@
 """
 
 import pytest
+from sqlalchemy import func, select
 
-from src.db.models import Item
+from src.db.models import Favorite, Item, LifeComment
 from tests.conftest import (
     ADMIN_BASE,
     C_BASE,
@@ -61,6 +62,121 @@ async def test_life_publish_review_visibility(client, db_session):
     comment = await client.post(f"{C_BASE}/life/posts/{post_id}/comments",
                                 json={"content": "拍得太好了！"}, headers=bearer(buyer["token"]))
     assert comment.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_life_mine_status_and_operation_metrics(client, db_session):
+    """我的生活动态返回审核状态；社区生活指标卡使用真实聚合而非占位值。"""
+    seller, buyer, _csrf = await _two_users(client)
+    publish = await client.post(f"{C_BASE}/life/posts", json={
+        "mediaType": "gallery", "media": ["life/dog-1.jpg"],
+        "title": "小区里的柯基日常", "description": "每天傍晚在中心花园遛弯。",
+        "category": "萌宠生活"}, headers=bearer(seller["token"]))
+    assert publish.status_code == 200, publish.text
+    post_id = publish.json()["data"]["id"]
+
+    mine = (await client.get(f"{C_BASE}/life/posts/mine",
+                             headers=bearer(seller["token"]))).json()["data"]
+    row = next(post for post in mine["items"] if post["id"] == post_id)
+    assert row["status"] == "PENDING_REVIEW"
+    assert row["statusLabel"] == "待审核"
+
+    overview = (await client.get(f"{ADMIN_BASE}/operations/overview",
+                                 params={"module": "life", "communityId": 1},
+                                 headers=admin_headers(client))).json()["data"]
+    assert overview["metrics"]["pendingReview"] >= 1
+    assert overview["statusCounts"]["PENDING_REVIEW"] >= 1
+
+    await client.post(f"{ADMIN_BASE}/life-posts/{post_id}/review",
+                      json={"decision": "APPROVE"}, headers=admin_headers(client))
+
+    # 「全部」是移动端 Tab 标签，不应被当成真实分类过滤掉已发布内容。
+    feed = (await client.get(f"{C_BASE}/life/posts", params={"category": "全部"},
+                             headers=bearer(buyer["token"]))).json()["data"]
+    assert any(post["id"] == post_id for post in feed["items"])
+
+    detail = (await client.get(f"{C_BASE}/life/posts/{post_id}",
+                               headers=bearer(buyer["token"]))).json()["data"]
+    assert detail["status"] == "PUBLISHED"
+    assert detail["views"] == 1
+
+    overview = (await client.get(f"{ADMIN_BASE}/operations/overview",
+                                 params={"module": "life", "communityId": 1},
+                                 headers=admin_headers(client))).json()["data"]
+    assert overview["metrics"]["todayViews"] >= 1
+    assert overview["metrics"]["totalViews"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_admin_life_edit_and_delete(client, db_session):
+    """后台编辑生活内容标题/分类/正文并删除，评论与收藏随内容清理。"""
+    seller, buyer, _csrf = await _two_users(client)
+    publish = await client.post(f"{C_BASE}/life/posts", json={
+        "mediaType": "gallery", "media": ["life/park-2.jpg", "life/park-3.jpg"],
+        "title": "春日赏花地图", "description": "小区东门的樱花开了。",
+        "category": "小区风景"}, headers=bearer(seller["token"]))
+    assert publish.status_code == 200, publish.text
+    post_id = publish.json()["data"]["id"]
+    await client.post(f"{ADMIN_BASE}/life-posts/{post_id}/review",
+                      json={"decision": "APPROVE"}, headers=admin_headers(client))
+
+    update = await client.put(f"{ADMIN_BASE}/life-posts/{post_id}", json={
+        "title": "春日赏花路线更新",
+        "category": "邻里日常",
+        "description": "补充东门与北门的赏花路线。"}, headers=admin_headers(client))
+    assert update.status_code == 200, update.text
+    assert update.json()["data"]["title"] == "春日赏花路线更新"
+    assert update.json()["data"]["category"] == "邻里日常"
+
+    # 图片可增删改：替换媒体列表并指定新封面
+    media_update = await client.put(f"{ADMIN_BASE}/life-posts/{post_id}", json={
+        "media": ["life/park-new.jpg", "life/park-2.jpg"],
+        "mediaType": "GALLERY", "coverKey": "life/park-new.jpg"},
+        headers=admin_headers(client))
+    assert media_update.status_code == 200, media_update.text
+    assert media_update.json()["data"]["mediaKeys"] == [
+        "life/park-new.jpg", "life/park-2.jpg"]
+    assert media_update.json()["data"]["coverKey"] == "life/park-new.jpg"
+
+    # 后台编辑立即反映到移动端详情
+    detail = (await client.get(f"{C_BASE}/life/posts/{post_id}",
+                               headers=bearer(buyer["token"]))).json()["data"]
+    assert detail["title"] == "春日赏花路线更新"
+    assert detail["description"] == "补充东门与北门的赏花路线。"
+    assert detail["mediaKeys"] == ["life/park-new.jpg", "life/park-2.jpg"]
+
+    # 标题长度不合法、媒体为空、短视频多文件时拒绝
+    bad = await client.put(f"{ADMIN_BASE}/life-posts/{post_id}",
+                           json={"title": "短"}, headers=admin_headers(client))
+    assert bad.status_code == 400
+    empty_media = await client.put(f"{ADMIN_BASE}/life-posts/{post_id}",
+                                   json={"media": []}, headers=admin_headers(client))
+    assert empty_media.status_code == 400
+    bad_video = await client.put(
+        f"{ADMIN_BASE}/life-posts/{post_id}",
+        json={"media": ["life/a.mp4", "life/b.mp4"], "mediaType": "VIDEO"},
+        headers=admin_headers(client))
+    assert bad_video.status_code == 400
+
+    await client.post(f"{C_BASE}/life/posts/{post_id}/like", headers=bearer(buyer["token"]))
+    await client.post(f"{C_BASE}/life/posts/{post_id}/comments",
+                      json={"content": "路线很实用"}, headers=bearer(buyer["token"]))
+
+    delete = await client.delete(f"{ADMIN_BASE}/life-posts/{post_id}",
+                                 headers=admin_headers(client))
+    assert delete.status_code == 200, delete.text
+    missing = await client.get(f"{ADMIN_BASE}/life-posts/{post_id}",
+                               headers=admin_headers(client))
+    assert missing.status_code == 404
+
+    favorites = int((await db_session.scalar(
+        select(func.count()).select_from(Favorite).where(
+            Favorite.target_type == "LIFE",
+            Favorite.target_id == int(post_id)))) or 0)
+    comments = int((await db_session.scalar(
+        select(func.count()).select_from(LifeComment).where(
+            LifeComment.post_id == int(post_id)))) or 0)
+    assert favorites == 0 and comments == 0
 
 
 @pytest.mark.asyncio

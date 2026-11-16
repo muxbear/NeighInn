@@ -6,6 +6,10 @@ export function getLifePosts(query: LifePostQuery = {}): Promise<PageResult<Life
   return get<PageResult<LifePost>>(withQuery('/life/posts', query))
 }
 
+export function getMyLifePosts(page = 1, pageSize = 20): Promise<PageResult<LifePost>> {
+  return get<PageResult<LifePost>>(withQuery('/life/posts/mine', { page, pageSize }))
+}
+
 export function getLifePost(id: string): Promise<LifePost> {
   return get<LifePost>(`/life/posts/${id}`)
 }

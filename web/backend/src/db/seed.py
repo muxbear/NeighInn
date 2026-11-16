@@ -110,6 +110,8 @@ PERMISSIONS: list[tuple[str, str, str, str | None]] = [
     ("community:help:close", "关闭互助", "按钮", None),
     ("community:life:view", "查看社区生活", "页面", "/community-operations/life"),
     ("community:life:create", "新建生活内容", "按钮", None),
+    ("community:life:update", "编辑生活内容", "按钮", None),
+    ("community:life:delete", "删除生活内容", "按钮", None),
     ("community:life:review", "审核生活内容", "按钮", None),
     ("community:life:offline", "下线生活内容", "按钮", None),
     ("communication:notice:view", "查看公告", "页面", "/communication/notices"),

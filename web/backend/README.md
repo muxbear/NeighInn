@@ -91,7 +91,7 @@ uv run python run.py
 
 ```bash
 uv run ruff check src tests run.py scripts
-uv run pytest -q            # 99 个测试（状态机/认证注册/认证上传/待办/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
+uv run pytest -q            # 121 个测试（状态机/认证注册/认证上传/待办/物品/订单资金/内容社交/管理面/WS/超时任务/Outbox/2FA）
 ```
 
 ## 双端接线（联调）

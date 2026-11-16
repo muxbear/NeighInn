@@ -5,7 +5,11 @@
         <image class="life-card__gallery-image" :src="imageSrc(post.images[0])" mode="aspectFill" lazy-load @error="markFailed(post.images[0])" />
         <image class="life-card__gallery-image life-card__gallery-image--right" :src="imageSrc(post.images[1])" mode="aspectFill" lazy-load @error="markFailed(post.images[1])" />
       </view>
-      <image v-else class="life-card__cover" :src="imageSrc(post.cover || post.images[0])" mode="aspectFill" lazy-load @error="markFailed(post.cover || post.images[0])" />
+      <image v-else-if="post.type !== 'video'" class="life-card__cover" :src="imageSrc(post.cover || post.images[0])" mode="aspectFill" lazy-load @error="markFailed(post.cover || post.images[0])" />
+      <view v-else class="life-card__video-cover">
+        <ni-icon name="play" :size="30" state="white" :filled="true" />
+        <text class="life-card__video-cover-text">短视频</text>
+      </view>
 
       <view v-if="post.type === 'video'" class="life-card__play">
         <ni-icon name="play" :size="20" state="white" :filled="true" />
@@ -126,6 +130,18 @@ function onComment(): void {
 .life-card__cover {
   width: 100%;
   height: 100%;
+}
+.life-card__video-cover {
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background-image: linear-gradient(135deg, #5c4a43 0%, #2f2825 100%);
+}
+.life-card__video-cover-text {
+  margin-top: 7px;
+  font-size: $ni-font-10;
+  color: rgba(255, 255, 255, 0.82);
 }
 .life-card__gallery {
   width: 100%;

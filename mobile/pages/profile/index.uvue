@@ -300,7 +300,7 @@ function goFavorites(): void {
   uni.navigateTo({ url: '/pages/mine/favorites' })
 }
 function goLife(): void {
-  uni.navigateTo({ url: '/pages/life/index' })
+  uni.navigateTo({ url: '/pages/life/mine' })
 }
 function goZoneService(): void {
   uni.navigateTo({ url: '/pages/zone/index?zone=service' })

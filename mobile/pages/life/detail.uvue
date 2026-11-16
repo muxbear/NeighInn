@@ -16,13 +16,13 @@
     <template v-if="post">
       <view class="ldetail__media">
         <template v-if="post.type === 'video'">
-          <image class="ldetail__video" :src="post.cover || post.images[0]" mode="aspectFill" />
-          <view class="ldetail__video-overlay" @click="toggleVideo">
-            <view class="ldetail__play">
-              <ni-icon :name="playing ? 'check' : 'play'" :size="24" state="white" :filled="!playing" />
-            </view>
-            <text class="ldetail__play-text">{{ playing ? '正在播放' : '点击播放视频' }}</text>
-          </view>
+          <video
+            class="ldetail__video"
+            :src="post.images[0]"
+            :controls="true"
+            :show-center-play-btn="true"
+            object-fit="cover"
+          />
           <text v-if="post.duration" class="ldetail__duration">{{ post.duration }}</text>
         </template>
 
@@ -182,7 +182,6 @@ const post = ref<LifePost | null>(null)
 const comments = ref<LifeComment[]>([])
 const loading = ref(true)
 const following = ref(false)
-const playing = ref(false)
 const commentVisible = ref(false)
 const commentText = ref('')
 const commentSubmitting = ref(false)
@@ -224,11 +223,6 @@ function goBack(): void {
 }
 function goLife(): void {
   uni.redirectTo({ url: '/pages/life/index' })
-}
-
-function toggleVideo(): void {
-  playing.value = !playing.value
-  showToast(playing.value ? '正在播放（演示环境）' : '已暂停')
 }
 
 function previewImage(index: number): void {

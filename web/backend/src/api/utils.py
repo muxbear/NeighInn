@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Select, func, select
@@ -9,6 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.responses import ERR_PARAM, ApiError
 
 MAX_PAGE_SIZE = 50
+
+
+def epoch_ms(value: datetime | None) -> int:
+    """时间 → Unix 毫秒；naive 时间按 UTC 解释，避免服务器时区造成 8 小时偏移。"""
+    if value is None:
+        return 0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return int(value.timestamp() * 1000)
 
 
 async def paginate(db: AsyncSession, stmt: Select, page: int, page_size: int):

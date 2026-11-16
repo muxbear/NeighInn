@@ -5,12 +5,15 @@ import { secureStorage } from '../utils/storage'
 import { createIdempotencyKey } from '../utils/idempotency'
 import { chooseImages, chooseVideo, compressImage } from '../utils/image'
 
-export type UploadScene = 'REALNAME_ID' | 'OWNER_PROOF' | 'ITEM_IMAGE' | 'PUBLIC_IMAGE'
+export type UploadScene = 'REALNAME_ID' | 'OWNER_PROOF' | 'ITEM_IMAGE' | 'PUBLIC_IMAGE' | 'LIFE_VIDEO'
 
 function contentTypeOf(path: string): string {
   const ext = (path.split('.').pop() ?? '').toLowerCase()
   if (ext === 'png') return 'image/png'
   if (ext === 'webp') return 'image/webp'
+  if (ext === 'mp4' || ext === 'm4v') return 'video/mp4'
+  if (ext === 'mov') return 'video/quicktime'
+  if (ext === 'webm') return 'video/webm'
   return 'image/jpeg'
 }
 
@@ -18,6 +21,9 @@ function extensionOf(type: string): string {
   if (type === 'image/png') return '.png'
   if (type === 'image/webp') return '.webp'
   if (type === 'application/pdf') return '.pdf'
+  if (type === 'video/mp4') return '.mp4'
+  if (type === 'video/quicktime') return '.mov'
+  if (type === 'video/webm') return '.webm'
   return '.jpg'
 }
 

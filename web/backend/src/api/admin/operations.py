@@ -30,6 +30,7 @@ from src.db.models import (
     ItemCategory,
     ItemComment,
     ItemMedia,
+    LifePost,
     Order,
     User,
     ViewHistory,
@@ -146,6 +147,8 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
                               module: str = Query(default="items"),
                               communityId: int | None = Query(default=None)):
     """运营页指标卡与 Tab 计数：全部来自实时聚合，禁止前端硬编码。"""
+    if module == "life":
+        return await _life_overview(db, communityId)
     if module != "items":
         raise ApiError(ERR_PARAM, "暂不支持该模块概览", 400)
     now = utcnow()
@@ -205,6 +208,66 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
             "weekGmvCents": week_gmv_cents,
             "recommended": recommended,
             "recommendSlots": settings.item_recommend_slots,
+        },
+    })
+
+
+async def _life_overview(db: DbSession, community_id: int | None) -> dict:
+    """社区生活指标：内容量、待审核、今日阅读与收藏率全部实时聚合。
+
+    「今日阅读」来自详情页按日累计的 stats.viewsByDay；
+    「内容收藏率」= 累计点赞（Favorite LIFE）/ 累计阅读，阅读为 0 时展示 0。
+    """
+    scope = [LifePost.community_id == community_id] if community_id else []
+    status_rows = (await db.execute(
+        select(LifePost.status, func.count()).where(*scope).group_by(LifePost.status))).all()
+    status_counts = {str(status): int(count) for status, count in status_rows}
+    total = sum(status_counts.values())
+    published = status_counts.get("PUBLISHED", 0)
+    pending_review = status_counts.get("PENDING_REVIEW", 0)
+
+    # 阅读/收藏指标只统计已发布内容：待审、驳回、下线的浏览不计入频道表现。
+    published_scope = [*scope, LifePost.status == "PUBLISHED"]
+    category_count = int((await db.scalar(
+        select(func.count(func.distinct(LifePost.category))).where(*published_scope))) or 0)
+    stats_rows = list((await db.execute(
+        select(LifePost.stats).where(*published_scope))).scalars().all())
+
+    now = utcnow()
+    # 运营侧按中国标准时间（UTC+8）划分自然日，避免早上 8 点前阅读被算到前一天。
+    today_key = (now + timedelta(hours=8)).strftime("%Y-%m-%d")
+    yesterday_key = (now - timedelta(days=1) + timedelta(hours=8)).strftime("%Y-%m-%d")
+    today_views = yesterday_views = total_views = total_likes = 0
+    for stats in stats_rows:
+        stats = stats or {}
+        total_views += int(stats.get("views", 0) or 0)
+        total_likes += int(stats.get("likes", 0) or 0)
+        views_by_day = stats.get("viewsByDay")
+        if isinstance(views_by_day, dict):
+            today_views += int(views_by_day.get(today_key, 0) or 0)
+            yesterday_views += int(views_by_day.get(yesterday_key, 0) or 0)
+
+    delta = (
+        round((today_views - yesterday_views) / yesterday_views * 100, 1)
+        if yesterday_views else 0
+    )
+    favorite_rate = round(total_likes / total_views * 100, 1) if total_views else 0
+
+    return ok({
+        "module": "life",
+        "total": total,
+        "statusCounts": status_counts,
+        "metrics": {
+            "total": total,
+            "published": published,
+            "pendingReview": pending_review,
+            "categoryCount": category_count,
+            "todayViews": today_views,
+            "yesterdayViews": yesterday_views,
+            "todayViewsDelta": delta,
+            "totalViews": total_views,
+            "totalLikes": total_likes,
+            "favoriteRate": favorite_rate,
         },
     })
 
