@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     min_item_images: int = 3
     max_item_images: int = 12
     item_expire_days: int = 30
+    # 热门推荐位容量（同一社区在售推荐物品上限，后台物品页指标卡使用）
+    item_recommend_slots: int = 12
     pay_timeout_minutes: int = 30
     auto_release_hours: int = 72
     confirm_timeout_hours: int = 48

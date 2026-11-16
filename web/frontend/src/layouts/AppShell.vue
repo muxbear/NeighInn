@@ -6,6 +6,7 @@ import { figmaNavGroups, type NavItem } from '@/config/nav'
 import { fmtRelative } from '@/api/compat'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import { useNavBadgeStore } from '@/stores/navBadges'
 import { useTodoStore } from '@/stores/todos'
 
 const route = useRoute()
@@ -13,6 +14,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const app = useAppStore()
 const todos = useTodoStore()
+const navBadges = useNavBadgeStore()
 const noticeOpen = ref(false)
 const communityOpen = ref(false)
 const commandOpen = ref(false)
@@ -34,6 +36,21 @@ const visibleGroups = computed(() =>
 )
 
 const allItems = computed<NavItem[]>(() => visibleGroups.value.flatMap((group) => group.items))
+
+function navBadge(item: NavItem): number | string {
+  let count = 0
+  if (item.badgeKey === 'item') {
+    // 与「社区物品」指标卡同源，避免侧边栏与页面数字不一致
+    count = navBadges.itemPending
+  } else if (item.badgeKey) {
+    const todo = todos.items.find((entry) => entry.key === item.badgeKey)
+    count = Number(todo?.count || 0)
+  } else {
+    return item.badge ?? ''
+  }
+  if (count <= 0) return ''
+  return count > 99 ? '99+' : count
+}
 const currentNav = computed(() => {
   for (const group of visibleGroups.value) {
     const item = group.items.find((navItem) => navItem.route === route.path)
@@ -94,6 +111,7 @@ async function logout() {
 onMounted(() => {
   app.loadCommunities().catch(() => undefined)
   todos.startPolling()
+  navBadges.refresh(app.currentCommunityId)
   window.addEventListener('keydown', (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault()
@@ -114,6 +132,16 @@ onUnmounted(() => {
 
 watch(() => route.path, () => {
   noticeOpen.value = false
+  navBadges.refresh(app.currentCommunityId)
+})
+
+watch(() => app.currentCommunityId, (id) => {
+  navBadges.refresh(id)
+})
+
+// 待办轮询成功后顺带刷新侧边栏徽标，保证跨页面操作后 60 秒内收敛
+watch(() => todos.lastLoadedAt, () => {
+  navBadges.refresh(app.currentCommunityId)
 })
 </script>
 
@@ -164,7 +192,7 @@ watch(() => route.path, () => {
           >
             <component :is="item.icon" :size="18" :stroke-width="2" />
             <span>{{ item.label }}</span>
-            <em v-if="item.badge">{{ item.badge }}</em>
+            <em v-if="navBadge(item)">{{ navBadge(item) }}</em>
           </button>
         </div>
       </nav>

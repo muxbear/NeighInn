@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Coffee, EyeOff, HandHeart, Megaphone, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal } from 'lucide-vue-next'
+import { ArchiveX, Coffee, EyeOff, HandHeart, Megaphone, Pencil, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Trash2 } from 'lucide-vue-next'
 import { operationsApi } from '@/api'
 import { mapTradeType } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useNavBadgeStore } from '@/stores/navBadges'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
@@ -14,6 +15,7 @@ import CommunityFilterBar from '@/components/CommunityFilterBar.vue'
 const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
+const navBadges = useNavBadgeStore()
 const rows = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -24,6 +26,15 @@ const selectedRows = ref<string[]>([])
 const loading = ref(false)
 const drawerOpen = ref(false)
 const form = ref({ title: '', subtitle: '', owner: '社区运营 · 李知夏', category: '', content: '' })
+const overview = ref<any>(null)
+const itemCategories = ref<any[]>([])
+
+const ITEM_CONDITIONS = ['全新', '九九新', '轻微使用痕迹', '明显使用痕迹', '有功能缺陷']
+const TRADE_TYPES = [
+  { value: 'MONETARY', label: '货币交易' },
+  { value: 'FREE_GIFT', label: '免费赠与' },
+  { value: 'BARTER', label: '物品互换' },
+]
 
 const configs: Record<string, any> = {
   broadcast: {
@@ -43,12 +54,6 @@ const configs: Record<string, any> = {
     ownerLabel: '物品归属小区', scopeNote: '物品列表仅展示所选小区',
     description: '管理邻里闲置物品、热门推荐、商品审核及交易状态', create: '新增物品',
     tabs: ['全部', '在售', '待审核', '已售出', '已下架'],
-    metrics: [
-      { label: '在售物品', value: '386', note: '本周新增 52' },
-      { label: '待审核', value: '12', note: '平均等待 18 分钟', attention: true },
-      { label: '本周成交', value: '86', note: '成交额 ¥12,680' },
-      { label: '热门推荐位', value: '8 / 12', note: '剩余 4 个展位' },
-    ],
   },
   help: {
     api: 'help-requests', title: '邻里互助', tone: 'help', icon: HandHeart,
@@ -95,6 +100,36 @@ const config = computed(() => configs[module.value] || configs.broadcast)
 const tabs = computed(() => config.value.tabs)
 const filteredRows = computed(() => rows.value)
 const canCreate = computed(() => module.value === 'broadcast' && auth.hasPermission('community:broadcast:create'))
+const canEditItem = computed(() => module.value === 'items' && auth.hasPermission('community:item:update'))
+const canDeleteItem = computed(() => module.value === 'items' && auth.hasPermission('community:item:delete'))
+
+/** 社区物品指标卡：全部来自 /operations/overview 实时聚合（禁止硬编码）。 */
+const metrics = computed(() => {
+  if (module.value !== 'items') return config.value.metrics
+  const data = overview.value?.metrics || {}
+  const recommended = Number(data.recommended || 0)
+  const slots = Number(data.recommendSlots || 12)
+  const gmv = Number(data.weekGmvCents || 0) / 100
+  return [
+    { label: '在售物品', value: String(data.onSale || 0), note: `本周新增 ${data.weekNew || 0}` },
+    {
+      label: '待审核',
+      value: String(data.pendingReview || 0),
+      note: data.pendingReview ? `平均等待 ${data.pendingAvgMinutes || 0} 分钟` : '暂无待审核',
+      attention: true,
+    },
+    {
+      label: '本周成交',
+      value: String(data.weekDeals || 0),
+      note: `成交额 ¥${gmv.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`,
+    },
+    {
+      label: '热门推荐位',
+      value: `${recommended} / ${slots}`,
+      note: `剩余 ${Math.max(0, slots - recommended)} 个展位`,
+    },
+  ]
+})
 
 const reviewOpen = ref(false)
 const reviewTarget = ref<any>(null)
@@ -115,6 +150,11 @@ function tabStatusCode(tab: string): string {
 }
 
 function statusCount(tab: string): number | string {
+  if (module.value === 'items' && overview.value) {
+    if (tab === '全部') return overview.value.total ?? 0
+    const code = tabStatusCode(tab)
+    return overview.value.statusCounts?.[code] ?? 0
+  }
   if (tab === '全部') return activeTab.value === '全部' ? total.value : ''
   if (activeTab.value === '全部') {
     const code = tabStatusCode(tab)
@@ -131,9 +171,16 @@ async function load() {
     const status = tabStatusCode(activeTab.value)
     if (status) params.status = status
     if (query.value) params.keyword = query.value
-    const data = await operationsApi.list(config.value.api, params)
+    const [data, summary] = await Promise.all([
+      operationsApi.list(config.value.api, params),
+      module.value === 'items'
+        ? operationsApi.overview('items', { communityId: app.currentCommunityId }).catch(() => null)
+        : Promise.resolve(null),
+    ])
     rows.value = data.items || []
     total.value = data.total || 0
+    overview.value = module.value === 'items' ? summary : null
+    if (summary) navBadges.setItemPending(Number(summary.metrics?.pendingReview || 0))
     selectedRows.value = []
   } catch (exc: any) {
     app.showToast(exc?.message || '数据加载失败')
@@ -240,18 +287,183 @@ async function submitReview() {
   }
 }
 
-async function offline(row: any) {
+const offlineOpen = ref(false)
+const offlineTarget = ref<any>(null)
+const offlineReason = ref('')
+const offlineSubmitting = ref(false)
+
+function offline(row: any) {
+  offlineTarget.value = row
+  offlineReason.value = ''
+  offlineOpen.value = true
+}
+
+async function submitOffline() {
+  const target = offlineTarget.value
+  if (!target || offlineSubmitting.value) return
+  const reason = offlineReason.value.trim()
+  if (module.value === 'items' && reason.length < 2) {
+    app.showToast('请填写下架原因（至少 2 个字，将通知卖家）')
+    return
+  }
+  offlineSubmitting.value = true
   try {
     if (module.value === 'help') {
-      await operationsApi.closeHelp(row.id)
+      await operationsApi.closeHelp(target.id, reason)
       app.showToast('互助已关闭')
     } else {
-      await operationsApi.offline(config.value.api, row.id)
-      app.showToast('内容已下架')
+      // 下架接口要求 JSON 请求体，缺失会被服务端判定为参数校验失败
+      await operationsApi.offline(config.value.api, target.id, reason)
+      app.showToast(module.value === 'items' ? '物品已下架' : '内容已下架')
     }
+    offlineOpen.value = false
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '操作失败')
+  } finally {
+    offlineSubmitting.value = false
+  }
+}
+
+const editOpen = ref(false)
+const editTarget = ref<any>(null)
+const editSubmitting = ref(false)
+const editForm = ref({
+  title: '',
+  qualityDesc: '',
+  categoryId: null as number | null,
+  tradeType: 'MONETARY',
+  priceYuan: '',
+  condition: '',
+  barterExpect: '',
+})
+
+const flatCategories = computed(() => {
+  const result: { id: number; name: string }[] = []
+  const walk = (nodes: any[]) => {
+    for (const node of nodes || []) {
+      result.push({ id: Number(node.id), name: node.name })
+      walk(node.children || [])
+    }
+  }
+  walk(itemCategories.value)
+  return result
+})
+
+async function loadCategories() {
+  if (itemCategories.value.length) return
+  try {
+    itemCategories.value = (await operationsApi.itemCategories()) || []
+  } catch {
+    itemCategories.value = []
+  }
+}
+
+async function openEdit(row: any) {
+  if (!canEditItem.value) return
+  editTarget.value = row
+  editForm.value = {
+    title: row.title || '',
+    qualityDesc: row.qualityDesc || row.subtitle || '',
+    categoryId: row.categoryId ? Number(row.categoryId) : null,
+    tradeType: row.tradeType || 'MONETARY',
+    priceYuan: row.tradeType === 'MONETARY' ? String((Number(row.priceCents || 0)) / 100) : '',
+    condition: row.condition || '',
+    barterExpect: row.barterExpect || '',
+  }
+  editOpen.value = true
+  await loadCategories()
+  try {
+    const detail = await operationsApi.itemDetail(row.id)
+    if (detail && editTarget.value?.id === row.id) {
+      editForm.value.qualityDesc = detail.qualityDesc || editForm.value.qualityDesc
+      editForm.value.categoryId = detail.categoryId ? Number(detail.categoryId) : editForm.value.categoryId
+      editForm.value.barterExpect = detail.barterExpect || editForm.value.barterExpect
+    }
+  } catch {
+    // 详情失败时仍可用列表数据编辑
+  }
+}
+
+function canEditRow(row: any): boolean {
+  return canEditItem.value && !['RESERVED', 'SOLD', 'GIFTED'].includes(row.statusCode)
+}
+
+function canDeleteRow(row: any): boolean {
+  return canDeleteItem.value && !['RESERVED', 'SOLD', 'GIFTED'].includes(row.statusCode)
+}
+
+async function saveEdit() {
+  const target = editTarget.value
+  if (!target || editSubmitting.value) return
+  const form = editForm.value
+  const title = form.title.trim()
+  if (title.length < 2 || title.length > 30) {
+    app.showToast('标题需 2–30 个字')
+    return
+  }
+  if (form.qualityDesc.trim().length < 20) {
+    app.showToast('质量说明至少 20 个字')
+    return
+  }
+  if (!form.condition) {
+    app.showToast('请选择成色档位')
+    return
+  }
+  if (form.tradeType === 'MONETARY' && Number(form.priceYuan) <= 0) {
+    app.showToast('货币交易必须填写价格')
+    return
+  }
+  if (form.tradeType === 'BARTER' && form.barterExpect.trim().length < 2) {
+    app.showToast('互换需填写期望交换的物品描述')
+    return
+  }
+  editSubmitting.value = true
+  try {
+    const payload: any = {
+      title,
+      qualityDesc: form.qualityDesc.trim(),
+      tradeType: form.tradeType,
+      condition: form.condition,
+      barterExpect: form.barterExpect.trim(),
+    }
+    if (form.categoryId) payload.categoryId = form.categoryId
+    payload.priceCents = form.tradeType === 'MONETARY'
+      ? Math.round(Number(form.priceYuan) * 100)
+      : 0
+    await operationsApi.updateItem(target.id, payload)
+    editOpen.value = false
+    app.showToast('物品已更新')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '保存失败')
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
+const deleteOpen = ref(false)
+const deleteTarget = ref<any>(null)
+const deleteSubmitting = ref(false)
+
+function confirmDelete(row: any) {
+  deleteTarget.value = row
+  deleteOpen.value = true
+}
+
+async function submitDelete() {
+  const target = deleteTarget.value
+  if (!target || deleteSubmitting.value) return
+  deleteSubmitting.value = true
+  try {
+    await operationsApi.deleteItem(target.id)
+    deleteOpen.value = false
+    app.showToast('物品已删除')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '删除失败')
+  } finally {
+    deleteSubmitting.value = false
   }
 }
 
@@ -290,7 +502,12 @@ function rowActionLabel(row: any) {
 }
 
 function rowOfflineLabel() {
+  if (module.value === 'items') return '下架物品'
   return module.value === 'help' ? '关闭互助' : '下架内容'
+}
+
+function rowOfflineIcon() {
+  return module.value === 'items' ? ArchiveX : EyeOff
 }
 
 onMounted(load)
@@ -310,7 +527,7 @@ watch(() => app.currentCommunityId, () => {
   <CommunityFilterBar :owner-label="config.ownerLabel" :scope-note="config.scopeNote" />
 
   <section class="community-operation-metrics">
-    <div v-for="metric in config.metrics" :key="metric.label">
+    <div v-for="metric in metrics" :key="metric.label">
       <span>{{ metric.label }}</span>
       <strong>{{ metric.value }}</strong>
       <em :class="{ attention: metric.attention }">{{ metric.note }}</em>
@@ -365,10 +582,16 @@ watch(() => app.currentCommunityId, () => {
                 <button v-if="canPrimaryAction(row)" class="row-icon-button" :aria-label="rowActionLabel(row)" :data-tip="rowActionLabel(row)" @click="review(row)">
                   <component :is="rowActionIcon(row)" :size="15" />
                 </button>
-                <button v-if="canOffline(row)" class="row-icon-button danger" :aria-label="rowOfflineLabel()" :data-tip="rowOfflineLabel()" @click="offline(row)">
-                  <EyeOff :size="15" />
+                <button v-if="canEditRow(row)" class="row-icon-button" aria-label="编辑物品" data-tip="编辑物品" @click="openEdit(row)">
+                  <Pencil :size="15" />
                 </button>
-                <span v-if="!canPrimaryAction(row) && !canOffline(row)" class="cell-ellipsis sm">—</span>
+                <button v-if="canOffline(row)" class="row-icon-button danger" :aria-label="rowOfflineLabel()" :data-tip="rowOfflineLabel()" @click="offline(row)">
+                  <component :is="rowOfflineIcon()" :size="15" />
+                </button>
+                <button v-if="canDeleteRow(row)" class="row-icon-button danger" aria-label="删除物品" data-tip="删除物品" @click="confirmDelete(row)">
+                  <Trash2 :size="15" />
+                </button>
+                <span v-if="!canPrimaryAction(row) && !canOffline(row) && !canEditRow(row) && !canDeleteRow(row)" class="cell-ellipsis sm">—</span>
               </div>
             </td>
           </tr>
@@ -491,6 +714,142 @@ watch(() => app.currentCommunityId, () => {
       <button @click="reviewOpen = false">取消</button>
       <button class="primary-button" :disabled="reviewSubmitting" @click="submitReview">
         {{ reviewSubmitting ? '提交中…' : '提交复核结论' }}
+      </button>
+    </template>
+  </NiDrawer>
+
+  <NiDrawer
+    :open="offlineOpen"
+    :title="offlineTarget ? `${rowOfflineLabel()} · ${offlineTarget.title}` : rowOfflineLabel()"
+    :eyebrow="config.title"
+    @close="offlineOpen = false"
+  >
+    <template v-if="offlineTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <component :is="rowOfflineIcon()" :size="18" style="color: #c9525e" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ offlineTarget.code }} · {{ offlineTarget.communityName || config.ownerLabel }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ offlineTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="offlineTarget.status" />
+      </div>
+      <label style="display: block">
+        <span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 6px">
+          {{ module === 'items' ? '下架原因 *（至少 2 个字，将通知卖家）' : '下架原因（选填）' }}
+        </span>
+        <textarea
+          v-model="offlineReason"
+          style="width: 100%; min-height: 84px; padding: 9px; border: 1px solid #e1dee5; border-radius: 8px; font-size: var(--font-size-body); resize: vertical"
+          :placeholder="module === 'items' ? '例如：物品描述与实际不符，请补充实拍照片后重新提交' : '请输入下架原因'"
+        />
+      </label>
+      <p style="margin-top: 10px; color: #958b9f; font-size: var(--font-size-caption)">
+        {{ module === 'items' ? '下架后物品将不再在移动端展示，卖家会收到通知。' : '操作会记录到审计日志。' }}
+      </p>
+    </template>
+    <template #footer>
+      <button @click="offlineOpen = false">取消</button>
+      <button class="primary-button" :disabled="offlineSubmitting" @click="submitOffline">
+        {{ offlineSubmitting ? '处理中…' : (module === 'items' ? '确认下架' : '确认操作') }}
+      </button>
+    </template>
+  </NiDrawer>
+
+  <NiDrawer
+    :open="editOpen"
+    :title="editTarget ? `编辑物品 · ${editTarget.title}` : '编辑物品'"
+    eyebrow="社区物品"
+    @close="editOpen = false"
+  >
+    <template v-if="editTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <ShoppingBag :size="18" style="color: #6852c5" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ editTarget.code }} · {{ editTarget.seller }} · {{ editTarget.communityName }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ editTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="editTarget.status" />
+      </div>
+
+      <div class="form-grid">
+        <label class="full"><span>标题 *</span><input v-model="editForm.title" maxlength="30" placeholder="请输入物品标题" /></label>
+        <label class="full">
+          <span>质量说明 *（至少 20 个字）</span>
+          <textarea v-model="editForm.qualityDesc" placeholder="描述成色、使用情况、瑕疵等" />
+        </label>
+        <label>
+          <span>分类</span>
+          <select v-model="editForm.categoryId">
+            <option :value="null">未选择</option>
+            <option v-for="category in flatCategories" :key="category.id" :value="category.id">{{ category.name }}</option>
+          </select>
+        </label>
+        <label>
+          <span>交易方式</span>
+          <select v-model="editForm.tradeType">
+            <option v-for="option in TRADE_TYPES" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label v-if="editForm.tradeType === 'MONETARY'">
+          <span>价格（元）*</span>
+          <input v-model="editForm.priceYuan" type="number" min="0.01" step="0.01" placeholder="0.00" />
+        </label>
+        <label>
+          <span>成色</span>
+          <select v-model="editForm.condition">
+            <option value="" disabled>请选择成色</option>
+            <option v-for="condition in ITEM_CONDITIONS" :key="condition" :value="condition">{{ condition }}</option>
+          </select>
+        </label>
+        <label v-if="editForm.tradeType === 'BARTER'" class="full">
+          <span>期望交换的物品 *</span>
+          <input v-model="editForm.barterExpect" placeholder="如：儿童绘本、盆栽绿植等" />
+        </label>
+      </div>
+      <p style="margin-top: 12px; color: #958b9f; font-size: var(--font-size-caption)">
+        保存后列表与移动端将展示最新信息；已成交物品不允许编辑。
+      </p>
+    </template>
+    <template #footer>
+      <button @click="editOpen = false">取消</button>
+      <button class="primary-button" :disabled="editSubmitting" @click="saveEdit">
+        {{ editSubmitting ? '保存中…' : '保存修改' }}
+      </button>
+    </template>
+  </NiDrawer>
+
+  <NiDrawer
+    :open="deleteOpen"
+    title="删除物品"
+    eyebrow="社区物品"
+    @close="deleteOpen = false"
+  >
+    <template v-if="deleteTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <Trash2 :size="18" style="color: #c9525e" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ deleteTarget.code }} · {{ deleteTarget.seller }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ deleteTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="deleteTarget.status" />
+      </div>
+      <p style="color: #554761; font-size: var(--font-size-body); line-height: 1.7">
+        删除后不可恢复，物品照片、质检记录与留言将一并清理。
+      </p>
+      <p style="margin-top: 8px; color: #c85660; font-size: var(--font-size-caption)">
+        若物品已有订单记录，系统会拒绝删除，请改用「下架物品」保留交易凭证。
+      </p>
+    </template>
+    <template #footer>
+      <button @click="deleteOpen = false">取消</button>
+      <button class="danger-button" :disabled="deleteSubmitting" @click="submitDelete">
+        {{ deleteSubmitting ? '删除中…' : '确认删除' }}
       </button>
     </template>
   </NiDrawer>

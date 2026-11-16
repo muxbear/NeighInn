@@ -194,17 +194,22 @@ export const residentApi = {
 }
 
 export const operationsApi = {
-  overview: (module: string) => http.get<any, any>('/operations/overview', { params: { module } }),
+  overview: (module: string, params: Dict = {}) => http.get<any, any>('/operations/overview', { params: { module, ...params } }),
   list: async (module: string, params: Dict = {}) => mapItems(await http.get<any, any>(`/${module}`, { params }), (row) => normalizeOperationRow(module, row)),
   create: (module: string, payload: Dict) => http.post<any, any>(`/${module}`, payload),
   itemDetail: (id: number | string) => http.get<any, any>(`/items/${id}`),
   itemAudit: (id: number | string) => http.get<any, any>(`/items/${id}/ai-audit`),
+  itemCategories: () => http.get<any, any>('/item-categories'),
+  updateItem: (id: number | string, payload: Dict) => http.put<any, any>(`/items/${id}`, payload),
+  deleteItem: (id: number | string) => http.delete<any, any>(`/items/${id}`),
   review: (module: string, id: number | string, payload: Dict = { decision: 'APPROVE' }) =>
     http.post<any, any>(`/${module}/${id}/review`, payload),
-  offline: (module: string, id: number | string) => http.post<any, any>(`/${module}/${id}/offline`),
+  // 物品下架接口强制要求 reason（FastAPI 请求体缺失会返回 422 参数校验失败）
+  offline: (module: string, id: number | string, reason = '') =>
+    http.post<any, any>(`/${module}/${id}/offline`, { reason }),
   recommend: (id: number | string, enabled = true) => http.post<any, any>(`/items/${id}/recommend`, { enabled }),
   matchHelp: (id: number | string, helper = '陈师傅') => http.post<any, any>(`/help-requests/${id}/match`, { helper }),
-  closeHelp: (id: number | string) => http.post<any, any>(`/help-requests/${id}/close`),
+  closeHelp: (id: number | string, reason = '') => http.post<any, any>(`/help-requests/${id}/close`, { reason }),
 }
 
 export const noticesApi = {

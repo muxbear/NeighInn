@@ -98,6 +98,8 @@ PERMISSIONS: list[tuple[str, str, str, str | None]] = [
     ("community:broadcast:offline", "下架喇叭", "按钮", None),
     ("community:item:view", "查看社区物品", "页面", "/community-operations/items"),
     ("community:item:create", "新增物品", "按钮", None),
+    ("community:item:update", "编辑物品", "按钮", None),
+    ("community:item:delete", "删除物品", "按钮", None),
     ("community:item:review", "审核物品", "按钮", None),
     ("community:item:recommend", "设置热门推荐", "按钮", None),
     ("community:item:offline", "下架物品", "按钮", None),

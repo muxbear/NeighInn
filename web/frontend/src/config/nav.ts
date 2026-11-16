@@ -29,7 +29,10 @@ export type NavItem = {
   route: string
   icon: any
   permission?: string
+  /** 静态徽标（仅用于有稳定业务口径的模块，保留兼容）。 */
   badge?: number
+  /** 动态徽标：对应 /dashboard/todos 的待办 key，数字随真实待办刷新。 */
+  badgeKey?: string
 }
 
 export type NavGroup = {
@@ -45,9 +48,9 @@ export const figmaNavGroups: NavGroup[] = [
   {
     label: '社区运营',
     items: [
-      { id: 'community-broadcast', label: '社区喇叭', route: '/community-operations/broadcast', icon: Megaphone, permission: 'community:broadcast:view', badge: 6 },
-      { id: 'community-items', label: '社区物品', route: '/community-operations/items', icon: ShoppingBag, permission: 'community:item:view', badge: 12 },
-      { id: 'neighbor-help', label: '邻里互助', route: '/community-operations/help', icon: HandHeart, permission: 'community:help:view', badge: 8 },
+      { id: 'community-broadcast', label: '社区喇叭', route: '/community-operations/broadcast', icon: Megaphone, permission: 'community:broadcast:view' },
+      { id: 'community-items', label: '社区物品', route: '/community-operations/items', icon: ShoppingBag, permission: 'community:item:view', badgeKey: 'item' },
+      { id: 'neighbor-help', label: '邻里互助', route: '/community-operations/help', icon: HandHeart, permission: 'community:help:view', badgeKey: 'help' },
       { id: 'community-life', label: '社区生活', route: '/community-operations/life', icon: Coffee, permission: 'community:life:view' },
     ],
   },

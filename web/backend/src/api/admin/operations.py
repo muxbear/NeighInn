@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 
 from src.api.utils import paginate
 from src.core.audit import write_audit, write_outbox
@@ -13,14 +13,28 @@ from src.core.deps import CurrentAdmin, DbSession
 from src.core.idempotency import complete_idempotency, guard_idempotency
 from src.core.permissions import require_permission
 from src.core.responses import (
+    ERR_BIZ_RULE,
+    ERR_CONFLICT,
     ERR_NOT_FOUND,
     ERR_PARAM,
     ApiError,
     ok,
     paginated,
 )
-from src.db.models import Community, Item, ItemAudit, ItemCategory, ItemMedia, User
-from src.db.models.common import utcnow
+from src.db.models import (
+    Community,
+    Conversation,
+    Favorite,
+    Item,
+    ItemAudit,
+    ItemCategory,
+    ItemComment,
+    ItemMedia,
+    Order,
+    User,
+    ViewHistory,
+)
+from src.db.models.common import ensure_utc, utcnow
 from src.domain import enums as E
 from src.domain.state import item_sm
 from src.services.item_service import _public_media_url
@@ -50,6 +64,22 @@ class BatchOfflineIn(BaseModel):
     reason: str
 
 
+ITEM_CONDITIONS = ("全新", "九九新", "轻微使用痕迹", "明显使用痕迹", "有功能缺陷")
+
+
+class ItemUpdateIn(BaseModel):
+    """后台编辑物品：仅传需要变更的字段，未传字段保持原值。"""
+
+    title: str | None = None
+    description: str | None = None
+    qualityDesc: str | None = None
+    categoryId: int | None = None
+    tradeType: str | None = None
+    priceCents: int | None = None
+    condition: str | None = None
+    barterExpect: str | None = None
+
+
 class CategoryIn(BaseModel):
     name: str
     parentId: int | None = None
@@ -70,9 +100,13 @@ async def _row(db: DbSession, item: Item) -> dict:
         "code": f"IT{item.id:08d}",
         "title": item.title,
         "subtitle": (item.quality_desc or "")[:60],
+        "description": item.description,
+        "qualityDesc": item.quality_desc,
+        "barterExpect": item.barter_expect,
         "seller": seller.nickname if seller else "",
         "sellerId": str(item.seller_id),
         "category": category.name if category else "",
+        "categoryId": str(item.category_id) if item.category_id else "",
         "priceCents": item.price_cents,
         "price": f"¥{item.price_cents / 100:g}" if item.trade_type == E.TradeType.MONETARY else "—",
         "tradeType": item.trade_type,
@@ -103,6 +137,76 @@ async def _audit_row(audit: ItemAudit) -> dict:
         "modelVersion": audit.model_version,
         "createdAt": int(audit.created_at.timestamp() * 1000) if audit.created_at else 0,
     }
+
+
+# ---------------------------------------------------------------- 运营概览（真实聚合）
+
+@router.get("/operations/overview")
+async def operations_overview(admin: CurrentAdmin, db: DbSession,
+                              module: str = Query(default="items"),
+                              communityId: int | None = Query(default=None)):
+    """运营页指标卡与 Tab 计数：全部来自实时聚合，禁止前端硬编码。"""
+    if module != "items":
+        raise ApiError(ERR_PARAM, "暂不支持该模块概览", 400)
+    now = utcnow()
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    scope = [Item.community_id == communityId] if communityId else []
+
+    status_rows = (await db.execute(
+        select(Item.status, func.count()).where(*scope).group_by(Item.status))).all()
+    status_counts = {str(status): int(count) for status, count in status_rows}
+    total = sum(status_counts.values())
+    on_sale = status_counts.get(E.ItemStatus.ON_SALE, 0)
+    pending_review = status_counts.get(E.ItemStatus.PENDING_REVIEW, 0)
+
+    pending_times = list((await db.execute(
+        select(Item.created_at).where(
+            *scope, Item.status == E.ItemStatus.PENDING_REVIEW))).scalars().all())
+    pending_waits = [
+        max(0, int((now - ensure_utc(created_at)).total_seconds() // 60))
+        for created_at in pending_times if created_at
+    ]
+    pending_avg_minutes = (
+        round(sum(pending_waits) / len(pending_waits)) if pending_waits else 0)
+
+    week_new = int((await db.scalar(
+        select(func.count()).select_from(Item).where(
+            *scope, Item.created_at >= week_start))) or 0)
+    recommended = int((await db.scalar(
+        select(func.count()).select_from(Item).where(
+            *scope, Item.recommended.is_(True), Item.status == E.ItemStatus.ON_SALE))) or 0)
+
+    order_scope = [Order.community_id == communityId] if communityId else []
+    week_deals = int((await db.scalar(
+        select(func.count()).select_from(Order).where(
+            *order_scope,
+            Order.status == E.OrderStatus.COMPLETED,
+            func.coalesce(Order.completed_at, Order.updated_at) >= week_start,
+        ))) or 0)
+    week_gmv_cents = int((await db.scalar(
+        select(func.coalesce(func.sum(Order.amount_cents), 0)).where(
+            *order_scope,
+            Order.status == E.OrderStatus.COMPLETED,
+            Order.trade_type == E.TradeType.MONETARY,
+            func.coalesce(Order.completed_at, Order.updated_at) >= week_start,
+        ))) or 0)
+
+    return ok({
+        "module": module,
+        "total": total,
+        "statusCounts": status_counts,
+        "metrics": {
+            "onSale": on_sale,
+            "pendingReview": pending_review,
+            "pendingAvgMinutes": pending_avg_minutes,
+            "weekNew": week_new,
+            "weekDeals": week_deals,
+            "weekGmvCents": week_gmv_cents,
+            "recommended": recommended,
+            "recommendSlots": settings.item_recommend_slots,
+        },
+    })
 
 
 # ---------------------------------------------------------------- 物品（W03-01）
@@ -148,6 +252,112 @@ async def item_detail(item_id: int, admin: CurrentAdmin, db: DbSession):
     row["barterExpect"] = item.barter_expect
     row["qualityDesc"] = item.quality_desc
     return ok(row)
+
+
+@router.put("/items/{item_id}",
+            dependencies=[Depends(require_permission("community:item:update"))])
+async def update_item(item_id: int, payload: ItemUpdateIn, request: Request,
+                      admin: CurrentAdmin, db: DbSession):
+    """后台编辑物品信息（W03-01 配套）：交易中与已完成物品不可改，避免破坏成交快照。"""
+    item = await db.get(Item, item_id)
+    if not item:
+        raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    if item.status in (E.ItemStatus.RESERVED, E.ItemStatus.SOLD, E.ItemStatus.GIFTED):
+        raise ApiError(ERR_BIZ_RULE, "交易中或已成交的物品不可编辑", 422)
+
+    title = payload.title.strip() if payload.title is not None else item.title
+    if not (2 <= len(title) <= 30):
+        raise ApiError(ERR_PARAM, "标题需 2–30 个字", 400)
+
+    trade_type = payload.tradeType or item.trade_type
+    if trade_type not in E.TradeType.ALL:
+        raise ApiError(ERR_PARAM, "交易方式不合法", 400)
+
+    price_cents = payload.priceCents if payload.priceCents is not None else item.price_cents
+    if price_cents < 0:
+        raise ApiError(ERR_PARAM, "价格不能为负数", 400)
+    if trade_type == E.TradeType.MONETARY and price_cents <= 0:
+        raise ApiError(ERR_PARAM, "货币交易必须填写价格", 400)
+    if trade_type == E.TradeType.FREE_GIFT:
+        price_cents = 0
+
+    barter_expect = (payload.barterExpect.strip() if payload.barterExpect is not None
+                     else item.barter_expect)
+    if trade_type == E.TradeType.BARTER and len(barter_expect) < 2:
+        raise ApiError(ERR_PARAM, "互换必须填写期望交换的物品描述（BR-13）", 400)
+
+    condition = payload.condition or item.condition
+    if condition not in ITEM_CONDITIONS:
+        raise ApiError(ERR_PARAM, "请选择完整的成色档位（五档）", 400)
+
+    quality_desc = (payload.qualityDesc.strip() if payload.qualityDesc is not None
+                    else item.quality_desc)
+    if payload.qualityDesc is not None and len(quality_desc) < 20:
+        raise ApiError(ERR_PARAM, "质量说明至少 20 个字（M03-01）", 400)
+
+    category_id = item.category_id
+    if payload.categoryId is not None:
+        category = await db.get(ItemCategory, payload.categoryId)
+        if not category:
+            raise ApiError(ERR_PARAM, "物品类目不存在", 400)
+        category_id = category.id
+
+    before = {
+        "title": item.title, "tradeType": item.trade_type,
+        "priceCents": item.price_cents, "condition": item.condition,
+        "categoryId": item.category_id,
+    }
+    item.title = title
+    if payload.description is not None:
+        item.description = payload.description.strip()[:2000]
+    item.quality_desc = quality_desc
+    item.category_id = category_id
+    item.trade_type = trade_type
+    item.price_cents = price_cents
+    item.condition = condition
+    item.barter_expect = barter_expect
+
+    await write_audit(db, request, actor=admin, action="item.update",
+                      resource_type="item", resource_id=item.id,
+                      before=before,
+                      after={"title": item.title, "tradeType": item.trade_type,
+                             "priceCents": item.price_cents,
+                             "condition": item.condition,
+                             "categoryId": item.category_id})
+    await db.commit()
+    return ok(await _row(db, item), "物品已更新")
+
+
+@router.delete("/items/{item_id}",
+               dependencies=[Depends(require_permission("community:item:delete"))])
+async def delete_item(item_id: int, request: Request,
+                      admin: CurrentAdmin, db: DbSession):
+    """删除物品：已有订单记录时拒绝（资金/履约凭证必须保留），请改用下架。"""
+    item = await db.get(Item, item_id)
+    if not item:
+        raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    if item.status in (E.ItemStatus.RESERVED, E.ItemStatus.SOLD, E.ItemStatus.GIFTED):
+        raise ApiError(ERR_BIZ_RULE, "交易中或已成交的物品不能删除，请使用下架", 422)
+    order_count = int((await db.scalar(
+        select(func.count()).select_from(Order).where(Order.item_id == item.id))) or 0)
+    if order_count:
+        raise ApiError(ERR_CONFLICT, "该物品已有订单记录，不能删除；请使用下架", 409)
+    before = await _row(db, item)
+    await db.execute(delete(ItemMedia).where(ItemMedia.item_id == item.id))
+    await db.execute(delete(ItemAudit).where(ItemAudit.item_id == item.id))
+    await db.execute(delete(ItemComment).where(ItemComment.item_id == item.id))
+    await db.execute(delete(ViewHistory).where(ViewHistory.item_id == item.id))
+    await db.execute(delete(Favorite).where(
+        Favorite.target_type == "ITEM", Favorite.target_id == item.id))
+    # 会话保留聊天记录，仅解除已删除物品的引用
+    await db.execute(update(Conversation).where(Conversation.item_id == item.id)
+                     .values(item_id=None))
+    await db.delete(item)
+    await write_audit(db, request, actor=admin, action="item.delete",
+                      resource_type="item", resource_id=item_id,
+                      before=before, after=None)
+    await db.commit()
+    return ok({"id": str(item_id)}, "物品已删除")
 
 
 @router.get("/items/{item_id}/ai-audit")
