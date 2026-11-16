@@ -1,7 +1,7 @@
 <template>
   <view class="trade-tag" :class="`trade-tag--${tone}`">
-    <ni-icon :name="icon" :size="size === 'xs' ? 10 : 11" state="white" />
-    <text class="trade-tag__text" :class="`trade-tag__text--${size}`">{{ label }}</text>
+    <ni-icon v-if="icon" :name="icon" :size="size === 'xs' ? 10 : 11" state="white" />
+    <text class="trade-tag__text" :class="[`trade-tag__text--${size}`, { 'trade-tag__text--solo': !icon }]">{{ label }}</text>
   </view>
 </template>
 
@@ -31,7 +31,7 @@ const label = computed(() => {
 const icon = computed(() => {
   if (props.type === '免费') return 'gift'
   if (props.type === '互换') return 'swap'
-  return 'wallet'
+  return ''
 })
 </script>
 
@@ -57,6 +57,9 @@ const icon = computed(() => {
   margin-left: 3px;
   color: #ffffff;
   font-weight: 700;
+}
+.trade-tag__text--solo {
+  margin-left: 0;
 }
 .trade-tag__text--xs {
   font-size: $ni-font-9;

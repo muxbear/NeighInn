@@ -28,7 +28,7 @@ const props = withDefaults(
 const display = computed(() => formatPrice(props.value, false))
 const symbolSize = computed(() => (props.size === 'md' ? 11 : props.size === 'xl' ? 15 : 15))
 const valueSize = computed(() => (props.size === 'md' ? 19 : props.size === 'xl' ? 29 : 19))
-const freeSize = computed(() => (props.size === 'md' ? 13 : props.size === 'xl' ? 18 : 14))
+const freeSize = computed(() => (props.size === 'md' ? 14 : props.size === 'xl' ? 18 : 14))
 </script>
 
 <style scoped lang="scss">

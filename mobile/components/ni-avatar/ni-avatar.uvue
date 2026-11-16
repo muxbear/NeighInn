@@ -5,9 +5,9 @@
     :style="{ width: size + 'px', height: size + 'px', borderRadius: size / 2 + 'px' }"
   >
     <image
-      v-if="src && !failed"
+      v-if="resolvedSrc && !failed"
       class="ni-avatar__image"
-      :src="src"
+      :src="resolvedSrc"
       mode="aspectFill"
       @error="onError"
     />
@@ -38,13 +38,23 @@ const props = withDefaults(
 )
 
 const failed = ref(false)
+// 服务端下发的是内置头像键（如 avatar-person-1），映射到端内静态资源；
+// 完整 URL / 本地路径 / dataURL 原样使用。
+const resolvedSrc = computed(() => {
+  const src = String(props.src || '').trim()
+  if (!src) return ''
+  if (src.indexOf('avatar-') === 0 && src.indexOf('/') < 0) {
+    return `/static/avatars/${src}.svg`
+  }
+  return src
+})
 const initial = computed(() => {
   const text = Array.from(props.name || '邻')
   return text[0] ?? '邻'
 })
 
 watch(
-  () => props.src,
+  resolvedSrc,
   () => {
     failed.value = false
   },

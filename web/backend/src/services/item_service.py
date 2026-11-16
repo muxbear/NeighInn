@@ -35,7 +35,7 @@ from src.db.models import (
     UserPenalty,
 )
 from src.domain import enums as E
-from src.services.auth_service import bound_resident
+from src.services.auth_service import bound_resident, latest_certification
 
 TRADE_LABEL = {E.TradeType.MONETARY: "出售", E.TradeType.FREE_GIFT: "免费", E.TradeType.BARTER: "互换"}
 # 公开物品图片签名 URL 有效期：覆盖列表缓存周期即可，避免端侧出现长期可直接访问的地址。
@@ -184,8 +184,16 @@ def replace_media(item_id: int, payload) -> list[ItemMedia]:
 
 
 async def _seller_summary(db: AsyncSession, item: Item) -> dict:
+    # 列表页商品卡需要展示认证邻里信息；同一请求内按（卖家, 小区）缓存，避免重复查询。
+    cache: dict = db.info.setdefault("seller_summary_cache", {})
+    cache_key = (item.seller_id, item.community_id)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     seller = await db.get(User, item.seller_id)
     resident = await bound_resident(db, item.seller_id)
+    realname = await latest_certification(db, item.seller_id, "REALNAME")
     community = await db.get(Community, item.community_id)
     deal_count = 0
     if seller:
@@ -198,17 +206,24 @@ async def _seller_summary(db: AsyncSession, item: Item) -> dict:
         joined_days = max(0, (datetime.now(UTC).replace(tzinfo=None)
                               - seller.registered_at.replace(tzinfo=None)).days)
     credit = seller.credit_score if seller else 100
-    return {
+    realname_verified = bool(realname and realname.status == "VERIFIED")
+    owner_verified = bool(resident)
+    payload = {
         "id": str(item.seller_id),
         "name": seller.nickname if seller else "",
         "avatar": (seller.avatar_key if seller else "") or "avatar-person-1",
         "credit": "信用极好" if credit >= 90 else "信用良好" if credit >= 70 else "信用一般",
+        "creditScore": credit,
         "dealCount": deal_count,
         "area": f"{community.name if community else ''} · {resident.building}" if resident and resident.building else (community.name if community else ""),
-        "verified": bool(resident),
+        "verified": owner_verified,
+        "realnameVerified": realname_verified,
+        "ownerVerified": owner_verified,
         "joinedDays": joined_days,
         "level": min(9, max(1, credit // 12)),
     }
+    cache[cache_key] = payload
+    return payload
 
 
 async def serialize_item(
@@ -221,9 +236,11 @@ async def serialize_item(
     community = await db.get(Community, item.community_id)
 
     km = None
+    same_community = None
     if viewer:
         viewer_resident = await bound_resident(db, viewer.id)
         if viewer_resident:
+            same_community = viewer_resident.community_id == item.community_id
             viewer_community = await db.get(Community, viewer_resident.community_id)
             if viewer_community and community:
                 km = _distance_km(viewer_community.longitude, viewer_community.latitude,
@@ -254,6 +271,7 @@ async def serialize_item(
         "images": images,
         "imageKeys": image_keys,
         "community": community.name if community else "",
+        "sameCommunity": same_community,
         "barterExpect": item.barter_expect,
         "description": item.quality_desc or item.description,
         "status": item.status,
@@ -263,10 +281,11 @@ async def serialize_item(
         "viewCount": stats.get("views", 0),
         "commentCount": stats.get("comments", 0),
         "aiVerified": bool(latest_audit),
+        # 商品卡（首页/附近/搜索/收藏）依赖卖家信用与小区信息，列表也必须下发。
+        "seller": await _seller_summary(db, item),
     }
     if detail:
         data["gallery"] = images
-        data["seller"] = await _seller_summary(db, item)
         data["rejectReason"] = item.reject_reason
         data["expiresAt"] = int(item.expires_at.timestamp() * 1000) if item.expires_at else 0
     return data

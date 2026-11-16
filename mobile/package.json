@@ -10,7 +10,7 @@
     "check:uvue": "node scripts/check-uvue.mjs",
     "check:links": "node scripts/check-links.mjs",
     "check": "npm run type-check && npm run check:uvue && npm run check:links && npm run test",
-    "icons": "node scripts/generate-icons.mjs && node scripts/generate-avatars.mjs"
+    "icons": "node scripts/generate-icons.mjs && node scripts/generate-avatars.mjs && node scripts/generate-hats.mjs"
   },
   "dependencies": {
     "pinia": "^2.2.6"

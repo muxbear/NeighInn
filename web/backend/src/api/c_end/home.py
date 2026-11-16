@@ -15,7 +15,7 @@ router = APIRouter(tags=["c:home"])
 
 @router.get("/home")
 async def home_bundle(user: CurrentUser, db: DbSession):
-    """首页聚合（M02）：本小区信息、四专属区统计、喇叭站、小区淘宝、
+    """首页聚合（M02）：本小区信息、四专属区统计、喇叭站、小区拾物、
     互助、生活流、通知未读数。"""
     resident = await bound_resident(db, user.id)
     community_id = resident.community_id if resident else None
@@ -63,7 +63,7 @@ async def home_bundle(user: CurrentUser, db: DbSession):
 
     hot_stmt = (select(Item).where(Item.status == E.ItemStatus.ON_SALE)
                 .order_by(Item.recommended.desc(), Item.published_at.desc().nullslast(),
-                          Item.id.desc()).limit(6))
+                          Item.id.desc()).limit(10))
     if community_id:
         hot_stmt = hot_stmt.where(Item.community_id == community_id)
     hot_items = [await item_svc.serialize_item(db, item, user)

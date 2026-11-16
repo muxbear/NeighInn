@@ -131,7 +131,7 @@
       <view class="home__hot">
         <ni-section-header
           kicker="邻居们都在看"
-          title="小区淘宝"
+          title="小区拾物"
           action-text="查看更多"
           @action="goZone('sale')"
         />
@@ -656,7 +656,7 @@ async function onLifeLike(post: any): Promise<void> {
   height: 132px;
 }
 .home__hot {
-  background-color: $ni-color-fill-1;
+  background-color: $ni-color-white;
   padding: 18px 14px 20px;
 }
 .home__product-grid {

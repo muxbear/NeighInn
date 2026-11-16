@@ -93,6 +93,11 @@ const ICONS = {
       S('M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7z') +
       S('M18.5 15.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z'),
   },
+  star: {
+    line: S('M12 3.2 14.6 8.9 20.8 9.7 16.2 14.1 17.4 20.3 12 17.2 6.6 20.3 7.8 14.1 3.2 9.7 9.4 8.9Z'),
+    filled:
+      '<path d="M12 3.2 14.6 8.9 20.8 9.7 16.2 14.1 17.4 20.3 12 17.2 6.6 20.3 7.8 14.1 3.2 9.7 9.4 8.9Z" fill="%C%"/>',
+  },
   sliders: {
     line:
       S('M4 7h8M16 7h4M4 12h4M12 12h8M4 17h10M18 17h2') +
@@ -197,5 +202,19 @@ for (const [name, def] of Object.entries(ICONS)) {
     }
   }
 }
+
+// 半星无法由 line/filled 两态表达，单独生成金色半星（信用星级）。
+const STAR_PATH = 'M12 3.2 14.6 8.9 20.8 9.7 16.2 14.1 17.4 20.3 12 17.2 6.6 20.3 7.8 14.1 3.2 9.7 9.4 8.9Z'
+writeFileSync(
+  join(outDir, 'icon-star-24-half--gold.svg'),
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <path d="${STAR_PATH}" fill="#F1ECE5"/>
+  <path d="M12 3.2 9.4 8.9 3.2 9.7 7.8 14.1 6.6 20.3 12 17.2Z" fill="${COLORS.gold}"/>
+  <path d="${STAR_PATH}" fill="none" stroke="${COLORS.gold}" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>
+`,
+  'utf8',
+)
+count += 1
 
 console.log(`[icons] generated ${count} svg files -> ${outDir}`)

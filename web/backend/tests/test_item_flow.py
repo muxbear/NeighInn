@@ -111,9 +111,15 @@ async def test_publish_review_approve_and_visibility(client, db_session):
     assert resp.json()["data"]["status"] == "ON_SALE"
     assert resp.json()["data"]["recommended"] is True
 
-    # 买家在信息流可见（本小区默认 feed）
+    # 买家在信息流可见（本小区默认 feed），且商品卡所需的认证邻里信息随列表下发
     feed = await client.get(f"{C_BASE}/items", headers=bearer(buyer["token"]))
-    assert any(row["id"] == item_id for row in feed.json()["data"]["items"])
+    listed = next(row for row in feed.json()["data"]["items"] if row["id"] == item_id)
+    assert listed["seller"]["name"] == seller["profile"]["nickname"]
+    assert listed["seller"]["verified"] is True
+    assert listed["seller"]["realnameVerified"] is True
+    assert listed["seller"]["ownerVerified"] is True
+    assert listed["seller"]["creditScore"] == 100
+    assert listed["seller"]["area"]
 
     detail = (await client.get(f"{C_BASE}/items/{item_id}",
                                headers=bearer(buyer["token"]))).json()["data"]

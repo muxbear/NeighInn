@@ -21,9 +21,15 @@ export interface SellerSummary {
   name: string
   avatar: string
   credit: string
+  /** 信用分（0–100） */
+  creditScore?: number
   dealCount: number
   area: string
   verified: boolean
+  /** 实名认证通过（身份认证） */
+  realnameVerified?: boolean
+  /** 业主认证通过 */
+  ownerVerified?: boolean
   joinedDays?: number
   following?: boolean
   /** 邻里等级：1–9，体现交易与互助活跃度 */
@@ -44,6 +50,8 @@ export interface Item {
   /** 图片对象键（用于编辑回传；images 为端侧可直接展示的签名 URL）。 */
   imageKeys?: string[]
   community?: string
+  /** 是否与当前用户同一小区；null/undefined 表示未登录或未绑定小区 */
+  sameCommunity?: boolean | null
   gallery?: string[]
   barterExpect?: string
   description?: string
