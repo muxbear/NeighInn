@@ -7,7 +7,7 @@ const emit = defineEmits<{ close: [] }>()
 
 <template>
   <div v-if="open" class="drawer-backdrop" @mousedown.self="emit('close')">
-    <aside class="drawer" @mousedown.stop>
+    <section class="drawer" role="dialog" aria-modal="true" :aria-label="title" @mousedown.stop>
       <div class="drawer-header">
         <div>
           <span>{{ eyebrow || '维护档案' }}</span>
@@ -17,6 +17,6 @@ const emit = defineEmits<{ close: [] }>()
       </div>
       <div class="drawer-body"><slot /></div>
       <div v-if="$slots.footer" class="drawer-footer"><slot name="footer" /></div>
-    </aside>
+    </section>
   </div>
 </template>

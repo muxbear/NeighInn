@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+import io
+import logging
 import re
 from datetime import datetime
+from typing import Annotated
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
+from starlette.concurrency import run_in_threadpool
 
 from src.api.utils import paginate
 from src.core.audit import write_audit, write_outbox
+from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.idempotency import complete_idempotency, guard_idempotency
 from src.core.permissions import require_permission
 from src.core.responses import (
     ERR_BIZ_RULE,
     ERR_CONFLICT,
+    ERR_DEPENDENCY,
+    ERR_FILE_TOO_LARGE,
     ERR_NOT_FOUND,
     ERR_PARAM,
     ApiError,
@@ -22,7 +30,7 @@ from src.core.responses import (
     paginated,
 )
 from src.core.security import decrypt_field, encrypt_field, hmac_index, mask_phone
-from src.core.storage import presign_download
+from src.core.storage import get_minio, presign_download
 from src.db.models import Certification, Community, Item, Resident, User
 from src.db.models.common import utcnow
 from src.domain import enums as E
@@ -30,8 +38,10 @@ from src.domain.state import certification_sm, item_sm
 from src.services.notify_service import notify_user
 
 router = APIRouter(tags=["admin:residents"])
+logger = logging.getLogger(__name__)
 
 AuditPerm = Depends(require_permission("community:resident:audit"))
+ResidentUpdatePerm = Depends(require_permission("community:resident:update"))
 
 IDENTITY_MAP = {"owner": "业主", "tenant": "租户", "family": "家属", "business": "商务人员"}
 TYPE_LABEL = {"REALNAME": "实名认证", "OWNER_PROOF": "住户认证"}
@@ -68,12 +78,18 @@ PHONE_PATTERN = re.compile(r"^1\d{10}$")
 class ResidentIn(BaseModel):
     communityId: int | None = None
     name: str = ""
+    # 账号资料（关联 User）：后台编辑档案时可一并维护。
+    nickname: str | None = None
+    email: str | None = None
+    bio: str | None = None
     gender: str = "女"
     phone: str = ""
     identity: str = "业主"
     building: str = ""
     relationship: str = ""
     certification: str = "未认证"
+    realnameStatus: str | None = None
+    creditScore: int | None = None
     certificationNo: str = ""
     level: str = "普通用户"
     status: str = "正常"
@@ -116,6 +132,49 @@ def _validate_profile_text(payload: ResidentIn) -> None:
         raise ApiError(ERR_PARAM, "与房屋关系最多 64 字", 400)
     if len(payload.certificationNo.strip()) > 32:
         raise ApiError(ERR_PARAM, "认证编号最多 32 字", 400)
+    if payload.nickname is not None and len(payload.nickname.strip()) > 24:
+        raise ApiError(ERR_PARAM, "昵称最多 24 字", 400)
+    if payload.email is not None and len(payload.email.strip()) > 128:
+        raise ApiError(ERR_PARAM, "邮箱最多 128 字", 400)
+    if payload.bio is not None and len(payload.bio.strip()) > 500:
+        raise ApiError(ERR_PARAM, "个人描述最多 500 字", 400)
+
+
+async def _apply_user_profile(db: DbSession, resident: Resident, payload: ResidentIn,
+                              *, only_non_empty: bool) -> None:
+    """把昵称 / 邮箱 / 个人描述写回关联账号；未绑定账号的档案忽略这些字段。"""
+    if not resident.user_id:
+        return
+    user = await db.get(User, resident.user_id)
+    if user is None:
+        return
+    if payload.nickname is not None and (payload.nickname.strip() or not only_non_empty):
+        user.nickname = payload.nickname.strip()[:24]
+    if payload.email is not None and (payload.email.strip() or not only_non_empty):
+        user.email = payload.email.strip()[:128]
+    if payload.bio is not None and (payload.bio.strip() or not only_non_empty):
+        user.bio = payload.bio.strip()[:500]
+
+
+async def _apply_user_status_fields(db: DbSession, resident: Resident,
+                                    payload: ResidentIn) -> None:
+    """后台直接维护身份认证状态与信用分（不受审核状态机 / 信用流水限制）。"""
+    if not resident.user_id:
+        return
+    user = await db.get(User, resident.user_id)
+    if user is None:
+        return
+    if payload.realnameStatus is not None:
+        target = _normalize_choice(
+            payload.realnameStatus, CERT_STATUS_ALIASES, "身份认证状态")
+        user.realname_status = target
+        await _sync_latest_cert_status(db, resident.user_id, "REALNAME", target)
+    if payload.creditScore is not None:
+        score = int(payload.creditScore)
+        if not 0 <= score <= 1000:
+            raise ApiError(ERR_PARAM, "信用分需在 0-1000 之间", 400)
+        user.credit_score = score
+        user.credit_level = _credit_level(score)
 
 
 # ---------------------------------------------------------------- 序列化
@@ -197,6 +256,25 @@ async def _latest_certifications(db: DbSession, user_id: int) -> dict[str, Certi
     for cert in rows:
         latest.setdefault(cert.type, cert)
     return latest
+
+
+async def _latest_cert(db: DbSession, user_id: int, cert_type: str) -> Certification | None:
+    return await db.scalar(
+        select(Certification)
+        .where(Certification.user_id == user_id, Certification.type == cert_type)
+        .order_by(Certification.submitted_at.desc(), Certification.id.desc())
+        .limit(1)
+    )
+
+
+async def _sync_latest_cert_status(db: DbSession, user_id: int | None,
+                                   cert_type: str, status: str) -> None:
+    """后台直改认证状态时同步最近一张审核单，保证档案与认证材料页展示一致。"""
+    if not user_id:
+        return
+    cert = await _latest_cert(db, user_id, cert_type)
+    if cert is not None:
+        cert.status = status
 
 
 async def _resident_row(db: DbSession, resident: Resident) -> dict:
@@ -358,6 +436,8 @@ async def create_resident(payload: ResidentIn, request: Request,
     await db.flush()
     if resident.certification_status == "VERIFIED" and not resident.certification_no:
         resident.certification_no = f"YZ{resident.id:08d}"
+    await _apply_user_profile(db, resident, payload, only_non_empty=True)
+    await _apply_user_status_fields(db, resident, payload)
     await write_audit(db, request, actor=admin, action="resident.create",
                       resource_type="resident", resource_id=resident.id,
                       before=None, after=await _resident_row(db, resident))
@@ -420,27 +500,19 @@ async def update_resident(resident_id: int, payload: ResidentIn, request: Reques
         resident.status = _normalize_choice(
             payload.status, RESIDENT_STATUS_ALIASES, "账号状态")
     if "certification" in fields and payload.certification.strip():
-        target = _normalize_choice(payload.certification, CERT_STATUS_ALIASES, "认证状态")
-        current = CERT_STATUS_ALIASES.get(resident.certification_status,
-                                          resident.certification_status)
-        if target != current:
-            if not certification_sm.can_fire(current, target):
-                current_label = CERT_STATUS_LABEL.get(current, current)
-                raise ApiError(
-                    ERR_BIZ_RULE,
-                    f"认证状态不能从「{current_label}」直接改为"
-                    f"「{CERT_STATUS_LABEL.get(target, target)}」，请通过认证审核流程处理",
-                    422,
-                )
-            resident.certification_status = certification_sm.fire(current, target)
-        else:
-            resident.certification_status = current
+        # 后台管理员可直接修正业主认证状态（不再受审核状态机迁移限制）。
+        resident.certification_status = _normalize_choice(
+            payload.certification, CERT_STATUS_ALIASES, "业主认证状态")
+        await _sync_latest_cert_status(
+            db, resident.user_id, "OWNER_PROOF", resident.certification_status)
     if "certificationNo" in fields:
         resident.certification_no = payload.certificationNo.strip()
     if "joinedAt" in fields and payload.joinedAt:
         resident.joined_at = _parse_joined_at(payload.joinedAt)
 
     _validate_profile_text(payload)
+    await _apply_user_profile(db, resident, payload, only_non_empty=False)
+    await _apply_user_status_fields(db, resident, payload)
     if resident.certification_status == "VERIFIED" and not resident.certification_no:
         resident.certification_no = f"YZ{resident.id:08d}"
     await write_audit(db, request, actor=admin, action="resident.update",
@@ -470,6 +542,162 @@ async def delete_resident(resident_id: int, request: Request,
                       before=before, after=None)
     await db.commit()
     return ok({"id": str(resident_id)}, "人员档案已删除")
+
+
+# ---------------------------------------------------------------- 认证材料维护（后台直改）
+
+MAX_CERT_MATERIAL_BYTES = 10 * 1024 * 1024
+CERT_MATERIAL_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+CERT_MATERIAL_TYPES = {
+    "REALNAME": CERT_MATERIAL_IMAGE_TYPES,
+    "OWNER_PROOF": CERT_MATERIAL_IMAGE_TYPES | {"application/pdf"},
+}
+CERT_MATERIAL_EXT = {
+    "image/jpeg": ".jpg", "image/png": ".png",
+    "image/webp": ".webp", "application/pdf": ".pdf",
+}
+RESIDENT_CERT_LABEL = {"REALNAME": "身份认证", "OWNER_PROOF": "业主认证"}
+IDENTITY_CODES = {"业主": "owner", "租户": "tenant", "家属": "family", "商务人员": "business"}
+
+
+def _normalize_cert_type(raw: str) -> str:
+    value = (raw or "").strip().upper()
+    if value not in CERT_MATERIAL_TYPES:
+        raise ApiError(ERR_PARAM, "认证类型不合法", 400)
+    return value
+
+
+def _detect_cert_material_type(head: bytes) -> str:
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head.startswith(b"%PDF-"):
+        return "application/pdf"
+    return ""
+
+
+async def _get_resident_or_404(db: DbSession, resident_id: int) -> Resident:
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    return resident
+
+
+async def _get_or_create_resident_cert(db: DbSession, resident: Resident,
+                                       cert_type: str) -> Certification:
+    """取最近一张认证单；没有时补建一张，便于后台直接维护历史人员的证件材料。"""
+    if not resident.user_id:
+        raise ApiError(ERR_PARAM, "该人员档案未绑定账号，无法维护认证材料", 400)
+    cert = await _latest_cert(db, resident.user_id, cert_type)
+    if cert is not None:
+        return cert
+    user = await db.get(User, resident.user_id)
+    if user is None:
+        raise ApiError(ERR_PARAM, "关联账号不存在，无法维护认证材料", 400)
+    status = (user.realname_status if cert_type == "REALNAME"
+              else resident.certification_status) or "UNVERIFIED"
+    cert = Certification(
+        user_id=resident.user_id,
+        resident_id=resident.id,
+        community_id=resident.community_id if cert_type == "OWNER_PROOF" else None,
+        type=cert_type,
+        identity=IDENTITY_CODES.get(resident.identity_type, "owner"),
+        materials=[],
+        status=status,
+        submitted_at=utcnow(),
+    )
+    db.add(cert)
+    await db.flush()
+    return cert
+
+
+@router.get("/residents/{resident_id}/certifications/{cert_type}/materials",
+            dependencies=[ResidentUpdatePerm])
+async def resident_cert_materials(resident_id: int, cert_type: str,
+                                  admin: CurrentAdmin, db: DbSession):
+    resident = await _get_resident_or_404(db, resident_id)
+    cert_type = _normalize_cert_type(cert_type)
+    cert = await _latest_cert(db, resident.user_id, cert_type) if resident.user_id else None
+    if cert is None:
+        return ok({
+            "id": "", "type": cert_type, "typeLabel": RESIDENT_CERT_LABEL[cert_type],
+            "status": "", "submittedAt": 0, "materials": [],
+        })
+    return ok(await _cert_detail(db, cert))
+
+
+@router.post("/residents/{resident_id}/certifications/{cert_type}/materials",
+             dependencies=[ResidentUpdatePerm])
+async def upload_resident_cert_material(resident_id: int, cert_type: str, request: Request,
+                                        admin: CurrentAdmin, db: DbSession,
+                                        file: Annotated[UploadFile, File()]):
+    """后台直传认证照片/证件（私有桶）；自动补建认证单并记审计。"""
+    resident = await _get_resident_or_404(db, resident_id)
+    cert_type = _normalize_cert_type(cert_type)
+    cert = await _get_or_create_resident_cert(db, resident, cert_type)
+
+    content = await file.read()
+    if not content:
+        raise ApiError(ERR_PARAM, "上传文件为空", 400)
+    if len(content) > MAX_CERT_MATERIAL_BYTES:
+        raise ApiError(ERR_FILE_TOO_LARGE, "单个文件不能超过 10MB", 413)
+    allowed = CERT_MATERIAL_TYPES[cert_type]
+    detected = _detect_cert_material_type(content[:16])
+    if detected not in allowed:
+        message = ("仅支持 JPG / PNG / WebP 图片" if cert_type == "REALNAME"
+                   else "仅支持 JPG / PNG / WebP 图片或 PDF 文件")
+        raise ApiError(ERR_PARAM, message, 400)
+
+    client = get_minio()
+    if client is None:
+        raise ApiError(ERR_DEPENDENCY, "对象存储未配置，暂无法上传材料", 503)
+    bucket = settings.minio_bucket_private
+    object_key = f"certifications/admin/{cert.id}/{uuid4().hex}{CERT_MATERIAL_EXT[detected]}"
+    try:
+        if hasattr(client, "bucket_exists"):
+            exists = await run_in_threadpool(client.bucket_exists, bucket)
+            if not exists:
+                await run_in_threadpool(client.make_bucket, bucket)
+        await run_in_threadpool(
+            client.put_object, bucket, object_key,
+            io.BytesIO(content), len(content), content_type=detected,
+        )
+    except Exception as exc:  # 对象存储异常统一转依赖不可用
+        logger.warning("认证材料上传失败：%s", exc)
+        raise ApiError(ERR_DEPENDENCY, "认证材料上传失败，请稍后重试", 503) from exc
+
+    before = list(cert.materials or [])
+    cert.materials = [*before, object_key]
+    await write_audit(db, request, actor=admin, action="certification.material.upload",
+                      resource_type="certification", resource_id=cert.id,
+                      before={"materials": before}, after={"materials": cert.materials})
+    await db.commit()
+    return ok(await _cert_detail(db, cert), "认证材料已上传")
+
+
+@router.delete("/residents/{resident_id}/certifications/{cert_type}/materials",
+               dependencies=[ResidentUpdatePerm])
+async def delete_resident_cert_material(resident_id: int, cert_type: str, request: Request,
+                                        admin: CurrentAdmin, db: DbSession,
+                                        objectKey: str = Query(...)):
+    """从认证单移除材料引用（对象保留在私有桶供审计追溯）。"""
+    resident = await _get_resident_or_404(db, resident_id)
+    cert_type = _normalize_cert_type(cert_type)
+    cert = await _latest_cert(db, resident.user_id, cert_type) if resident.user_id else None
+    if cert is None:
+        raise ApiError(ERR_NOT_FOUND, "该人员暂无认证材料", 404)
+    before = list(cert.materials or [])
+    if objectKey not in before:
+        raise ApiError(ERR_NOT_FOUND, "认证材料不存在", 404)
+    cert.materials = [key for key in before if key != objectKey]
+    await write_audit(db, request, actor=admin, action="certification.material.delete",
+                      resource_type="certification", resource_id=cert.id,
+                      before={"materials": before}, after={"materials": cert.materials})
+    await db.commit()
+    return ok(await _cert_detail(db, cert), "认证材料已删除")
 
 
 # ---------------------------------------------------------------- 认证审核队列（W02）

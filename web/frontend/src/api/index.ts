@@ -294,6 +294,17 @@ export const certificationsApi = {
   requestMaterials: (id: number | string, note: string) => http.post<any, any>(`/certifications/${id}/request-materials`, { note }),
   freezeResident: (residentId: number | string) => http.post<any, any>(`/residents/${residentId}/freeze`, {}),
   unfreezeResident: (residentId: number | string) => http.post<any, any>(`/residents/${residentId}/unfreeze`, {}),
+  materials: (residentId: number | string, type: 'REALNAME' | 'OWNER_PROOF') =>
+    http.get<any, any>(`/residents/${residentId}/certifications/${type}/materials`),
+  uploadMaterial: (residentId: number | string, type: 'REALNAME' | 'OWNER_PROOF', file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post<any, any>(`/residents/${residentId}/certifications/${type}/materials`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  removeMaterial: (residentId: number | string, type: 'REALNAME' | 'OWNER_PROOF', objectKey: string) =>
+    http.delete<any, any>(`/residents/${residentId}/certifications/${type}/materials`, { params: { objectKey } }),
 }
 
 export const reportsApi = {

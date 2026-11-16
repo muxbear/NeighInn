@@ -30,6 +30,13 @@ const certViewerTitle = ref('')
 const certViewerData = ref<any>(null)
 const certPhotoErrors = ref<Record<string, boolean>>({})
 
+// 编辑弹窗内的认证材料维护（身份认证 / 业主认证）。
+const CERT_TYPE_BY_KIND = { realname: 'REALNAME', owner: 'OWNER_PROOF' } as const
+const certMaterials = ref<Record<'realname' | 'owner', any[]>>({ realname: [], owner: [] })
+const certMaterialsLoading = ref<Record<'realname' | 'owner', boolean>>({ realname: false, owner: false })
+const certUploading = ref<Record<'realname' | 'owner', boolean>>({ realname: false, owner: false })
+const certMaterialErrors = ref<Record<string, boolean>>({})
+
 const AVATAR_TONES = ['violet', 'blue', 'green', 'orange', 'plum', 'teal']
 
 const tabs = ['全部人员', '业主', '家属', '租户', '商务人员']
@@ -59,18 +66,35 @@ async function load() {
 
 function openCreate() {
   editing.value = null
+  certMaterials.value = { realname: [], owner: [] }
+  certMaterialErrors.value = {}
   form.value = {
-    communityId: app.currentCommunityId, name: '', gender: '女', phone: '', identity: '业主',
+    communityId: app.currentCommunityId, name: '', nickname: '', email: '', bio: '',
+    gender: '女', phone: '', identity: '业主',
     building: '', relationship: '房屋产权人', certification: '未认证', certificationNo: '',
-    level: '普通用户', status: '正常',
+    realnameStatus: null, creditScore: null,
+    level: '普通用户', status: '正常', joinedAt: '',
   }
   drawerOpen.value = true
 }
 
 function openEdit(row: any) {
   editing.value = row
-  form.value = { ...row, communityId: Number(row.communityId) }
+  form.value = {
+    ...row,
+    communityId: Number(row.communityId),
+    nickname: row.nickname || '',
+    email: row.email || '',
+    bio: row.bio || '',
+    realnameStatus: row.realnameStatus || 'UNVERIFIED',
+    creditScore: row.creditScore ?? 0,
+    joinedAt: row.joinedAt && row.joinedAt !== '—' ? row.joinedAt : '',
+  }
   drawerOpen.value = true
+  certMaterials.value = { realname: [], owner: [] }
+  certMaterialErrors.value = {}
+  loadCertMaterials('realname')
+  loadCertMaterials('owner')
 }
 
 async function save() {
@@ -81,8 +105,13 @@ async function save() {
   const payload: any = { ...form.value }
   // 列表返回的为脱敏手机号；未重新输入时不提交，避免覆盖真实号码。
   if (editing.value && String(payload.phone || '').includes('*')) delete payload.phone
-  // 加入时间不在表单中维护，避免把列表展示值（含占位符）回写成业务数据。
-  delete payload.joinedAt
+  // 留空表示不修改身份认证状态 / 信用分。
+  if (payload.realnameStatus === null || payload.realnameStatus === '') delete payload.realnameStatus
+  if (payload.creditScore === null || payload.creditScore === '' || Number.isNaN(Number(payload.creditScore))) {
+    delete payload.creditScore
+  } else {
+    payload.creditScore = Number(payload.creditScore)
+  }
   try {
     if (editing.value) await residentApi.update(editing.value.id, payload)
     else await residentApi.create(payload)
@@ -152,6 +181,55 @@ function closeCertViewer() {
 
 function onCertPhotoError(objectKey: string) {
   certPhotoErrors.value = { ...certPhotoErrors.value, [objectKey]: true }
+}
+
+async function loadCertMaterials(kind: 'realname' | 'owner') {
+  if (!editing.value?.id) return
+  certMaterialsLoading.value[kind] = true
+  try {
+    const data = await certificationsApi.materials(editing.value.id, CERT_TYPE_BY_KIND[kind])
+    certMaterials.value[kind] = data?.materials || []
+  } catch (exc: any) {
+    certMaterials.value[kind] = []
+    app.showToast(exc?.message || '认证材料加载失败')
+  } finally {
+    certMaterialsLoading.value[kind] = false
+  }
+}
+
+async function onCertMaterialSelected(kind: 'realname' | 'owner', event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !editing.value?.id) return
+  certUploading.value[kind] = true
+  try {
+    const data = await certificationsApi.uploadMaterial(editing.value.id, CERT_TYPE_BY_KIND[kind], file)
+    certMaterials.value[kind] = data?.materials || []
+    certMaterialErrors.value = {}
+    app.showToast('认证材料已上传')
+  } catch (exc: any) {
+    app.showToast(exc?.message || '认证材料上传失败')
+  } finally {
+    certUploading.value[kind] = false
+  }
+}
+
+async function removeCertMaterial(kind: 'realname' | 'owner', objectKey: string) {
+  if (!editing.value?.id) return
+  if (!window.confirm('确定删除该认证材料吗？对象文件将保留在私有桶供审计追溯。')) return
+  try {
+    const data = await certificationsApi.removeMaterial(
+      editing.value.id, CERT_TYPE_BY_KIND[kind], objectKey)
+    certMaterials.value[kind] = data?.materials || []
+    app.showToast('认证材料已删除')
+  } catch (exc: any) {
+    app.showToast(exc?.message || '删除失败')
+  }
+}
+
+function markCertMaterialError(objectKey: string) {
+  certMaterialErrors.value = { ...certMaterialErrors.value, [objectKey]: true }
 }
 
 onMounted(load)
@@ -306,17 +384,108 @@ watch(() => app.currentCommunityId, () => {
     </div>
     <h4 class="section-title">基本信息</h4>
     <div class="form-grid">
+      <label class="full">
+        <span>头像</span>
+        <div class="drawer-avatar-row">
+          <span :class="['resident-avatar', avatarTone(form)]">{{ avatarText(form) }}</span>
+          <em>头像由移动端头像库维护，后台暂不支持更换</em>
+        </div>
+      </label>
       <label><span>姓名 *</span><input v-model="form.name" placeholder="请输入姓名" /></label>
+      <label><span>昵称</span><input v-model="form.nickname" maxlength="24" placeholder="App 展示昵称" /></label>
       <label><span>性别</span><select v-model="form.gender"><option>男</option><option>女</option></select></label>
       <label><span>手机号</span><input v-model="form.phone" placeholder="请输入手机号" /></label>
+      <label><span>邮箱</span><input v-model="form.email" maxlength="128" placeholder="选填" /></label>
       <label><span>身份类型</span><select v-model="form.identity"><option>业主</option><option>家属</option><option>租户</option><option>商务人员</option></select></label>
-      <label class="full"><span>房屋 / 商铺</span><input v-model="form.building" placeholder="例如：8 栋 1 单元 902" /></label>
-      <label class="full"><span>与房屋关系</span><input v-model="form.relationship" /></label>
+      <label><span>房屋 / 商铺</span><input v-model="form.building" placeholder="例如：8 栋 1 单元 902" /></label>
+      <label><span>与房屋关系</span><input v-model="form.relationship" placeholder="如：房屋产权人" /></label>
+      <label><span>加入时间</span><input v-model="form.joinedAt" type="date" /></label>
+      <label class="full"><span>个人描述</span><textarea v-model="form.bio" maxlength="500" placeholder="选填，移动端个人简介" /></label>
     </div>
-    <h4 class="section-title" style="margin-top: 24px">认证与等级</h4>
+    <h4 class="section-title" style="margin-top: 24px">认证与材料</h4>
+    <div class="cert-material-grid">
+      <div class="cert-material-block">
+        <div class="cert-material-head">
+          <strong>身份认证</strong>
+          <span>{{ form.realnameStatus ? mapStatus(form.realnameStatus) : '未认证' }}</span>
+        </div>
+        <label class="cert-status-field">
+          <span>认证状态</span>
+          <select v-model="form.realnameStatus"><option :value="null">保持原样</option><option value="UNVERIFIED">未认证</option><option value="PENDING">待审核</option><option value="VERIFIED">已认证</option><option value="SUPPLEMENT">待补充</option><option value="REJECTED">认证驳回</option><option value="FROZEN">已冻结</option><option value="REVOKED">已撤销</option></select>
+        </label>
+        <template v-if="editing">
+          <div v-if="certMaterialsLoading.realname" class="cert-material-hint">正在加载认证材料…</div>
+          <div v-else-if="certMaterials.realname.length" class="cert-material-thumbs">
+            <div v-for="material in certMaterials.realname" :key="material.objectKey" class="cert-material-thumb">
+              <a v-if="material.signedUrl" :href="material.signedUrl" target="_blank" rel="noopener">
+                <img
+                  v-if="!certMaterialErrors[material.objectKey]"
+                  :src="material.signedUrl"
+                  :alt="material.label"
+                  @error="markCertMaterialError(material.objectKey)"
+                />
+                <div v-else class="cert-material-missing">图片加载失败</div>
+              </a>
+              <div v-else class="cert-material-missing">签名 URL 生成失败</div>
+              <div class="cert-material-foot">
+                <span>{{ material.label }}</span>
+                <button type="button" @click="removeCertMaterial('realname', material.objectKey)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="cert-material-hint">暂无认证材料</div>
+          <label class="cert-material-upload">
+            <input type="file" accept="image/jpeg,image/png,image/webp" @change="onCertMaterialSelected('realname', $event)" />
+            <span>{{ certUploading.realname ? '上传中…' : '上传 / 替换照片' }}</span>
+          </label>
+        </template>
+        <p v-else class="cert-material-hint">保存档案后可上传身份认证材料</p>
+      </div>
+
+      <div class="cert-material-block">
+        <div class="cert-material-head">
+          <strong>业主认证</strong>
+          <span>{{ form.certification || '未认证' }}</span>
+        </div>
+        <label class="cert-status-field">
+          <span>认证状态</span>
+          <select v-model="form.certification"><option>已认证</option><option>待审核</option><option>待补充</option><option>已驳回</option><option>未认证</option><option>已冻结</option><option>已撤销</option></select>
+        </label>
+        <template v-if="editing">
+          <div v-if="certMaterialsLoading.owner" class="cert-material-hint">正在加载认证材料…</div>
+          <div v-else-if="certMaterials.owner.length" class="cert-material-thumbs">
+            <div v-for="material in certMaterials.owner" :key="material.objectKey" class="cert-material-thumb">
+              <a v-if="material.signedUrl" :href="material.signedUrl" target="_blank" rel="noopener">
+                <img
+                  v-if="!certMaterialErrors[material.objectKey]"
+                  :src="material.signedUrl"
+                  :alt="material.label"
+                  @error="markCertMaterialError(material.objectKey)"
+                />
+                <div v-else class="cert-material-missing">图片加载失败</div>
+              </a>
+              <div v-else class="cert-material-missing">签名 URL 生成失败</div>
+              <div class="cert-material-foot">
+                <span>{{ material.label }}</span>
+                <button type="button" @click="removeCertMaterial('owner', material.objectKey)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="cert-material-hint">暂无认证材料</div>
+          <label class="cert-material-upload">
+            <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" @change="onCertMaterialSelected('owner', $event)" />
+            <span>{{ certUploading.owner ? '上传中…' : '上传 / 替换照片' }}</span>
+          </label>
+        </template>
+        <p v-else class="cert-material-hint">保存档案后可上传业主认证材料</p>
+      </div>
+    </div>
+    <p class="form-hint">支持 JPG / PNG / WebP，业主认证另支持 PDF，单文件不超过 10MB；点击缩略图可查看原图。信用等级随信用分自动更新。</p>
+
+    <h4 class="section-title" style="margin-top: 24px">等级与账号</h4>
     <div class="form-grid">
-      <label><span>认证状态</span><select v-model="form.certification"><option>已认证</option><option>待审核</option><option>待补充</option><option>已驳回</option><option>未认证</option><option>已冻结</option><option>已撤销</option></select></label>
       <label><span>认证编号</span><input v-model="form.certificationNo" /></label>
+      <label><span>信用分</span><input v-model.number="form.creditScore" type="number" min="0" max="1000" step="1" placeholder="0-1000，留空不修改" /></label>
       <label><span>用户级别</span><select v-model="form.level"><option>普通用户</option><option>活跃用户</option><option>社区达人</option><option>重点关怀</option></select></label>
       <label><span>账号状态</span><select v-model="form.status"><option>正常</option><option>已停用</option><option>已离开</option></select></label>
     </div>
