@@ -185,9 +185,10 @@
         </view>
         <view class="home__service-list">
           <service-preview-card
-            v-for="post in currentServices"
+            v-for="(post, index) in currentServices"
             :key="post.id"
             :post="post"
+            :last="index === currentServices.length - 1"
             @tap="goZone('service')"
           />
           <view v-if="currentServices.length === 0" class="home__service-empty">
@@ -677,7 +678,7 @@ async function onLifeLike(post: any): Promise<void> {
 .home__service {
   background-color: $ni-color-fill-1;
   padding-top: 18px;
-  padding-bottom: 26px;
+  padding-bottom: 18px;
 }
 .home__service-head {
   padding-left: 16px;
@@ -736,7 +737,7 @@ async function onLifeLike(post: any): Promise<void> {
   font-weight: 700;
 }
 .home__service-list {
-  padding: 1px 14px 7px;
+  padding: 1px 14px 0;
 }
 .home__service-empty {
   width: 100%;

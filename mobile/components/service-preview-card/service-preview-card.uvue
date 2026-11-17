@@ -1,7 +1,7 @@
 <template>
   <view
     class="service-preview"
-    :class="{ 'service-preview--offer': isOffer }"
+    :class="{ 'service-preview--offer': isOffer, 'service-preview--last': last }"
     hover-class="service-preview--pressed"
     :hover-stay-time="100"
     @click="onTap"
@@ -60,7 +60,7 @@
 import { computed } from 'vue'
 import type { ServicePost } from '../../models'
 
-const props = defineProps<{ post: ServicePost }>()
+const props = defineProps<{ post: ServicePost; last?: boolean }>()
 const emit = defineEmits<{ (event: 'tap'): void }>()
 
 const isOffer = computed(() => props.post.kind === '提供')
@@ -88,6 +88,9 @@ function onTap(): void {
 .service-preview--offer {
   border-color: #cee5d7;
   background-image: linear-gradient(160deg, #f8fdfa 0%, #ffffff 62%);
+}
+.service-preview--last {
+  margin-bottom: 0;
 }
 .service-preview__top {
   flex-direction: row;
