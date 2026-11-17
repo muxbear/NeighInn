@@ -292,8 +292,8 @@ async def update_help(help_id: int, payload: HelpUpdateIn, request: Request,
         raise ApiError(ERR_PARAM, "标题需 2–30 个字", 400)
 
     category = payload.category.strip() if payload.category is not None else row.category
-    if not (1 <= len(category) <= 32):
-        raise ApiError(ERR_PARAM, "分类需 1–32 个字", 400)
+    if len(category) > 32:
+        raise ApiError(ERR_PARAM, "分类最多 32 个字", 400)
 
     description = (payload.description.strip() if payload.description is not None
                    else row.description)

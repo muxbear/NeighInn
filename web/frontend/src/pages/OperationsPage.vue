@@ -990,10 +990,6 @@ async function saveHelpEdit() {
     app.showToast('标题需 2–30 个字')
     return
   }
-  if (!category) {
-    app.showToast('请填写互助分类')
-    return
-  }
   if (description.length > 500) {
     app.showToast('详细说明最多 500 个字')
     return
@@ -1506,8 +1502,9 @@ watch(() => app.currentCommunityId, () => {
           </select>
         </label>
         <label>
-          <span>互助分类 *</span>
+          <span>互助分类</span>
           <select v-model="helpEditForm.category">
+            <option value="">暂不选择</option>
             <option v-for="category in helpCategoryOptions" :key="category" :value="category">{{ category }}</option>
           </select>
         </label>

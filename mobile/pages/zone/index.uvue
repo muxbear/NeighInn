@@ -216,8 +216,11 @@ onLoad((options: any) => {
     zoneKey.value = requested
   }
   const requestedKind = String(options?.kind ?? '')
-  if (requestedKind === '求助' || requestedKind === '提供') {
-    serviceKind.value = requestedKind
+  const kindCode = requestedKind.toUpperCase()
+  if (requestedKind === '求助' || kindCode === 'HELP') {
+    serviceKind.value = '求助'
+  } else if (requestedKind === '提供' || kindCode === 'OFFER') {
+    serviceKind.value = '提供'
   }
   loadInitial()
 })
@@ -305,8 +308,9 @@ function goPublish(): void {
   uni.navigateTo({ url: '/pages/publish/index' })
 }
 function openServicePublish(): void {
+  const kind = serviceKind.value === '提供' ? 'OFFER' : 'HELP'
   uni.navigateTo({
-    url: `/pages/publish/index?mode=service&kind=${encodeURIComponent(serviceKind.value)}`,
+    url: `/pages/publish/index?mode=service&kind=${kind}`,
   })
 }
 function goItem(id: string): void {

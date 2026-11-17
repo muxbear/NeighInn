@@ -57,6 +57,19 @@
       <view v-if="step === 1" class="publish__content">
         <view class="publish__card">
           <view class="publish__card-head">
+            <text class="publish__card-title">物品标题</text>
+            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-count">{{ draft.title.length }}/30</text>
+          </view>
+          <ni-input v-model="draft.title" placeholder="例如：原木儿童成长椅，九成新" :maxlength="30" :height="43" />
+          <view class="publish__ai-write" @click="generateDescription">
+            <ni-icon name="spark" :size="15" state="active" />
+            <text class="publish__ai-write-text">上传照片后，AI 帮你写标题和描述</text>
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
             <text class="publish__card-title">添加实拍照片</text>
             <text class="publish__card-hint">至少 {{ appStore.config.minItemImages }} 张</text>
             <text class="publish__card-count">{{ draft.images.length }}/{{ appStore.config.maxItemImages }}</text>
@@ -72,19 +85,6 @@
           <view class="publish__ai-tip">
             <ni-icon name="spark" :size="16" state="green" />
             <text class="publish__ai-tip-text">建议自然光下拍摄，正面、侧面、瑕疵处都要拍到，AI 质检更容易通过。</text>
-          </view>
-        </view>
-
-        <view class="publish__card">
-          <view class="publish__card-head">
-            <text class="publish__card-title">物品标题</text>
-            <text class="publish__card-hint">必填</text>
-            <text class="publish__card-count">{{ draft.title.length }}/30</text>
-          </view>
-          <ni-input v-model="draft.title" placeholder="例如：原木儿童成长椅，九成新" :maxlength="30" :height="43" />
-          <view class="publish__ai-write" @click="generateDescription">
-            <ni-icon name="spark" :size="15" state="active" />
-            <text class="publish__ai-write-text">上传照片后，AI 帮你写标题和描述</text>
           </view>
         </view>
 
@@ -260,6 +260,15 @@
     <template v-else-if="mode === 'life'">
       <view class="publish__content">
         <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">标题</text>
+            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-count">{{ lifeTitle.length }}/40</text>
+          </view>
+          <ni-input v-model="lifeTitle" placeholder="给这条生活动态起个标题" :maxlength="40" :height="43" />
+        </view>
+
+        <view class="publish__card">
           <view class="publish__card-head publish__card-head--compact">
             <text class="publish__card-title">内容形式</text>
             <view class="publish__segment">
@@ -303,15 +312,6 @@
               add-text="添加照片"
             />
           </template>
-        </view>
-
-        <view class="publish__card">
-          <view class="publish__card-head">
-            <text class="publish__card-title">标题</text>
-            <text class="publish__card-hint">必填</text>
-            <text class="publish__card-count">{{ lifeTitle.length }}/40</text>
-          </view>
-          <ni-input v-model="lifeTitle" placeholder="给这条生活动态起个标题" :maxlength="40" :height="43" />
         </view>
 
         <view class="publish__card">
@@ -392,29 +392,6 @@
 
         <view class="publish__card">
           <view class="publish__card-head">
-            <text class="publish__card-title">图片 / 视频</text>
-            <text class="publish__card-hint">选填</text>
-            <text class="publish__card-count">{{ serviceImages.length }}/9</text>
-          </view>
-          <ni-photo-uploader
-            v-model="serviceImages"
-            :max="9"
-            :min="0"
-            :columns="3"
-            :tile-height="96"
-            add-text="添加图片"
-          />
-          <view class="publish__optional-row">
-            <view class="publish__optional" @click="pickServiceVideo">
-              <ni-icon name="play" :size="17" state="active" />
-              <text class="publish__optional-text">{{ serviceVideo ? '已添加视频（点击移除）' : '添加服务视频' }}</text>
-            </view>
-          </view>
-          <text class="publish__optional-hint">可上传最多 9 张图片，或 1 个短视频；图片与视频不能混排。</text>
-        </view>
-
-        <view class="publish__card">
-          <view class="publish__card-head">
             <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '求助标题' : '服务标题' }}</text>
             <text class="publish__card-hint">必填</text>
             <text class="publish__card-count">{{ serviceDraft.title.length }}/30</text>
@@ -425,6 +402,52 @@
             :maxlength="30"
             :height="43"
           />
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head publish__card-head--compact">
+            <text class="publish__card-title">图片 / 视频</text>
+            <view class="publish__segment">
+              <view
+                class="publish__segment-item"
+                :class="{ 'publish__segment-item--active': serviceMediaType === 'video' }"
+                @click="serviceMediaType = 'video'"
+              >
+                <ni-icon name="play" :size="12" :state="serviceMediaType === 'video' ? 'active' : 'tertiary'" />
+                <text class="publish__segment-text" :class="{ 'publish__segment-text--active': serviceMediaType === 'video' }">短视频</text>
+              </view>
+              <view
+                class="publish__segment-item"
+                :class="{ 'publish__segment-item--active': serviceMediaType === 'gallery' }"
+                @click="serviceMediaType = 'gallery'"
+              >
+                <ni-icon name="image" :size="12" :state="serviceMediaType === 'gallery' ? 'active' : 'tertiary'" />
+                <text class="publish__segment-text" :class="{ 'publish__segment-text--active': serviceMediaType === 'gallery' }">照片集</text>
+              </view>
+            </view>
+          </view>
+          <view v-if="serviceMediaType === 'video'" class="publish__life-upload" @click="pickServiceVideo">
+            <ni-icon name="camera" :size="30" state="active" />
+            <text class="publish__life-upload-title">{{ serviceVideo ? '已选择视频（点击替换）' : '拍摄或选择视频' }}</text>
+            <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
+          </view>
+          <template v-else>
+            <view v-if="serviceImages.length === 0" class="publish__life-upload" @click="pickServiceImages">
+              <ni-icon name="image" :size="30" state="active" />
+              <text class="publish__life-upload-title">添加照片</text>
+              <text class="publish__life-upload-desc">最多 9 张，支持相册或拍摄</text>
+            </view>
+            <ni-photo-uploader
+              v-else
+              v-model="serviceImages"
+              :max="9"
+              :min="0"
+              :columns="3"
+              :tile-height="96"
+              add-text="添加照片"
+            />
+          </template>
+          <text class="publish__service-hint">选填；短视频与照片集二选一。</text>
         </view>
 
         <view class="publish__card">
@@ -444,43 +467,49 @@
         <view class="publish__card">
           <view class="publish__card-head">
             <text class="publish__card-title">互助分类</text>
-            <text class="publish__card-hint">必选</text>
+            <text class="publish__card-hint">选填</text>
           </view>
-          <view class="publish__service-categories">
-            <view
-              v-for="category in serviceCategories"
-              :key="category"
-              class="publish__service-category"
-              :class="{ 'publish__service-category--active': serviceDraft.category === category }"
-              @click="serviceDraft.category = category"
-            >
-              <text class="publish__service-category-text" :class="{ 'publish__service-category-text--active': serviceDraft.category === category }">{{ category }}</text>
-            </view>
+          <view class="publish__row publish__row--last" @click="chooseServiceCategory">
+            <text class="publish__row-label">分类</text>
+            <text class="publish__row-value">{{ serviceCategoryDisplay }}</text>
+            <ni-icon name="chevron" :size="16" state="tertiary" />
           </view>
+          <ni-input
+            v-if="serviceCategoryCustomMode"
+            v-model="serviceDraft.category"
+            placeholder="请输入互助分类"
+            :maxlength="20"
+            :height="43"
+          />
         </view>
 
         <view class="publish__card">
           <view class="publish__card-head">
             <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '期望时间' : '可服务时间' }}</text>
-            <text class="publish__card-hint">必选</text>
+            <text class="publish__card-hint">选填</text>
           </view>
-          <view class="publish__service-chips">
-            <view
-              v-for="time in serviceTimeOptions"
-              :key="time"
-              class="publish__service-chip"
-              :class="{ 'publish__service-chip--active': serviceDraft.expectedTime === time }"
-              @click="serviceDraft.expectedTime = time"
-            >
-              <text class="publish__service-chip-text" :class="{ 'publish__service-chip-text--active': serviceDraft.expectedTime === time }">{{ time }}</text>
+          <view class="publish__optional-row">
+            <view class="publish__optional" @click="openServiceTimePicker('specific')">
+              <ni-icon name="clock" :size="17" state="active" />
+              <text class="publish__optional-text">选择具体时间</text>
+            </view>
+            <view class="publish__optional" @click="openServiceTimePicker('range')">
+              <ni-icon name="clock" :size="17" state="active" />
+              <text class="publish__optional-text">选择时间段</text>
             </view>
           </view>
+          <view v-if="serviceDraft.expectedTime" class="publish__row publish__row--last">
+            <text class="publish__row-label">已选</text>
+            <text class="publish__row-value">{{ serviceDraft.expectedTime }}</text>
+            <text class="publish__service-link" @click="clearServiceTime">清除</text>
+          </view>
+          <text class="publish__service-hint">可不选；支持选择一个具体时间或一个时间段。</text>
         </view>
 
         <view class="publish__card">
           <view class="publish__card-head">
             <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '地点 / 交接位置' : '服务地点 / 范围' }}</text>
-            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-hint">选填</text>
           </view>
           <ni-input
             v-model="serviceDraft.location"
@@ -536,6 +565,103 @@
         </view>
       </view>
     </template>
+
+    <ni-sheet v-model:visible="serviceCategoryPickerVisible" title="选择互助分类" height="62vh">
+      <view class="publish__picker">
+        <view
+          class="publish__picker-row"
+          :class="{ 'publish__picker-row--active': !serviceDraft.category && !serviceCategoryCustomMode }"
+          @click="selectServiceCategory('')"
+        >
+          <text class="publish__picker-row-text">暂不选择</text>
+          <ni-icon
+            v-if="!serviceDraft.category && !serviceCategoryCustomMode"
+            name="check"
+            :size="16"
+            state="active"
+          />
+        </view>
+        <view
+          v-for="category in serviceCategories"
+          :key="category"
+          class="publish__picker-row"
+          :class="{ 'publish__picker-row--active': serviceDraft.category === category || (category === '其他' && serviceCategoryCustomMode) }"
+          @click="selectServiceCategory(category)"
+        >
+          <text class="publish__picker-row-text">{{ category }}</text>
+          <ni-icon
+            v-if="serviceDraft.category === category || (category === '其他' && serviceCategoryCustomMode)"
+            name="check"
+            :size="16"
+            state="active"
+          />
+        </view>
+      </view>
+    </ni-sheet>
+
+    <ni-sheet
+      v-model:visible="serviceTimePickerVisible"
+      :title="serviceTimePickerMode === 'specific' ? '选择具体时间' : '选择时间段'"
+      height="76vh"
+    >
+      <view class="publish__picker">
+        <text class="publish__picker-label">日期</text>
+        <view class="publish__picker-days">
+          <view
+            v-for="dateOption in serviceDateChoices"
+            :key="dateOption.value"
+            class="publish__picker-day"
+            :class="{ 'publish__picker-day--active': serviceTimePickerDate === dateOption.value }"
+            @click="selectServiceTimeDate(dateOption.value)"
+          >
+            <text
+              class="publish__picker-day-text"
+              :class="{ 'publish__picker-day-text--active': serviceTimePickerDate === dateOption.value }"
+            >{{ dateOption.label }}</text>
+          </view>
+        </view>
+
+        <text class="publish__picker-label">{{ serviceTimePickerMode === 'range' ? '开始时间' : '时间' }}</text>
+        <view class="publish__picker-times">
+          <view
+            v-for="timeSlot in serviceTimeChoices"
+            :key="`start-${timeSlot}`"
+            class="publish__picker-time"
+            :class="{ 'publish__picker-time--active': serviceTimePickerStart === timeSlot }"
+            @click="selectServiceTimeStart(timeSlot)"
+          >
+            <text
+              class="publish__picker-time-text"
+              :class="{ 'publish__picker-time-text--active': serviceTimePickerStart === timeSlot }"
+            >{{ timeSlot }}</text>
+          </view>
+        </view>
+
+        <template v-if="serviceTimePickerMode === 'range'">
+          <text class="publish__picker-label">结束时间</text>
+          <text v-if="!serviceTimePickerStart" class="publish__picker-hint">请先选择开始时间</text>
+          <view v-else class="publish__picker-times">
+            <view
+              v-for="timeSlot in serviceEndTimeChoices"
+              :key="`end-${timeSlot}`"
+              class="publish__picker-time"
+              :class="{ 'publish__picker-time--active': serviceTimePickerEnd === timeSlot }"
+              @click="selectServiceTimeEnd(timeSlot)"
+            >
+              <text
+                class="publish__picker-time-text"
+                :class="{ 'publish__picker-time-text--active': serviceTimePickerEnd === timeSlot }"
+              >{{ timeSlot }}</text>
+            </view>
+          </view>
+        </template>
+
+        <view class="publish__picker-actions">
+          <text class="publish__picker-clear" @click="clearServiceTime(true)">清除已选时间</text>
+          <text v-if="serviceTimePickerMode === 'range'" class="publish__picker-hint">选择结束时间后自动保存</text>
+        </view>
+      </view>
+    </ni-sheet>
 
     <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="110" />
   </scroll-view>
@@ -636,19 +762,33 @@ const serviceDraft = reactive<{
   reward: '',
 })
 const serviceSubmitting = ref(false)
+const serviceMediaType = ref<LifeMediaType>('gallery')
 const serviceImages = ref<string[]>([])
 const serviceVideo = ref('')
+const serviceCategoryCustomMode = ref(false)
+const serviceCategoryPickerVisible = ref(false)
+const serviceTimePickerVisible = ref(false)
+const serviceTimePickerMode = ref<'specific' | 'range'>('specific')
+const serviceTimePickerDate = ref('')
+const serviceTimePickerStart = ref('')
+const serviceTimePickerEnd = ref('')
 const serviceCategories = SERVICE_CATEGORIES.filter((item) => item !== '全部')
-const serviceTimeOptions = computed(() =>
-  serviceDraft.kind === '求助'
-    ? ['今天内', '明天', '本周内', '时间可协商']
-    : ['工作日白天', '周末', '晚上', '时间灵活'],
-)
+const serviceDateChoices = computed(() => buildServiceDateOptions())
+const serviceTimeChoices = buildServiceTimeSlots()
+const serviceEndTimeChoices = computed(() => {
+  const startIndex = serviceTimeChoices.indexOf(serviceTimePickerStart.value)
+  return startIndex >= 0 ? serviceTimeChoices.slice(startIndex + 1) : []
+})
 const serviceRewardOptions = computed(() =>
   serviceDraft.kind === '求助'
-    ? ['邻里互助', '请喝奶茶', '红包答谢', '酬谢可议']
+    ? ['邻里互助', '红包答谢', '酬谢可议']
     : ['免费帮忙', '邻里价', '按次收费', '面议'],
 )
+const serviceCategoryDisplay = computed(() => {
+  const category = serviceDraft.category.trim()
+  if (serviceCategoryCustomMode.value) return category || '其他（请填写）'
+  return category || '请选择（选填）'
+})
 const serviceTitlePlaceholder = computed(() =>
   serviceDraft.kind === '求助'
     ? '例如：今天临时加班，求帮忙接孩子'
@@ -741,13 +881,6 @@ watch(
   { deep: true },
 )
 
-watch(serviceImages, (images) => {
-  if (images.length && serviceVideo.value) {
-    serviceImages.value = []
-    showToast('请先移除短视频，再添加图片', 'alert')
-  }
-})
-
 function restoreDraft(): void {
   if (editingId.value) return
   const saved = getStorage<ItemDraft | null>(STORAGE_KEYS.draftItem, null)
@@ -795,6 +928,81 @@ function chooseExpectTime(): void {
       draft.expectTime = options[Number(res.tapIndex)] ?? ''
     },
   })
+}
+
+function buildServiceDateOptions(): Array<{ label: string; value: string }> {
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  const now = new Date()
+  const options: Array<{ label: string; value: string }> = []
+  for (let offset = 0; offset < 14; offset += 1) {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset)
+    const value = `${date.getMonth() + 1}月${date.getDate()}日`
+    const relative = offset === 0 ? '（今天）' : offset === 1 ? '（明天）' : ''
+    options.push({ label: `${value} 周${weekdays[date.getDay()]}${relative}`, value })
+  }
+  return options
+}
+
+function buildServiceTimeSlots(): string[] {
+  const slots: string[] = []
+  for (let hour = 7; hour <= 22; hour += 1) {
+    slots.push(`${String(hour).padStart(2, '0')}:00`)
+  }
+  return slots
+}
+
+function chooseServiceCategory(): void {
+  serviceCategoryPickerVisible.value = true
+}
+
+function selectServiceCategory(category: string): void {
+  serviceCategoryPickerVisible.value = false
+  if (!category) {
+    serviceDraft.category = ''
+    serviceCategoryCustomMode.value = false
+    return
+  }
+  serviceCategoryCustomMode.value = category === '其他'
+  serviceDraft.category = category === '其他' ? '' : category
+}
+
+function openServiceTimePicker(mode: 'specific' | 'range'): void {
+  serviceTimePickerMode.value = mode
+  serviceTimePickerDate.value = serviceDateChoices.value[0]?.value ?? ''
+  serviceTimePickerStart.value = ''
+  serviceTimePickerEnd.value = ''
+  serviceTimePickerVisible.value = true
+}
+
+function selectServiceTimeDate(date: string): void {
+  if (serviceTimePickerDate.value === date) return
+  serviceTimePickerDate.value = date
+  serviceTimePickerStart.value = ''
+  serviceTimePickerEnd.value = ''
+}
+
+function selectServiceTimeStart(time: string): void {
+  serviceTimePickerStart.value = time
+  serviceTimePickerEnd.value = ''
+  if (serviceTimePickerMode.value === 'specific') {
+    serviceDraft.expectedTime = `${serviceTimePickerDate.value} ${time}`
+    serviceTimePickerVisible.value = false
+  }
+}
+
+function selectServiceTimeEnd(time: string): void {
+  if (!serviceTimePickerStart.value || time <= serviceTimePickerStart.value) return
+  serviceTimePickerEnd.value = time
+  serviceDraft.expectedTime =
+    `${serviceTimePickerDate.value} ${serviceTimePickerStart.value}–${time}`
+  serviceTimePickerVisible.value = false
+}
+
+function clearServiceTime(closePicker = false): void {
+  serviceDraft.expectedTime = ''
+  serviceTimePickerStart.value = ''
+  serviceTimePickerEnd.value = ''
+  if (closePicker) serviceTimePickerVisible.value = false
 }
 
 async function pickVideo(): Promise<void> {
@@ -910,19 +1118,10 @@ async function pickLifeVideo(): Promise<void> {
 }
 
 async function pickServiceVideo(): Promise<void> {
-  if (serviceVideo.value) {
-    serviceVideo.value = ''
-    showToast('已移除服务视频')
-    return
-  }
-  if (serviceImages.value.length) {
-    showToast('请先移除图片，再添加短视频', 'alert')
-    return
-  }
   try {
     const path = await prepareVideo()
     serviceVideo.value = path
-    showToast('服务视频已添加')
+    showToast('视频已选择')
   } catch {
     showToast('未选择视频', 'alert')
   }
@@ -934,6 +1133,17 @@ async function pickLifeImages(): Promise<void> {
     const paths = await chooseImages({ count: remaining })
     if (!paths.length) return
     lifeImages.value = [...lifeImages.value, ...paths].slice(0, appStore.config.maxLifeImages)
+  } catch {
+    // 用户取消选择
+  }
+}
+
+async function pickServiceImages(): Promise<void> {
+  try {
+    const remaining = Math.max(1, 9 - serviceImages.value.length)
+    const paths = await chooseImages({ count: remaining })
+    if (!paths.length) return
+    serviceImages.value = [...serviceImages.value, ...paths].slice(0, 9)
   } catch {
     // 用户取消选择
   }
@@ -991,9 +1201,6 @@ function validateServiceDraft(): string {
   if (title.length < 2) return '请填写 2–30 个字的互助标题'
   if (title.length > 30) return '互助标题不能超过 30 个字'
   if (serviceDraft.description.trim().length < 5) return '请补充至少 5 个字的详细说明'
-  if (!serviceDraft.category) return '请选择互助分类'
-  if (!serviceDraft.expectedTime) return serviceDraft.kind === '求助' ? '请选择期望时间' : '请选择可服务时间'
-  if (!serviceDraft.location.trim()) return serviceDraft.kind === '求助' ? '请填写地点或交接位置' : '请填写服务地点或范围'
   return ''
 }
 
@@ -1006,41 +1213,35 @@ async function submitService(): Promise<void> {
   }
   serviceSubmitting.value = true
   try {
-    if (serviceImages.value.length && serviceVideo.value) {
-      showToast('图片与短视频不能混排，请先移除其中一种', 'alert')
-      return
-    }
-    if (serviceImages.value.length || serviceVideo.value) {
+    const hasVideo = serviceMediaType.value === 'video' && Boolean(serviceVideo.value)
+    const hasImages = serviceMediaType.value === 'gallery' && serviceImages.value.length > 0
+    if (hasVideo || hasImages) {
       showToast('正在上传互助媒体…')
     }
-    const mediaKeys = serviceImages.value.length
-      ? await uploadMany(serviceImages.value, 'PUBLIC_IMAGE')
-      : []
-    if (serviceVideo.value) {
-      mediaKeys.push(await uploadOne(serviceVideo.value, 'LIFE_VIDEO'))
-    }
-    const hasVideo = Boolean(serviceVideo.value)
-    const mediaType = hasVideo && mediaKeys.length === 1 ? 'VIDEO' : 'GALLERY'
+    const mediaKeys = hasVideo
+      ? [await uploadOne(serviceVideo.value, 'LIFE_VIDEO')]
+      : hasImages ? await uploadMany(serviceImages.value, 'PUBLIC_IMAGE') : []
+    const mediaType = hasVideo ? 'VIDEO' : 'GALLERY'
+    const category = serviceDraft.category.trim()
     await serviceService.publish({
       kind: serviceDraft.kind,
-      category: serviceDraft.category,
+      category,
       title: serviceDraft.title.trim(),
       description: serviceDraft.description.trim(),
       expectedTime: serviceDraft.expectedTime,
       location: serviceDraft.location.trim(),
-      reward:
-        serviceDraft.reward.trim() || (serviceDraft.kind === '求助' ? '邻里互助' : '面议'),
+      reward: serviceDraft.reward.trim(),
       media: mediaKeys,
       mediaType,
       coverKey: mediaKeys[0] || '',
       icon:
-        SERVICE_ICON_BY_CATEGORY[serviceDraft.category] ||
+        SERVICE_ICON_BY_CATEGORY[category] ||
         (serviceDraft.kind === '求助' ? 'child' : 'friend'),
     })
     showToast(serviceDraft.kind === '求助'
       ? '邻里求助已发布'
       : '邻里服务已提交审核，通过后展示')
-    const kind = encodeURIComponent(serviceDraft.kind)
+    const kind = serviceDraft.kind === '提供' ? 'OFFER' : 'HELP'
     setTimeout(() => {
       uni.redirectTo({ url: `/pages/zone/index?zone=service&kind=${kind}` })
     }, 500)
@@ -1684,6 +1885,113 @@ function openPublishRule(): void {
   font-size: $ni-font-8;
   line-height: 14px;
   color: $ni-color-text-tertiary;
+}
+.publish__service-link {
+  padding-left: 8px;
+  font-size: $ni-font-9;
+  color: $ni-color-primary-dark;
+}
+.publish__picker {
+  padding-bottom: 12px;
+}
+.publish__picker-row {
+  min-height: 50px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: $ni-radius-11;
+  margin-top: 8px;
+  background-color: #faf8f6;
+}
+.publish__picker-row--active {
+  background-color: $ni-color-primary-bg;
+}
+.publish__picker-row-text {
+  font-size: $ni-font-12;
+  color: $ni-color-text-primary;
+}
+.publish__picker-label {
+  margin-top: 16px;
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.publish__picker-hint {
+  margin-top: 8px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.publish__picker-days,
+.publish__picker-times {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.publish__picker-day {
+  width: 31.5%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding-left: 3px;
+  padding-right: 3px;
+  border-radius: 10px;
+  background-color: #faf8f6;
+  margin-right: 2.75%;
+  margin-bottom: 8px;
+}
+.publish__picker-day:nth-child(3n) {
+  margin-right: 0;
+}
+.publish__picker-day--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.publish__picker-day-text {
+  font-size: $ni-font-8;
+  color: $ni-color-text-secondary;
+  text-align: center;
+}
+.publish__picker-day-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.publish__picker-time {
+  min-width: 54px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 9px;
+  background-color: #faf8f6;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.publish__picker-time--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.publish__picker-time-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.publish__picker-time-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.publish__picker-actions {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.publish__picker-clear {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: $ni-font-10;
+  color: $ni-color-primary-dark;
 }
 .publish__service-notice {
   flex-direction: row;
