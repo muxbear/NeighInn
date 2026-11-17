@@ -50,7 +50,7 @@ async def _row(db: DbSession, row: HelpRequest, viewer=None) -> dict:
         "avatar": (author.avatar_key if author else "") or "avatar-person-1",
         "avatarClass": "person",
         "responses": responses,
-        "price": f"¥{row.reward}" if row.reward else "",
+        "price": row.reward or "",
         "credit": "信用极好" if (author and author.credit_score >= 90) else "信用良好",
         "status": row.status,
         "urgent": row.urgent,

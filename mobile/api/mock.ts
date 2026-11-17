@@ -732,21 +732,24 @@ async function route(
     return pageResult(list, query)
   }
   if (path === '/services' && method === 'POST') {
+    const kind = body.kind === 'OFFER' || body.kind === '提供' ? '提供' : '求助'
     const post: ServicePost = {
       id: `s-${Date.now()}`,
-      kind: body.kind ?? '求助',
-      icon: body.icon ?? 'friend',
+      kind,
+      icon: body.icon || (kind === '提供' ? 'friend' : 'child'),
       category: body.category ?? '其他',
       title: String(body.title ?? ''),
       description: String(body.description ?? ''),
       time: '刚刚',
-      place: body.place ?? state.user.communityName,
+      place: body.location ?? body.place ?? state.user.communityName,
       distance: '约 100m',
       reward: body.reward ?? '邻里互助',
       author: state.user.nickname,
       avatar: state.user.avatarPreset ? `/static/avatars/${state.user.avatarPreset}.svg` : '',
       avatarClass: 'orange',
       responses: 0,
+      price: body.reward || undefined,
+      credit: '信用良好',
     }
     state.servicePosts.unshift(post)
     return post

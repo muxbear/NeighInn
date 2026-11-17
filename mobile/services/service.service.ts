@@ -1,4 +1,5 @@
 import * as serviceApi from '../api/service.api'
+import type { CreateServiceInput } from '../api/service.api'
 import type { PageResult, ServiceKind, ServicePost } from '../models'
 
 export const serviceService = {
@@ -10,7 +11,7 @@ export const serviceService = {
   ): Promise<PageResult<ServicePost>> {
     return serviceApi.getServices({
       kind: kind || undefined,
-      category,
+      category: category === '全部' ? undefined : category,
       page,
       pageSize,
     })
@@ -20,7 +21,7 @@ export const serviceService = {
     return serviceApi.respondService(id)
   },
 
-  publish(payload: Partial<ServicePost>): Promise<ServicePost> {
+  publish(payload: CreateServiceInput): Promise<ServicePost> {
     return serviceApi.createService(payload)
   },
 }

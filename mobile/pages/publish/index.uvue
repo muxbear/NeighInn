@@ -4,8 +4,8 @@
       <ni-status-bar />
       <view class="publish__head-row">
         <view class="publish__head-copy">
-          <text class="publish__kicker">{{ editingId ? '修改后需要重新质检' : '让闲置继续发光' }}</text>
-          <text class="publish__title">{{ editingId ? '编辑闲置' : '发布闲置' }}</text>
+          <text class="publish__kicker">{{ headerKicker }}</text>
+          <text class="publish__title">{{ headerTitle }}</text>
         </view>
         <text class="publish__cancel" @click="onCancel">取消</text>
       </view>
@@ -26,6 +26,13 @@
           @click="mode = 'life'"
         >
           <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'life' }">发布生活</text>
+        </view>
+        <view
+          class="publish__mode-tab"
+          :class="{ 'publish__mode-tab--active': mode === 'service' }"
+          @click="mode = 'service'"
+        >
+          <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'service' }">邻里互助</text>
         </view>
       </view>
     </view>
@@ -250,30 +257,28 @@
       </view>
     </template>
 
-    <template v-else>
+    <template v-else-if="mode === 'life'">
       <view class="publish__content">
         <view class="publish__card">
-          <text class="publish__card-title">内容形式</text>
-          <view class="publish__life-types">
-            <view
-              class="publish__life-type"
-              :class="{ 'publish__life-type--active': lifeMediaType === 'video' }"
-              @click="lifeMediaType = 'video'"
-            >
-              <ni-icon name="play" :size="22" :state="lifeMediaType === 'video' ? 'active' : 'tertiary'" />
-              <text class="publish__life-type-title">短视频</text>
-              <text class="publish__life-type-desc">不超过 3 分钟</text>
-              <view v-if="lifeMediaType === 'video'" class="publish__life-check"><ni-icon name="check" :size="10" state="white" /></view>
-            </view>
-            <view
-              class="publish__life-type"
-              :class="{ 'publish__life-type--active': lifeMediaType === 'gallery' }"
-              @click="lifeMediaType = 'gallery'"
-            >
-              <ni-icon name="image" :size="22" :state="lifeMediaType === 'gallery' ? 'active' : 'tertiary'" />
-              <text class="publish__life-type-title">照片集</text>
-              <text class="publish__life-type-desc">最多 12 张</text>
-              <view v-if="lifeMediaType === 'gallery'" class="publish__life-check"><ni-icon name="check" :size="10" state="white" /></view>
+          <view class="publish__card-head publish__card-head--compact">
+            <text class="publish__card-title">内容形式</text>
+            <view class="publish__segment">
+              <view
+                class="publish__segment-item"
+                :class="{ 'publish__segment-item--active': lifeMediaType === 'video' }"
+                @click="lifeMediaType = 'video'"
+              >
+                <ni-icon name="play" :size="12" :state="lifeMediaType === 'video' ? 'active' : 'tertiary'" />
+                <text class="publish__segment-text" :class="{ 'publish__segment-text--active': lifeMediaType === 'video' }">短视频</text>
+              </view>
+              <view
+                class="publish__segment-item"
+                :class="{ 'publish__segment-item--active': lifeMediaType === 'gallery' }"
+                @click="lifeMediaType = 'gallery'"
+              >
+                <ni-icon name="image" :size="12" :state="lifeMediaType === 'gallery' ? 'active' : 'tertiary'" />
+                <text class="publish__segment-text" :class="{ 'publish__segment-text--active': lifeMediaType === 'gallery' }">照片集</text>
+              </view>
             </view>
           </view>
 
@@ -282,15 +287,22 @@
             <text class="publish__life-upload-title">{{ lifeVideo ? '已选择视频' : '拍摄或选择视频' }}</text>
             <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
           </view>
-          <ni-photo-uploader
-            v-else
-            v-model="lifeImages"
-            :max="appStore.config.maxLifeImages"
-            :min="1"
-            :columns="3"
-            :tile-height="100"
-            add-text="添加照片"
-          />
+          <template v-else>
+            <view v-if="lifeImages.length === 0" class="publish__life-upload" @click="pickLifeImages">
+              <ni-icon name="image" :size="30" state="active" />
+              <text class="publish__life-upload-title">添加照片</text>
+              <text class="publish__life-upload-desc">最多 {{ appStore.config.maxLifeImages }} 张，支持相册或拍摄</text>
+            </view>
+            <ni-photo-uploader
+              v-else
+              v-model="lifeImages"
+              :max="appStore.config.maxLifeImages"
+              :min="1"
+              :columns="3"
+              :tile-height="100"
+              add-text="添加照片"
+            />
+          </template>
         </view>
 
         <view class="publish__card">
@@ -352,33 +364,203 @@
       </view>
     </template>
 
+    <template v-else-if="mode === 'service'">
+      <view class="publish__content">
+        <view class="publish__card">
+          <view class="publish__card-head publish__card-head--compact">
+            <text class="publish__card-title">发布类型</text>
+            <view class="publish__segment">
+              <view
+                class="publish__segment-item"
+                :class="{ 'publish__segment-item--active': serviceDraft.kind === '求助' }"
+                @click="selectServiceKind('求助')"
+              >
+                <ni-icon name="child" :size="12" :state="serviceDraft.kind === '求助' ? 'active' : 'tertiary'" />
+                <text class="publish__segment-text" :class="{ 'publish__segment-text--active': serviceDraft.kind === '求助' }">邻里求助</text>
+              </view>
+              <view
+                class="publish__segment-item publish__segment-item--offer"
+                :class="{ 'publish__segment-item--active publish__segment-item--active-offer': serviceDraft.kind === '提供' }"
+                @click="selectServiceKind('提供')"
+              >
+                <ni-icon name="friend" :size="12" :state="serviceDraft.kind === '提供' ? 'green' : 'tertiary'" />
+                <text class="publish__segment-text" :class="{ 'publish__segment-text--active-offer': serviceDraft.kind === '提供' }">邻里服务</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '求助标题' : '服务标题' }}</text>
+            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-count">{{ serviceDraft.title.length }}/30</text>
+          </view>
+          <ni-input
+            v-model="serviceDraft.title"
+            :placeholder="serviceTitlePlaceholder"
+            :maxlength="30"
+            :height="43"
+          />
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">详细说明</text>
+            <text class="publish__card-hint">必填</text>
+            <text class="publish__card-count">{{ serviceDraft.description.length }}/500</text>
+          </view>
+          <ni-textarea
+            v-model="serviceDraft.description"
+            :placeholder="serviceDescriptionPlaceholder"
+            :maxlength="500"
+            :height="96"
+          />
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">互助分类</text>
+            <text class="publish__card-hint">必选</text>
+          </view>
+          <view class="publish__service-categories">
+            <view
+              v-for="category in serviceCategories"
+              :key="category"
+              class="publish__service-category"
+              :class="{ 'publish__service-category--active': serviceDraft.category === category }"
+              @click="serviceDraft.category = category"
+            >
+              <text class="publish__service-category-text" :class="{ 'publish__service-category-text--active': serviceDraft.category === category }">{{ category }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '期望时间' : '可服务时间' }}</text>
+            <text class="publish__card-hint">必选</text>
+          </view>
+          <view class="publish__service-chips">
+            <view
+              v-for="time in serviceTimeOptions"
+              :key="time"
+              class="publish__service-chip"
+              :class="{ 'publish__service-chip--active': serviceDraft.expectedTime === time }"
+              @click="serviceDraft.expectedTime = time"
+            >
+              <text class="publish__service-chip-text" :class="{ 'publish__service-chip-text--active': serviceDraft.expectedTime === time }">{{ time }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '地点 / 交接位置' : '服务地点 / 范围' }}</text>
+            <text class="publish__card-hint">必填</text>
+          </view>
+          <ni-input
+            v-model="serviceDraft.location"
+            :placeholder="serviceLocationPlaceholder"
+            :maxlength="64"
+            :height="43"
+          />
+          <text class="publish__service-hint">请模糊到楼栋或公共区域，勿填写门牌号、手机号等敏感信息。</text>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
+            <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '酬谢方式' : '收费方式' }}</text>
+            <text class="publish__card-hint">选填</text>
+          </view>
+          <view class="publish__service-chips">
+            <view
+              v-for="reward in serviceRewardOptions"
+              :key="reward"
+              class="publish__service-chip"
+              :class="{ 'publish__service-chip--active': serviceDraft.reward === reward }"
+              @click="serviceDraft.reward = reward"
+            >
+              <text class="publish__service-chip-text" :class="{ 'publish__service-chip-text--active': serviceDraft.reward === reward }">{{ reward }}</text>
+            </view>
+          </view>
+          <ni-input
+            v-model="serviceDraft.reward"
+            :placeholder="serviceRewardPlaceholder"
+            :maxlength="32"
+            :height="43"
+          />
+        </view>
+
+        <view class="publish__service-notice">
+          <ni-icon name="shield" :size="16" state="green" />
+          <view class="publish__service-notice-copy">
+            <text class="publish__service-notice-title">仅本小区认证业主可见</text>
+            <text class="publish__service-notice-desc">发布内容将经过内容安全审核；邻里互助请优先在公共区域进行，涉及上门服务建议提前在物业登记。</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="publish__bottom-space" />
+      <view class="publish__footer">
+        <ni-button type="primary" size="lg" block :loading="serviceSubmitting" @tap="submitService">
+          {{ serviceDraft.kind === '求助' ? '发布邻里求助' : '发布邻里服务' }}
+        </ni-button>
+        <view class="publish__agreement">
+          <text class="publish__agreement-text">发布即表示同意</text>
+          <text class="publish__agreement-link" @click="openPublishRule">《发布规范》</text>
+          <text class="publish__agreement-text">与《隐私政策》</text>
+        </view>
+      </view>
+    </template>
+
     <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="110" />
   </scroll-view>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import type { ItemDraft, LifeMediaType, TradeType } from '../../models'
+import type { ItemDraft, LifeMediaType, ServiceKind, TradeType } from '../../models'
 import { useAppStore } from '../../stores/app.store'
 import { useToast } from '../../composables/useToast'
 import { useUpload } from '../../composables/useUpload'
 import { itemService } from '../../services/item.service'
 import { lifeService } from '../../services/life.service'
-import { ITEM_CATEGORIES, ITEM_CONDITIONS, LIFE_CATEGORIES, STORAGE_KEYS } from '../../config/constants'
+import { serviceService } from '../../services/service.service'
+import {
+  ITEM_CATEGORIES,
+  ITEM_CONDITIONS,
+  LIFE_CATEGORIES,
+  SERVICE_CATEGORIES,
+  STORAGE_KEYS,
+} from '../../config/constants'
 import { getStorage, removeStorage, setStorage } from '../../utils/storage'
 import { validateItemDraft } from '../../utils/validator'
+import { chooseImages } from '../../utils/image'
 import { APP_INFO } from '../../config/env'
 
 const appStore = useAppStore()
 const { toast, showToast } = useToast()
 const { prepareVideo, uploadOne, uploadMany } = useUpload()
 
-const mode = ref<'item' | 'life'>('item')
+const mode = ref<'item' | 'life' | 'service'>('item')
 const step = ref(1)
 const stepLabels = ['物品信息', '确认发布', '审核上架']
 const submitting = ref(false)
 const editingId = ref('')
+const headerKicker = computed(() => {
+  if (editingId.value) return '修改后需要重新质检'
+  if (mode.value === 'life') return '记录身边真实生活'
+  if (mode.value === 'service') return '邻里搭把手，温暖在身边'
+  return '让闲置继续发光'
+})
+const headerTitle = computed(() => {
+  if (editingId.value) return '编辑闲置'
+  if (mode.value === 'life') return '发布生活'
+  if (mode.value === 'service') return '发布互助'
+  return '发布闲置'
+})
 // 编辑时服务端返回的是可直接展示的签名 URL，提交前需按 URL 还原为对象键，避免把临时 URL 写进媒体表。
 const imageKeyByUrl = ref<Record<string, string>>({})
 
@@ -413,10 +595,73 @@ const lifeCategory = ref('邻里日常')
 const lifeSubmitting = ref(false)
 const lifeCategories = LIFE_CATEGORIES.filter((item) => item !== '全部')
 
+const serviceDraft = reactive<{
+  kind: ServiceKind
+  category: string
+  title: string
+  description: string
+  expectedTime: string
+  location: string
+  reward: string
+}>({
+  kind: '求助',
+  category: '',
+  title: '',
+  description: '',
+  expectedTime: '',
+  location: '',
+  reward: '',
+})
+const serviceSubmitting = ref(false)
+const serviceCategories = SERVICE_CATEGORIES.filter((item) => item !== '全部')
+const serviceTimeOptions = computed(() =>
+  serviceDraft.kind === '求助'
+    ? ['今天内', '明天', '本周内', '时间可协商']
+    : ['工作日白天', '周末', '晚上', '时间灵活'],
+)
+const serviceRewardOptions = computed(() =>
+  serviceDraft.kind === '求助'
+    ? ['邻里互助', '请喝奶茶', '红包答谢', '酬谢可议']
+    : ['免费帮忙', '邻里价', '按次收费', '面议'],
+)
+const serviceTitlePlaceholder = computed(() =>
+  serviceDraft.kind === '求助'
+    ? '例如：今天临时加班，求帮忙接孩子'
+    : '例如：退休教师，可辅导小学语文',
+)
+const serviceDescriptionPlaceholder = computed(() =>
+  serviceDraft.kind === '求助'
+    ? '说明具体情况、时间、注意事项，方便邻居判断能否帮忙'
+    : '介绍你的经验、可提供的服务和注意事项',
+)
+const serviceLocationPlaceholder = computed(() =>
+  serviceDraft.kind === '求助'
+    ? '例如：实验小学北门 / 8号楼大堂'
+    : '例如：阳光花园及周边 1 公里',
+)
+const serviceRewardPlaceholder = computed(() =>
+  serviceDraft.kind === '求助'
+    ? '也可补充具体金额或酬谢说明'
+    : '也可补充具体报价或计费方式',
+)
+const SERVICE_ICON_BY_CATEGORY: Record<string, string> = {
+  接送照看: 'child',
+  宠物照看: 'pet',
+  学习陪伴: 'book',
+  邻里活动: 'cake',
+  维修安装: 'settings',
+  其他: 'friend',
+}
+
 let saveTimer: any = null
 
 onLoad(async (options: any) => {
   if (options?.mode === 'life') mode.value = 'life'
+  if (options?.mode === 'service') {
+    mode.value = 'service'
+    const kind = String(options?.kind ?? '')
+    serviceDraft.kind = kind === '提供' || kind === 'OFFER' || kind === 'offer' ? '提供' : '求助'
+  }
   const editId = String(options?.editId ?? '')
   if (editId) {
     editingId.value = editId
@@ -632,6 +877,17 @@ async function pickLifeVideo(): Promise<void> {
   }
 }
 
+async function pickLifeImages(): Promise<void> {
+  try {
+    const remaining = Math.max(1, appStore.config.maxLifeImages - lifeImages.value.length)
+    const paths = await chooseImages({ count: remaining })
+    if (!paths.length) return
+    lifeImages.value = [...lifeImages.value, ...paths].slice(0, appStore.config.maxLifeImages)
+  } catch {
+    // 用户取消选择
+  }
+}
+
 async function submitLife(): Promise<void> {
   if (lifeSubmitting.value) return
   if (lifeMediaType.value === 'video' && !lifeVideo.value) {
@@ -672,6 +928,58 @@ async function submitLife(): Promise<void> {
   }
 }
 
+function selectServiceKind(kind: ServiceKind): void {
+  if (serviceDraft.kind === kind) return
+  serviceDraft.kind = kind
+  serviceDraft.expectedTime = ''
+  serviceDraft.reward = ''
+}
+
+function validateServiceDraft(): string {
+  const title = serviceDraft.title.trim()
+  if (title.length < 2) return '请填写 2–30 个字的互助标题'
+  if (title.length > 30) return '互助标题不能超过 30 个字'
+  if (serviceDraft.description.trim().length < 5) return '请补充至少 5 个字的详细说明'
+  if (!serviceDraft.category) return '请选择互助分类'
+  if (!serviceDraft.expectedTime) return serviceDraft.kind === '求助' ? '请选择期望时间' : '请选择可服务时间'
+  if (!serviceDraft.location.trim()) return serviceDraft.kind === '求助' ? '请填写地点或交接位置' : '请填写服务地点或范围'
+  return ''
+}
+
+async function submitService(): Promise<void> {
+  if (serviceSubmitting.value) return
+  const validationError = validateServiceDraft()
+  if (validationError) {
+    showToast(validationError, 'alert')
+    return
+  }
+  serviceSubmitting.value = true
+  try {
+    await serviceService.publish({
+      kind: serviceDraft.kind,
+      category: serviceDraft.category,
+      title: serviceDraft.title.trim(),
+      description: serviceDraft.description.trim(),
+      expectedTime: serviceDraft.expectedTime,
+      location: serviceDraft.location.trim(),
+      reward:
+        serviceDraft.reward.trim() || (serviceDraft.kind === '求助' ? '邻里互助' : '面议'),
+      icon:
+        SERVICE_ICON_BY_CATEGORY[serviceDraft.category] ||
+        (serviceDraft.kind === '求助' ? 'child' : 'friend'),
+    })
+    showToast(serviceDraft.kind === '求助' ? '邻里求助已发布' : '邻里服务已发布')
+    const kind = encodeURIComponent(serviceDraft.kind)
+    setTimeout(() => {
+      uni.redirectTo({ url: `/pages/zone/index?zone=service&kind=${kind}` })
+    }, 500)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '发布失败', 'alert')
+  } finally {
+    serviceSubmitting.value = false
+  }
+}
+
 function onCancel(): void {
   const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
   if (pages.length > 1) uni.navigateBack({ delta: 1 })
@@ -681,7 +989,7 @@ function onCancel(): void {
 function openPublishRule(): void {
   uni.showModal({
     title: '发布规范',
-    content: `发布物品须真实、合法、无侵权；禁止发布违禁品与虚假信息。完整规范请访问：${APP_INFO.publishRuleUrl}`,
+    content: `发布物品与邻里互助信息须真实、合法、无侵权；互助请写明真实时间与地点，禁止发布违禁品、虚假信息或他人隐私。完整规范请访问：${APP_INFO.publishRuleUrl}`,
     showCancel: false,
     confirmText: '我知道了',
   })
@@ -1133,45 +1441,50 @@ function openPublishRule(): void {
   font-size: $ni-font-8;
   color: #b9653d;
 }
-.publish__life-types {
+.publish__card-head--compact {
+  margin-bottom: 6px;
+  justify-content: space-between;
+}
+.publish__segment {
   flex-direction: row;
-  margin-top: 10px;
+  align-items: center;
+  height: 32px;
+  padding: 3px;
+  border-radius: 10px;
+  background-color: #f2eeea;
 }
-.publish__life-type {
-  flex: 1;
-  min-height: 90px;
-  padding: 12px;
-  border-radius: $ni-radius-14;
-  background-color: #faf8f6;
-  border: 1px solid transparent;
-  position: relative;
-  margin-right: 9px;
-}
-.publish__life-type--active {
-  background-color: $ni-color-primary-bg;
-  border-color: #ffb58b;
-}
-.publish__life-type-title {
-  margin-top: 6px;
-  font-size: $ni-font-12;
-  font-weight: 700;
-  color: $ni-color-text-primary;
-}
-.publish__life-type-desc {
-  margin-top: 2px;
-  font-size: $ni-font-8;
-  color: $ni-color-text-tertiary;
-}
-.publish__life-check {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  width: 17px;
-  height: 17px;
-  border-radius: 9px;
-  background-color: $ni-color-primary;
+.publish__segment-item {
+  flex-direction: row;
   align-items: center;
   justify-content: center;
+  height: 26px;
+  padding-left: 9px;
+  padding-right: 9px;
+  border-radius: 7px;
+  margin-right: 2px;
+}
+.publish__segment-item:last-child {
+  margin-right: 0;
+}
+.publish__segment-item--active {
+  background-color: #ffffff;
+  box-shadow: 0 1px 4px rgba(80, 55, 40, 0.08);
+}
+.publish__segment-item--active-offer {
+  background-color: $ni-color-gift-bg-2;
+}
+.publish__segment-text {
+  margin-left: 3px;
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.publish__segment-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.publish__segment-text--active-offer {
+  color: $ni-color-gift-deep;
+  font-weight: 700;
 }
 .publish__life-upload {
   margin-top: 12px;
@@ -1242,5 +1555,85 @@ function openPublishRule(): void {
   font-size: $ni-font-8;
   line-height: 14px;
   color: #6f8c7d;
+}
+.publish__service-categories,
+.publish__service-chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.publish__service-category {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.publish__service-category--active {
+  background-color: $ni-color-primary-bg;
+  border: 1px solid #ffb58b;
+}
+.publish__service-category-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.publish__service-category-text--active {
+  color: $ni-color-primary-dark;
+  font-weight: 700;
+}
+.publish__service-chip {
+  min-height: 32px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background-color: $ni-color-fill-2;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.publish__service-chip--active {
+  background-color: $ni-color-service-bg-2;
+  border: 1px solid #ddbd7a;
+}
+.publish__service-chip-text {
+  font-size: $ni-font-10;
+  color: $ni-color-text-secondary;
+}
+.publish__service-chip-text--active {
+  color: $ni-color-service-deep;
+  font-weight: 700;
+}
+.publish__service-hint {
+  margin-top: 8px;
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: $ni-color-text-tertiary;
+}
+.publish__service-notice {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 11px 12px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-service-bg-2;
+}
+.publish__service-notice-copy {
+  flex: 1;
+  margin-left: 7px;
+}
+.publish__service-notice-title {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-service-deep;
+}
+.publish__service-notice-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: #8f7344;
 }
 </style>

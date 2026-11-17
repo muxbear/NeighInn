@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { mockRequest } from '../../api/mock'
 import { env } from '../../config/env'
-import type { CommunityBinding, HomeBundle, PageResult, RegionNode } from '../../models'
+import type { CommunityBinding, HomeBundle, PageResult, RegionNode, ServicePost } from '../../models'
 import type { Item, Order } from '../../models'
 
 beforeAll(() => {
@@ -107,6 +107,32 @@ describe('mock api', () => {
     const order = await mockRequest<Order>({ url: `/orders/${created.orderId}`, method: 'GET' })
     expect(order.status).toBe('ESCROWED')
     expect(order.canInspect).toBe(true)
+  })
+
+  it('publishes a mutual aid offer and lists it back', async () => {
+    const created = await mockRequest<ServicePost>({
+      url: '/services',
+      method: 'POST',
+      data: {
+        kind: 'OFFER',
+        category: '维修安装',
+        title: '周末可帮邻居修小家电',
+        description: '电饭煲、台灯等小问题可以帮忙看看，零件费另计。',
+        expectedTime: '周末',
+        location: '2号楼大堂',
+        reward: '面议',
+        icon: 'settings',
+      },
+    })
+    expect(created.kind).toBe('提供')
+    expect(created.place).toBe('2号楼大堂')
+    expect(created.category).toBe('维修安装')
+
+    const listed = await mockRequest<PageResult<ServicePost>>({
+      url: '/services?kind=%E6%8F%90%E4%BE%9B&page=1&pageSize=50',
+      method: 'GET',
+    })
+    expect(listed.list.some((post) => post.id === created.id)).toBe(true)
   })
 
   it('advances AI audit progress', async () => {

@@ -45,7 +45,7 @@ npm run dev
 `backend/.env` 已按本地开发环境配置，**含密钥，已被 `.gitignore` 忽略，禁止提交**。
 
 - PostgreSQL：`neighinn_dev`
-- Redis：当前开发实例需要密码，后端自动降级为内存会话；生产环境请补充 `REDIS_URL` 密码。
+- Redis：已配置密码认证（`REDIS_URL`），管理端会话与短信验证码使用 Redis 存储。
 - MinIO：私有桶 `ni-private`、公开桶 `ni-public`、系统桶 `ni-system`。
 
 ## 已实现页面

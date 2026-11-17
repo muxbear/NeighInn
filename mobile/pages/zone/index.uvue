@@ -215,6 +215,10 @@ onLoad((options: any) => {
   if (requested === 'swap' || requested === 'sale' || requested === 'service') {
     zoneKey.value = requested
   }
+  const requestedKind = String(options?.kind ?? '')
+  if (requestedKind === '求助' || requestedKind === '提供') {
+    serviceKind.value = requestedKind
+  }
   loadInitial()
 })
 
@@ -301,7 +305,9 @@ function goPublish(): void {
   uni.navigateTo({ url: '/pages/publish/index' })
 }
 function openServicePublish(): void {
-  showToast('邻里互助发布将在后续版本开放')
+  uni.navigateTo({
+    url: `/pages/publish/index?mode=service&kind=${encodeURIComponent(serviceKind.value)}`,
+  })
 }
 function goItem(id: string): void {
   uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
