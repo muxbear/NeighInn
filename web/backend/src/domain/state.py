@@ -186,9 +186,11 @@ content_sm = StateMachine("内容", {
 
 # ---- 邻里互助 ----
 help_sm = StateMachine("互助", {
+    E.HelpStatus.PENDING_REVIEW: {E.HelpStatus.OPEN, E.HelpStatus.REJECTED},
+    E.HelpStatus.REJECTED: set(),
     E.HelpStatus.OPEN: {E.HelpStatus.MATCHING, E.HelpStatus.CLOSED},
     E.HelpStatus.MATCHING: {E.HelpStatus.IN_PROGRESS, E.HelpStatus.OPEN, E.HelpStatus.CLOSED},
     E.HelpStatus.IN_PROGRESS: {E.HelpStatus.COMPLETED, E.HelpStatus.CLOSED},
     E.HelpStatus.COMPLETED: set(),
     E.HelpStatus.CLOSED: set(),
-}, terminal={E.HelpStatus.COMPLETED, E.HelpStatus.CLOSED})
+}, terminal={E.HelpStatus.COMPLETED, E.HelpStatus.CLOSED, E.HelpStatus.REJECTED})

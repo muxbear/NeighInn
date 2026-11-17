@@ -87,4 +87,22 @@ def require_permission(code: str):
     return checker
 
 
+def require_any_permission(*codes: str):
+    """任一权限满足即可（用于跨内容域的共享能力，如媒体上传）。
+
+    示例：生活内容与邻里互助都需要上传媒体，但分别归属
+    ``community:life:update`` / ``community:help:update``。
+    """
+
+    async def checker(db: DbSession, admin: CurrentAdmin) -> AdminUser:
+        if admin.is_super_admin:
+            return admin
+        admin_codes = set(await get_permission_codes(db, admin))
+        if not any(code in admin_codes for code in codes):
+            raise ApiError(ERR_FORBIDDEN, "无权限执行该操作", 403)
+        return admin
+
+    return checker
+
+
 Perm = Annotated[AdminUser, Depends()]

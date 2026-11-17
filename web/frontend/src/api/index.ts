@@ -199,19 +199,28 @@ export const operationsApi = {
   create: (module: string, payload: Dict) => http.post<any, any>(`/${module}`, payload),
   itemDetail: (id: number | string) => http.get<any, any>(`/items/${id}`),
   lifeDetail: (id: number | string) => http.get<any, any>(`/life-posts/${id}`),
+  helpDetail: (id: number | string) => http.get<any, any>(`/help-requests/${id}`),
   itemAudit: (id: number | string) => http.get<any, any>(`/items/${id}/ai-audit`),
   itemCategories: () => http.get<any, any>('/item-categories'),
   updateItem: (id: number | string, payload: Dict) => http.put<any, any>(`/items/${id}`, payload),
   deleteItem: (id: number | string) => http.delete<any, any>(`/items/${id}`),
   updateLife: (id: number | string, payload: Dict) => http.put<any, any>(`/life-posts/${id}`, payload),
   deleteLife: (id: number | string) => http.delete<any, any>(`/life-posts/${id}`),
+  updateHelp: (id: number | string, payload: Dict) => http.put<any, any>(`/help-requests/${id}`, payload),
+  deleteHelp: (id: number | string) => http.delete<any, any>(`/help-requests/${id}`),
+  batchDeleteHelp: (ids: Array<string | number>) =>
+    http.post<any, any>('/help-requests/batch-delete', { ids: ids.map((id) => Number(id)) }),
+  reviewHelp: (id: number | string, decision: 'APPROVE' | 'REJECT', reason = '') =>
+    http.post<any, any>(`/help-requests/${id}/review`, { decision, reason }),
+  helpResponses: (id: number | string) => http.get<any, any>(`/help-requests/${id}/responses`),
   review: (module: string, id: number | string, payload: Dict = { decision: 'APPROVE' }) =>
     http.post<any, any>(`/${module}/${id}/review`, payload),
   // 物品下架接口强制要求 reason（FastAPI 请求体缺失会返回 422 参数校验失败）
   offline: (module: string, id: number | string, reason = '') =>
     http.post<any, any>(`/${module}/${id}/offline`, { reason }),
   recommend: (id: number | string, enabled = true) => http.post<any, any>(`/items/${id}/recommend`, { enabled }),
-  matchHelp: (id: number | string, helper = '陈师傅') => http.post<any, any>(`/help-requests/${id}/match`, { helper }),
+  matchHelp: (id: number | string, responderId?: number | string) =>
+    http.post<any, any>(`/help-requests/${id}/match`, { responderId: Number(responderId) }),
   closeHelp: (id: number | string, reason = '') => http.post<any, any>(`/help-requests/${id}/close`, { reason }),
 }
 

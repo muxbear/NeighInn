@@ -287,6 +287,9 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
 .community-operation-tabs button.active::after, .resident-tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: #7059d2; content: ""; }
 .community-operation-tabs em, .resident-tabs em { min-width: 18px; height: 17px; padding: 0 5px; display: grid; place-items: center; border-radius: 9px; color: #817c89; background: #f0eef3; font-size: var(--font-size-caption); font-style: normal; }
 .community-operation-tabs button.active em, .resident-tabs button.active em { color: #624bc0; background: #ede9fb; }
+.community-operation-kind-tabs { display: flex; gap: 8px; padding: 12px 16px 0; }
+.community-operation-kind-tabs button { height: 32px; padding: 0 14px; border: 1px solid #e3dfe9; border-radius: 16px; color: #777381; background: #fff; font-size: var(--font-size-caption); font-weight: 600; }
+.community-operation-kind-tabs button.active { border-color: #7955b8; color: #6a49ae; background: #f3eefb; }
 .community-operation-toolbar, .resident-toolbar { min-height: 62px; padding: 12px 15px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #ece9f0; }
 .community-operation-toolbar > div:last-child, .resident-toolbar > div:last-child { display: flex; align-items: center; gap: 7px; }
 .community-operation-table { min-width: 1120px; } .community-operation-table td { height: 72px; }

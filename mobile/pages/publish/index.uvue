@@ -22,17 +22,17 @@
         </view>
         <view
           class="publish__mode-tab"
-          :class="{ 'publish__mode-tab--active': mode === 'life' }"
-          @click="mode = 'life'"
-        >
-          <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'life' }">发布生活</text>
-        </view>
-        <view
-          class="publish__mode-tab"
           :class="{ 'publish__mode-tab--active': mode === 'service' }"
           @click="mode = 'service'"
         >
           <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'service' }">邻里互助</text>
+        </view>
+        <view
+          class="publish__mode-tab"
+          :class="{ 'publish__mode-tab--active': mode === 'life' }"
+          @click="mode = 'life'"
+        >
+          <text class="publish__mode-tab-text" :class="{ 'publish__mode-tab-text--active': mode === 'life' }">发布生活</text>
         </view>
       </view>
     </view>
@@ -392,6 +392,29 @@
 
         <view class="publish__card">
           <view class="publish__card-head">
+            <text class="publish__card-title">图片 / 视频</text>
+            <text class="publish__card-hint">选填</text>
+            <text class="publish__card-count">{{ serviceImages.length }}/9</text>
+          </view>
+          <ni-photo-uploader
+            v-model="serviceImages"
+            :max="9"
+            :min="0"
+            :columns="3"
+            :tile-height="96"
+            add-text="添加图片"
+          />
+          <view class="publish__optional-row">
+            <view class="publish__optional" @click="pickServiceVideo">
+              <ni-icon name="play" :size="17" state="active" />
+              <text class="publish__optional-text">{{ serviceVideo ? '已添加视频（点击移除）' : '添加服务视频' }}</text>
+            </view>
+          </view>
+          <text class="publish__optional-hint">可上传最多 9 张图片，或 1 个短视频；图片与视频不能混排。</text>
+        </view>
+
+        <view class="publish__card">
+          <view class="publish__card-head">
             <text class="publish__card-title">{{ serviceDraft.kind === '求助' ? '求助标题' : '服务标题' }}</text>
             <text class="publish__card-hint">必填</text>
             <text class="publish__card-count">{{ serviceDraft.title.length }}/30</text>
@@ -496,7 +519,7 @@
           <ni-icon name="shield" :size="16" state="green" />
           <view class="publish__service-notice-copy">
             <text class="publish__service-notice-title">仅本小区认证业主可见</text>
-            <text class="publish__service-notice-desc">发布内容将经过内容安全审核；邻里互助请优先在公共区域进行，涉及上门服务建议提前在物业登记。</text>
+            <text class="publish__service-notice-desc">{{ serviceDraft.kind === '求助' ? '邻里求助发布后立即展示，并通过内容安全审核兜底；请优先在公共区域进行。' : '邻里服务需平台审核，审核通过后展示；涉及上门服务建议提前在物业登记。' }}</text>
           </view>
         </view>
       </view>
@@ -613,6 +636,8 @@ const serviceDraft = reactive<{
   reward: '',
 })
 const serviceSubmitting = ref(false)
+const serviceImages = ref<string[]>([])
+const serviceVideo = ref('')
 const serviceCategories = SERVICE_CATEGORIES.filter((item) => item !== '全部')
 const serviceTimeOptions = computed(() =>
   serviceDraft.kind === '求助'
@@ -715,6 +740,13 @@ watch(
   },
   { deep: true },
 )
+
+watch(serviceImages, (images) => {
+  if (images.length && serviceVideo.value) {
+    serviceImages.value = []
+    showToast('请先移除短视频，再添加图片', 'alert')
+  }
+})
 
 function restoreDraft(): void {
   if (editingId.value) return
@@ -877,6 +909,25 @@ async function pickLifeVideo(): Promise<void> {
   }
 }
 
+async function pickServiceVideo(): Promise<void> {
+  if (serviceVideo.value) {
+    serviceVideo.value = ''
+    showToast('已移除服务视频')
+    return
+  }
+  if (serviceImages.value.length) {
+    showToast('请先移除图片，再添加短视频', 'alert')
+    return
+  }
+  try {
+    const path = await prepareVideo()
+    serviceVideo.value = path
+    showToast('服务视频已添加')
+  } catch {
+    showToast('未选择视频', 'alert')
+  }
+}
+
 async function pickLifeImages(): Promise<void> {
   try {
     const remaining = Math.max(1, appStore.config.maxLifeImages - lifeImages.value.length)
@@ -955,6 +1006,21 @@ async function submitService(): Promise<void> {
   }
   serviceSubmitting.value = true
   try {
+    if (serviceImages.value.length && serviceVideo.value) {
+      showToast('图片与短视频不能混排，请先移除其中一种', 'alert')
+      return
+    }
+    if (serviceImages.value.length || serviceVideo.value) {
+      showToast('正在上传互助媒体…')
+    }
+    const mediaKeys = serviceImages.value.length
+      ? await uploadMany(serviceImages.value, 'PUBLIC_IMAGE')
+      : []
+    if (serviceVideo.value) {
+      mediaKeys.push(await uploadOne(serviceVideo.value, 'LIFE_VIDEO'))
+    }
+    const hasVideo = Boolean(serviceVideo.value)
+    const mediaType = hasVideo && mediaKeys.length === 1 ? 'VIDEO' : 'GALLERY'
     await serviceService.publish({
       kind: serviceDraft.kind,
       category: serviceDraft.category,
@@ -964,11 +1030,16 @@ async function submitService(): Promise<void> {
       location: serviceDraft.location.trim(),
       reward:
         serviceDraft.reward.trim() || (serviceDraft.kind === '求助' ? '邻里互助' : '面议'),
+      media: mediaKeys,
+      mediaType,
+      coverKey: mediaKeys[0] || '',
       icon:
         SERVICE_ICON_BY_CATEGORY[serviceDraft.category] ||
         (serviceDraft.kind === '求助' ? 'child' : 'friend'),
     })
-    showToast(serviceDraft.kind === '求助' ? '邻里求助已发布' : '邻里服务已发布')
+    showToast(serviceDraft.kind === '求助'
+      ? '邻里求助已发布'
+      : '邻里服务已提交审核，通过后展示')
     const kind = encodeURIComponent(serviceDraft.kind)
     setTimeout(() => {
       uni.redirectTo({ url: `/pages/zone/index?zone=service&kind=${kind}` })

@@ -130,6 +130,9 @@ class HelpStatus:
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CLOSED = "CLOSED"
+    # 邻里服务需平台审核；求助默认直接发布。
+    PENDING_REVIEW = "PENDING_REVIEW"
+    REJECTED = "REJECTED"
 
 
 class ReportStatus:

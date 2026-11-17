@@ -123,6 +123,15 @@ async def _todos(db: DbSession, admin: CurrentAdmin) -> list[dict]:
     open_help = int((await db.scalar(
         select(func.count()).select_from(HelpRequest).where(
             HelpRequest.status == E.HelpStatus.OPEN))) or 0)
+    pending_help_services = int((await db.scalar(
+        select(func.count()).select_from(HelpRequest).where(
+            HelpRequest.kind == "OFFER",
+            HelpRequest.status == E.HelpStatus.PENDING_REVIEW))) or 0)
+    pending_help_service_community = await db.scalar(
+        select(HelpRequest.community_id)
+        .where(HelpRequest.kind == "OFFER",
+               HelpRequest.status == E.HelpStatus.PENDING_REVIEW)
+        .order_by(HelpRequest.id.desc()).limit(1))
 
     cert_desc = (
         f"实名 {cert_breakdown.get('REALNAME', 0)} 项 · "
@@ -162,6 +171,18 @@ async def _todos(db: DbSession, admin: CurrentAdmin) -> list[dict]:
          "description": "邻里互助待撮合", "count": open_help,
          "route": "/community-operations/help", "permission": "community:help:match",
          "oldestPendingAt": 0},
+        {"key": "help_service", "icon": "ShieldCheck", "color": "green",
+         "title": "邻里服务待审核", "description": "移动端发布的邻里服务待处理",
+         "count": pending_help_services,
+         "route": (
+             f"/community-operations/help?kind=OFFER&tab=PENDING_REVIEW"
+             f"&communityId={int(pending_help_service_community)}"
+             if pending_help_service_community else
+             "/community-operations/help?kind=OFFER&tab=PENDING_REVIEW"
+         ),
+         "communityId": (int(pending_help_service_community)
+                         if pending_help_service_community else None),
+         "permission": "community:help:review", "oldestPendingAt": 0},
     ]
     codes = set(await get_permission_codes(db, admin))
     return [todo for todo in todos if todo["permission"] in codes]

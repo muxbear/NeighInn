@@ -97,6 +97,10 @@ class HelpRequest(Entity):
     expected_time: Mapped[str] = mapped_column(String(64), default="")
     location: Mapped[str] = mapped_column(String(128), default="")
     reward: Mapped[str] = mapped_column(String(64), default="")
+    # GALLERY / VIDEO；media 存对象键，展示时签发 URL（与生活动态一致）。
+    media: Mapped[dict] = mapped_column(JsonDict, default=list)
+    cover_key: Mapped[str] = mapped_column(String(255), default="")
+    media_type: Mapped[str] = mapped_column(String(16), default="GALLERY")
     urgent: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="OPEN", index=True)
     matched_helper_id: Mapped[int | None] = mapped_column(BigInteger)

@@ -85,6 +85,11 @@ function openCommand() {
 
 function openTodo(item: any) {
   noticeOpen.value = false
+  const target = router.resolve(item.route || '/dashboard')
+  const communityId = Number(target.query.communityId || item.communityId || 0)
+  if (communityId && communityId !== app.currentCommunityId) {
+    app.switchCommunity(communityId)
+  }
   if (item.key === 'certification') {
     router.push({
       path: item.route || '/governance/verification',

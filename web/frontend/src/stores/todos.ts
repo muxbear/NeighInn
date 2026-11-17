@@ -13,6 +13,7 @@ type TodoItem = {
   color: string
   oldestPendingAt: number
   latestCertId: string
+  communityId?: number | null
   breakdown: Record<string, number>
 }
 

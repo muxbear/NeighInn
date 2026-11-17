@@ -11,6 +11,9 @@ export interface CreateServiceInput {
   location?: string
   reward?: string
   icon?: string
+  media?: string[]
+  mediaType?: 'GALLERY' | 'VIDEO'
+  coverKey?: string
 }
 
 export function getServices(query: ServiceQuery = {}): Promise<PageResult<ServicePost>> {
@@ -28,6 +31,9 @@ export function createService(payload: CreateServiceInput): Promise<ServicePost>
     location: payload.location ?? '',
     reward: payload.reward ?? '',
     icon: payload.icon ?? '',
+    media: payload.media ?? [],
+    mediaType: payload.mediaType ?? 'GALLERY',
+    coverKey: payload.coverKey ?? '',
   }
   return post<ServicePost>('/services', body, { loading: true })
 }

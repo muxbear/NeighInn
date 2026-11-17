@@ -24,6 +24,7 @@ const page = ref(1)
 const pageSize = 20
 const query = ref('')
 const activeTab = ref('全部')
+const helpKind = ref('全部')
 const selectedRows = ref<string[]>([])
 const loading = ref(false)
 const drawerOpen = ref(false)
@@ -68,7 +69,7 @@ const configs: Record<string, any> = {
     api: 'help-requests', title: '邻里互助', tone: 'help', icon: HandHeart,
     ownerLabel: '互助归属小区', scopeNote: '互助列表仅展示所选小区',
     description: '管理居民求助、邻里响应、撮合履约及互助信用评价', create: '代发互助',
-    tabs: ['全部', '待响应', '匹配中', '进行中', '已完成'],
+    tabs: ['全部', '待审核', '待响应', '匹配中', '进行中', '已完成', '已关闭', '已驳回'],
     metrics: [
       { label: '今日求助', value: '18', note: '紧急求助 2 条' },
       { label: '待响应', value: '8', note: '平均等待 12 分钟', attention: true },
@@ -97,18 +98,28 @@ const configs: Record<string, any> = {
 const TAB_STATUS: Record<string, Record<string, string>> = {
   broadcast: { 已发布: 'PUBLISHED', 待审核: 'PENDING_REVIEW', 定时发布: 'SCHEDULED', 已下架: 'OFFLINE' },
   life: { 已发布: 'PUBLISHED', 草稿: 'DRAFT', 待审核: 'PENDING_REVIEW', 已下线: 'OFFLINE' },
-  help: { 待响应: 'OPEN', 匹配中: 'MATCHING', 进行中: 'IN_PROGRESS', 已完成: 'COMPLETED' },
+  help: {
+    待审核: 'PENDING_REVIEW', 待响应: 'OPEN', 匹配中: 'MATCHING',
+    进行中: 'IN_PROGRESS', 已完成: 'COMPLETED', 已关闭: 'CLOSED', 已驳回: 'REJECTED',
+  },
   items: { 在售: 'ON_SALE', 待审核: 'PENDING_REVIEW', 已售出: 'SOLD', 已下架: 'OFF_SHELF' },
 }
 
 const ITEM_OFFLINE_BLOCKED = ['SOLD', 'GIFTED', 'OFF_SHELF']
-const HELP_TERMINAL = ['COMPLETED', 'CLOSED']
+const HELP_KIND_TABS = [
+  { label: '全部', code: '' },
+  { label: '邻里求助', code: 'HELP' },
+  { label: '邻里服务', code: 'OFFER' },
+]
 
 const module = computed(() => String(route.params.module || 'broadcast'))
 const config = computed(() => configs[module.value] || configs.broadcast)
 const tabs = computed(() => config.value.tabs)
 const filteredRows = computed(() => rows.value)
 const canCreate = computed(() => module.value === 'broadcast' && auth.hasPermission('community:broadcast:create'))
+const canEditHelp = computed(() => module.value === 'help' && auth.hasPermission('community:help:update'))
+const canDeleteHelp = computed(() => module.value === 'help' && auth.hasPermission('community:help:delete'))
+const canReviewHelp = computed(() => module.value === 'help' && auth.hasPermission('community:help:review'))
 const canEditItem = computed(() => module.value === 'items' && auth.hasPermission('community:item:update'))
 const canDeleteItem = computed(() => module.value === 'items' && auth.hasPermission('community:item:delete'))
 const canEditLife = computed(() => module.value === 'life' && auth.hasPermission('community:life:update'))
@@ -211,6 +222,10 @@ async function load() {
     const params: any = { communityId: app.currentCommunityId, page: page.value, pageSize }
     const status = tabStatusCode(activeTab.value)
     if (status) params.status = status
+    if (module.value === 'help') {
+      const kindCode = HELP_KIND_TABS.find((item) => item.label === helpKind.value)?.code
+      if (kindCode) params.kind = kindCode
+    }
     if (query.value) params.keyword = query.value
     const overviewModule = ['items', 'life'].includes(module.value) ? module.value : ''
     const [data, summary] = await Promise.all([
@@ -235,6 +250,13 @@ async function load() {
 
 function selectTab(tab: string) {
   activeTab.value = tab
+  page.value = 1
+  load()
+}
+
+function selectHelpKind(kind: string) {
+  if (helpKind.value === kind) return
+  helpKind.value = kind
   page.value = 1
   load()
 }
@@ -275,13 +297,82 @@ async function review(row: any) {
     await openLifeReview(row)
     return
   }
-  try {
-    if (module.value === 'help') {
-      await operationsApi.matchHelp(row.id)
-    } else {
-      await operationsApi.review(config.value.api, row.id, { decision: 'APPROVE' })
+  if (module.value === 'help') {
+    if (row.kindCode === 'OFFER' || row.statusCode === 'PENDING_REVIEW') {
+      openHelpReview(row)
+      return
     }
+    await matchHelpRow(row)
+    return
+  }
+  try {
+    await operationsApi.review(config.value.api, row.id, { decision: 'APPROVE' })
     app.showToast('操作已完成')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '操作失败')
+  }
+}
+
+/** 邻里服务审核：通过后进入待响应，驳回原因不少于 5 个字。 */
+const helpReviewOpen = ref(false)
+const helpReviewTarget = ref<any>(null)
+const helpReviewDetail = ref<any>(null)
+const helpReviewLoading = ref(false)
+const helpReviewSubmitting = ref(false)
+const helpReviewForm = ref({ decision: 'APPROVE', reason: '' })
+
+async function openHelpReview(row: any) {
+  if (!canReviewHelp.value) return
+  helpReviewTarget.value = row
+  helpReviewDetail.value = null
+  helpReviewForm.value = { decision: 'APPROVE', reason: '' }
+  helpReviewOpen.value = true
+  helpReviewLoading.value = true
+  try {
+    helpReviewDetail.value = await operationsApi.helpDetail(row.id)
+  } catch (exc: any) {
+    app.showToast(exc?.message || '互助详情加载失败')
+  } finally {
+    helpReviewLoading.value = false
+  }
+}
+
+async function submitHelpReview() {
+  const target = helpReviewTarget.value
+  if (!target || helpReviewSubmitting.value) return
+  const { decision, reason } = helpReviewForm.value
+  if (decision === 'REJECT' && reason.trim().length < 5) {
+    app.showToast('驳回原因至少 5 个字（将通知发布人）')
+    return
+  }
+  helpReviewSubmitting.value = true
+  try {
+    await operationsApi.reviewHelp(target.id, decision as 'APPROVE' | 'REJECT', reason.trim())
+    helpReviewOpen.value = false
+    app.showToast(decision === 'REJECT' ? '已驳回并通知发布人' : '审核通过，已展示在邻里服务')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '审核失败')
+  } finally {
+    helpReviewSubmitting.value = false
+  }
+}
+
+async function matchHelpRow(row: any) {
+  if (!row.responses) {
+    app.showToast('暂无邻居响应，暂时无法撮合')
+    return
+  }
+  try {
+    const responses = await operationsApi.helpResponses(row.id)
+    const pending = (responses || []).find((item: any) => item.status === 'PENDING')
+    if (!pending) {
+      app.showToast('没有待处理的响应')
+      return
+    }
+    await operationsApi.matchHelp(row.id, pending.responderId)
+    app.showToast('互助撮合成功')
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '操作失败')
@@ -481,24 +572,32 @@ async function openEdit(row: any) {
 }
 
 function canEditRow(row: any): boolean {
+  if (module.value === 'help') return canEditHelp.value
   if (module.value === 'life') return canEditLife.value
   return canEditItem.value && !['RESERVED', 'SOLD', 'GIFTED'].includes(row.statusCode)
 }
 
 function canDeleteRow(row: any): boolean {
+  if (module.value === 'help') return canDeleteHelp.value
   if (module.value === 'life') return canDeleteLife.value
   return canDeleteItem.value && !['RESERVED', 'SOLD', 'GIFTED'].includes(row.statusCode)
 }
 
 function rowEditLabel(): string {
+  if (module.value === 'help') return '编辑互助'
   return module.value === 'life' ? '编辑内容' : '编辑物品'
 }
 
 function rowDeleteLabel(): string {
+  if (module.value === 'help') return '删除互助'
   return module.value === 'life' ? '删除内容' : '删除物品'
 }
 
 function editRow(row: any): void {
+  if (module.value === 'help') {
+    void openHelpEdit(row)
+    return
+  }
   if (module.value === 'life') {
     void openLifeEdit(row)
     return
@@ -739,14 +838,215 @@ async function saveLifeEdit() {
   }
 }
 
+/** 邻里互助/服务编辑：发布类型与全部业务字段、图片/视频均可维护。 */
+const helpEditOpen = ref(false)
+const helpEditTarget = ref<any>(null)
+const helpEditSubmitting = ref(false)
+const helpEditForm = ref({
+  kind: 'HELP',
+  category: '',
+  title: '',
+  description: '',
+  expectedTime: '',
+  location: '',
+  reward: '',
+  urgent: false,
+  coverKey: '',
+})
+const helpEditMedia = ref<LifeMediaItem[]>([])
+const helpMediaUploading = ref(false)
+const helpFileInput = ref<HTMLInputElement | null>(null)
+
+const HELP_CATEGORIES = ['邻里帮忙', '物品借用', '临时照看', '维修安装', '接送照看', '宠物照看', '学习陪伴', '邻里活动', '信息咨询', '其他']
+const helpCategoryOptions = computed(() => {
+  const current = helpEditForm.value.category
+  return current && !HELP_CATEGORIES.includes(current)
+    ? [current, ...HELP_CATEGORIES]
+    : HELP_CATEGORIES
+})
+
+function isVideoMediaKey(key: string): boolean {
+  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(key)
+}
+
+function buildHelpMedia(row: any): LifeMediaItem[] {
+  const keys: string[] = row.mediaKeys || []
+  const urls: string[] = row.media || []
+  return keys.map((key, index) => ({
+    key,
+    url: urls[index] || '',
+    type: isVideoMediaKey(key) ? 'video' : 'image',
+  }))
+}
+
+async function openHelpEdit(row: any) {
+  if (!canEditHelp.value) return
+  helpEditTarget.value = row
+  helpEditForm.value = {
+    kind: row.kindCode || 'HELP',
+    category: row.category || '',
+    title: row.title || '',
+    description: row.description || '',
+    expectedTime: row.expectedTime || '',
+    location: row.location || '',
+    reward: row.reward || '',
+    urgent: Boolean(row.urgent),
+    coverKey: row.coverKey || '',
+  }
+  helpEditMedia.value = buildHelpMedia(row)
+  helpEditOpen.value = true
+  try {
+    const detail = await operationsApi.helpDetail(row.id)
+    if (!detail || helpEditTarget.value?.id !== row.id) return
+    helpEditForm.value = {
+      kind: detail.kindCode || detail.kind || helpEditForm.value.kind,
+      category: detail.category || helpEditForm.value.category,
+      title: detail.title || helpEditForm.value.title,
+      description: detail.description || helpEditForm.value.description,
+      expectedTime: detail.expectedTime || helpEditForm.value.expectedTime,
+      location: detail.location || helpEditForm.value.location,
+      reward: detail.reward || helpEditForm.value.reward,
+      urgent: Boolean(detail.urgent),
+      coverKey: detail.coverKey || helpEditForm.value.coverKey,
+    }
+    helpEditMedia.value = buildHelpMedia(detail)
+    if (!helpEditMedia.value.some((media) => media.key === helpEditForm.value.coverKey)) {
+      helpEditForm.value.coverKey = helpEditMedia.value[0]?.key || ''
+    }
+  } catch {
+    // 详情失败时仍可基于列表行编辑
+  }
+}
+
+function removeHelpMedia(index: number): void {
+  const [removed] = helpEditMedia.value.splice(index, 1)
+  if (removed && helpEditForm.value.coverKey === removed.key) {
+    helpEditForm.value.coverKey = helpEditMedia.value[0]?.key || ''
+  }
+}
+
+function triggerHelpMediaUpload(): void {
+  if (helpMediaUploading.value) return
+  helpFileInput.value?.click()
+}
+
+async function onHelpMediaPicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  for (const file of files) {
+    const name = file.name.toLowerCase()
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm)$/.test(name)
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp)$/.test(name)
+    if (!isVideo && !isImage) {
+      app.showToast(`「${file.name}」仅支持 JPG / PNG / WebP 图片或 MP4 / MOV / WebM 短视频`)
+      continue
+    }
+    if (isVideo) {
+      if (helpEditMedia.value.length > 0) {
+        app.showToast('短视频互助只能包含一个视频，请先移除其他媒体')
+        continue
+      }
+    } else {
+      if (helpEditMedia.value.some((media) => media.type === 'video')) {
+        app.showToast('图片与短视频不能混排，请先移除视频')
+        continue
+      }
+      if (helpEditMedia.value.length >= 12) {
+        app.showToast('图片最多上传 12 张')
+        break
+      }
+    }
+    helpMediaUploading.value = true
+    try {
+      const data = await filesApi.uploadMedia(file, isVideo ? 'LIFE_VIDEO' : 'LIFE_IMAGE')
+      const item: LifeMediaItem = {
+        key: data.objectKey,
+        url: data.url || data.objectKey,
+        type: isVideo ? 'video' : 'image',
+      }
+      helpEditMedia.value.push(item)
+      if (!helpEditForm.value.coverKey) helpEditForm.value.coverKey = item.key
+    } catch (exc: any) {
+      app.showToast(exc?.message || `「${file.name}」上传失败`)
+    } finally {
+      helpMediaUploading.value = false
+    }
+  }
+}
+
+async function saveHelpEdit() {
+  const target = helpEditTarget.value
+  if (!target || helpEditSubmitting.value) return
+  if (helpMediaUploading.value) {
+    app.showToast('媒体上传中，请稍候')
+    return
+  }
+  const form = helpEditForm.value
+  const title = form.title.trim()
+  const category = form.category.trim()
+  const description = form.description.trim()
+  if (title.length < 2 || title.length > 30) {
+    app.showToast('标题需 2–30 个字')
+    return
+  }
+  if (!category) {
+    app.showToast('请填写互助分类')
+    return
+  }
+  if (description.length > 500) {
+    app.showToast('详细说明最多 500 个字')
+    return
+  }
+  if (form.location.trim().length > 64 || form.expectedTime.trim().length > 64) {
+    app.showToast('时间与地点最多 64 个字')
+    return
+  }
+  const hasVideo = helpEditMedia.value.some((media) => media.type === 'video')
+  if (hasVideo && helpEditMedia.value.length > 1) {
+    app.showToast('短视频互助只能包含一个视频')
+    return
+  }
+  const mediaKeys = helpEditMedia.value.map((media) => media.key)
+  const coverKey = mediaKeys.includes(form.coverKey) ? form.coverKey : (mediaKeys[0] || '')
+  helpEditSubmitting.value = true
+  try {
+    await operationsApi.updateHelp(target.id, {
+      kind: form.kind,
+      category,
+      title,
+      description,
+      expectedTime: form.expectedTime.trim(),
+      location: form.location.trim(),
+      reward: form.reward.trim(),
+      urgent: form.urgent,
+      media: mediaKeys,
+      mediaType: hasVideo ? 'VIDEO' : 'GALLERY',
+      coverKey,
+    })
+    helpEditOpen.value = false
+    app.showToast('互助信息已更新')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '保存失败')
+  } finally {
+    helpEditSubmitting.value = false
+  }
+}
+
 async function confirmDelete(row: any): Promise<void> {
   const isLife = module.value === 'life'
+  const isHelp = module.value === 'help'
   const confirmed = await confirm({
-    title: isLife ? '删除内容' : '删除物品',
-    message: isLife
+    title: isHelp ? '删除互助' : isLife ? '删除内容' : '删除物品',
+    message: isHelp
+      ? `确定删除“${row.title}”吗？删除后不可恢复，邻居响应记录将一并清理。`
+      : isLife
       ? `确定删除“${row.title}”吗？删除后不可恢复，内容评论与收藏记录将一并清理。`
       : `确定删除“${row.title}”吗？删除后不可恢复，物品照片、质检记录与留言将一并清理。`,
-    details: [isLife
+    details: [isHelp
+      ? '删除操作会通知发布人，并写入审计日志。'
+      : isLife
       ? '若仅需停止展示，请改用「下架内容」保留运营数据；删除记录仍会写入审计日志。'
       : '若物品已有订单记录，系统会拒绝删除，请改用「下架物品」保留交易凭证。'],
     confirmText: '确认删除',
@@ -754,7 +1054,10 @@ async function confirmDelete(row: any): Promise<void> {
   })
   if (!confirmed) return
   try {
-    if (isLife) {
+    if (isHelp) {
+      await operationsApi.deleteHelp(row.id)
+      app.showToast('互助信息已删除')
+    } else if (isLife) {
       await operationsApi.deleteLife(row.id)
       app.showToast('内容已删除')
     } else {
@@ -777,27 +1080,57 @@ function toggleRow(id: string) {
     : [...selectedRows.value, id]
 }
 
+async function batchDeleteHelp(): Promise<void> {
+  if (!selectedRows.value.length || !canDeleteHelp.value) return
+  const confirmed = await confirm({
+    title: '批量删除互助',
+    message: `确定删除已选择的 ${selectedRows.value.length} 条互助/服务信息吗？删除后不可恢复。`,
+    details: ['每条删除都会通知发布人并写入审计日志；失败项会在完成后提示。'],
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!confirmed) return
+  try {
+    const result = await operationsApi.batchDeleteHelp(selectedRows.value)
+    const failed = result?.failed?.length || 0
+    app.showToast(failed ? `已删除 ${result.deleted.length} 条，${failed} 条失败` : `已删除 ${result.deleted.length} 条`)
+    selectedRows.value = []
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '批量删除失败')
+  }
+}
+
 /** 主操作只在服务端状态机允许的源状态下展示，避免点击后 40904。 */
 function canPrimaryAction(row: any): boolean {
-  if (module.value === 'help') return ['OPEN', 'MATCHING'].includes(row.statusCode)
+  if (module.value === 'help') {
+    if (row.kindCode === 'OFFER' && row.statusCode === 'PENDING_REVIEW') return true
+    return row.kindCode === 'HELP'
+      && ['OPEN', 'MATCHING'].includes(row.statusCode)
+      && Number(row.responses || 0) > 0
+  }
   if (module.value === 'items') return row.statusCode === 'PENDING_REVIEW'
   return row.statusCode === 'PENDING_REVIEW'
 }
 
 function canOffline(row: any): boolean {
   if (module.value === 'items') return !ITEM_OFFLINE_BLOCKED.includes(row.statusCode)
-  if (module.value === 'help') return !HELP_TERMINAL.includes(row.statusCode)
+  if (module.value === 'help') return ['OPEN', 'MATCHING', 'IN_PROGRESS'].includes(row.statusCode)
   // 内容状态机只允许 定时发布/已发布 → 已下线；待审核内容应先审核或删除。
   return ['SCHEDULED', 'PUBLISHED'].includes(row.statusCode)
 }
 
 function rowActionIcon(row: any) {
-  if (module.value === 'help') return HandHeart
+  if (module.value === 'help') {
+    return row.kindCode === 'OFFER' || row.statusCode === 'PENDING_REVIEW' ? ShieldCheck : HandHeart
+  }
   return ShieldCheck
 }
 
 function rowActionLabel(row: any) {
-  if (module.value === 'help') return '人工撮合'
+  if (module.value === 'help') {
+    return row.kindCode === 'OFFER' || row.statusCode === 'PENDING_REVIEW' ? '审核服务' : '人工撮合'
+  }
   if (module.value === 'items') return '审核物品'
   return row.statusCode === 'PENDING_REVIEW' ? '审核内容' : '查看内容'
 }
@@ -814,6 +1147,14 @@ function rowOfflineIcon() {
 
 /** 待办铃铛会带 ?tab=PENDING_REVIEW 跳转，直接落到待审核列表。 */
 function applyRouteTab(): void {
+  if (module.value === 'help') {
+    const requestedKind = String(route.query.kind || '').toUpperCase()
+    const map: Record<string, string> = {
+      HELP: '邻里求助', '求助': '邻里求助',
+      OFFER: '邻里服务', '提供': '邻里服务', '服务': '邻里服务',
+    }
+    if (map[requestedKind]) helpKind.value = map[requestedKind]
+  }
   const requested = String(route.query.tab || '')
   if (!requested) return
   const label = tabs.value.includes(requested)
@@ -826,8 +1167,9 @@ onMounted(() => {
   applyRouteTab()
   load()
 })
-watch(() => route.params.module, () => {
+watch(() => route.fullPath, () => {
   activeTab.value = '全部'
+  helpKind.value = '全部'
   query.value = ''
   page.value = 1
   applyRouteTab()
@@ -851,6 +1193,16 @@ watch(() => app.currentCommunityId, () => {
   </section>
 
   <section class="community-operation-panel">
+    <div v-if="module === 'help'" class="community-operation-kind-tabs">
+      <button
+        v-for="kind in HELP_KIND_TABS"
+        :key="kind.label"
+        :class="{ active: helpKind === kind.label }"
+        @click="selectHelpKind(kind.label)"
+      >
+        {{ kind.label }}
+      </button>
+    </div>
     <div class="community-operation-tabs">
       <button v-for="tab in tabs" :key="tab" :class="{ active: activeTab === tab }" @click="selectTab(tab)">
         {{ tab }}<em>{{ statusCount(tab) }}</em>
@@ -868,7 +1220,10 @@ watch(() => app.currentCommunityId, () => {
     </div>
     <div v-if="selectedRows.length" class="batch-bar community-operation-batch">
       <span>已选择 <strong>{{ selectedRows.length }}</strong> 项</span>
-      <button @click="app.showToast('批量状态变更已完成')">批量变更状态</button>
+      <button v-if="module === 'help' && canDeleteHelp" class="danger-button" @click="batchDeleteHelp">
+        批量删除
+      </button>
+      <button v-else @click="app.showToast('批量状态变更已完成')">批量变更状态</button>
       <button @click="selectedRows = []">取消选择</button>
     </div>
     <div class="table-wrap community-operation-table-wrap">
@@ -1030,6 +1385,188 @@ watch(() => app.currentCommunityId, () => {
       <button @click="reviewOpen = false">取消</button>
       <button class="primary-button" :disabled="reviewSubmitting" @click="submitReview">
         {{ reviewSubmitting ? '提交中…' : '提交复核结论' }}
+      </button>
+    </template>
+  </NiDrawer>
+
+  <NiDrawer
+    :open="helpReviewOpen"
+    :title="helpReviewTarget ? `邻里服务审核 · ${helpReviewTarget.title}` : '邻里服务审核'"
+    eyebrow="邻里互助"
+    @close="helpReviewOpen = false"
+  >
+    <template v-if="helpReviewTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <HandHeart :size="18" style="color: #7955b8" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ helpReviewTarget.code }} · {{ helpReviewTarget.communityName }} · {{ helpReviewTarget.requester }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ helpReviewTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="helpReviewTarget.status" />
+      </div>
+
+      <p v-if="helpReviewLoading" style="color: #988da2">正在加载服务详情…</p>
+      <template v-else>
+        <div class="form-grid">
+          <label><span>发布类型</span><input :value="helpReviewDetail?.kindLabel || helpReviewTarget.kindLabel" disabled /></label>
+          <label><span>分类</span><input :value="helpReviewDetail?.category || helpReviewTarget.category" disabled /></label>
+          <label><span>可服务时间</span><input :value="helpReviewDetail?.expectedTime || helpReviewTarget.expectedTime || '—'" disabled /></label>
+          <label><span>服务地点 / 范围</span><input :value="helpReviewDetail?.location || helpReviewTarget.location || '—'" disabled /></label>
+          <label><span>收费方式</span><input :value="helpReviewDetail?.reward || helpReviewTarget.reward || '—'" disabled /></label>
+          <label><span>紧急</span><input :value="(helpReviewDetail?.urgent ?? helpReviewTarget.urgent) ? '是' : '否'" disabled /></label>
+        </div>
+
+        <h4 class="section-title" style="margin-top: 20px">详细说明</h4>
+        <p style="color: #554761; font-size: var(--font-size-body); line-height: 1.7; white-space: pre-wrap">
+          {{ helpReviewDetail?.description || '无详细说明' }}
+        </p>
+
+        <h4 class="section-title" style="margin-top: 20px">图片 / 视频</h4>
+        <div v-if="helpReviewDetail?.media?.length" style="display: flex; flex-wrap: wrap; gap: 8px">
+          <template v-for="(url, index) in helpReviewDetail.media" :key="url">
+            <a :href="url" target="_blank" rel="noopener">
+              <img
+                v-if="helpReviewDetail.mediaType !== 'VIDEO' || index > 0"
+                :src="url"
+                alt="互助媒体"
+                style="width: 92px; height: 92px; object-fit: cover; border: 1px solid #ebe9ef; border-radius: 8px"
+              />
+              <span v-else style="display: inline-flex; width: 92px; height: 92px; align-items: center; justify-content: center; border: 1px solid #ebe9ef; border-radius: 8px; color: #7955b8; font-size: var(--font-size-caption)">
+                查看短视频
+              </span>
+            </a>
+          </template>
+        </div>
+        <p v-else style="color: #988da2; font-size: var(--font-size-body)">无媒体文件</p>
+
+        <h4 class="section-title" style="margin-top: 20px">审核结论</h4>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <button
+            :class="{ 'primary-button': helpReviewForm.decision === 'APPROVE' }"
+            @click="helpReviewForm.decision = 'APPROVE'"
+          >
+            通过并展示
+          </button>
+          <button
+            :class="{ 'danger-button': helpReviewForm.decision === 'REJECT' }"
+            @click="helpReviewForm.decision = 'REJECT'"
+          >
+            驳回修改
+          </button>
+        </div>
+        <label class="full" style="display: block; margin-top: 12px">
+          <span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">
+            审核备注{{ helpReviewForm.decision === 'REJECT' ? '（驳回必填，≥5 字，将通知发布人）' : '（选填）' }}
+          </span>
+          <textarea
+            v-model="helpReviewForm.reason"
+            style="width: 100%; min-height: 72px"
+            placeholder="例如：请补充服务资质说明或更清晰的服务内容"
+          />
+        </label>
+        <p style="margin-top: 10px; color: #958b9f; font-size: var(--font-size-caption)">
+          通过后服务将进入「待响应」并展示在移动端邻里服务；驳回会通知发布人。
+        </p>
+      </template>
+    </template>
+    <template #footer>
+      <button @click="helpReviewOpen = false">取消</button>
+      <button class="primary-button" :disabled="helpReviewSubmitting || helpReviewLoading" @click="submitHelpReview">
+        {{ helpReviewSubmitting ? '提交中…' : '提交审核结论' }}
+      </button>
+    </template>
+  </NiDrawer>
+
+  <NiDrawer
+    :open="helpEditOpen"
+    :title="helpEditTarget ? `编辑互助 · ${helpEditTarget.title}` : '编辑互助'"
+    eyebrow="邻里互助"
+    @close="helpEditOpen = false"
+  >
+    <template v-if="helpEditTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <HandHeart :size="18" style="color: #7955b8" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ helpEditTarget.code }} · {{ helpEditTarget.communityName }} · {{ helpEditTarget.requester }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ helpEditTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="helpEditTarget.status" />
+      </div>
+
+      <div class="form-grid">
+        <label>
+          <span>发布类型 *</span>
+          <select v-model="helpEditForm.kind">
+            <option value="HELP">邻里求助</option>
+            <option value="OFFER">邻里服务</option>
+          </select>
+        </label>
+        <label>
+          <span>互助分类 *</span>
+          <select v-model="helpEditForm.category">
+            <option v-for="category in helpCategoryOptions" :key="category" :value="category">{{ category }}</option>
+          </select>
+        </label>
+        <label class="full">
+          <span>标题 *（2–30 个字）</span>
+          <input v-model="helpEditForm.title" maxlength="30" placeholder="请输入互助标题" />
+        </label>
+        <label>
+          <span>{{ helpEditForm.kind === 'HELP' ? '期望时间' : '可服务时间' }}</span>
+          <input v-model="helpEditForm.expectedTime" maxlength="64" placeholder="例如：周末 14:00–16:00" />
+        </label>
+        <label>
+          <span>地点 / 服务范围</span>
+          <input v-model="helpEditForm.location" maxlength="64" placeholder="例如：8 号楼大堂 / 小区周边 1 公里" />
+        </label>
+        <label>
+          <span>{{ helpEditForm.kind === 'HELP' ? '酬谢方式' : '收费方式' }}</span>
+          <input v-model="helpEditForm.reward" maxlength="32" placeholder="例如：奶茶一杯 / 面议" />
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; padding-top: 20px">
+          <input v-model="helpEditForm.urgent" type="checkbox" style="width: auto" />
+          <span style="margin: 0">标记为紧急</span>
+        </label>
+        <label class="full">
+          <span>详细说明（最多 500 个字）</span>
+          <textarea v-model="helpEditForm.description" maxlength="500" placeholder="请输入详细说明" />
+        </label>
+      </div>
+
+      <h4 class="section-title" style="margin-top: 20px">图片 / 视频</h4>
+      <div class="life-media-grid">
+        <div v-for="(media, index) in helpEditMedia" :key="media.key" class="life-media-item">
+          <video v-if="media.type === 'video'" :src="media.url" controls preload="metadata" />
+          <img v-else :src="media.url" :alt="`媒体 ${index + 1}`" />
+          <button type="button" class="life-media-remove" aria-label="移除媒体" @click="removeHelpMedia(index)">
+            <X :size="13" />
+          </button>
+          <span v-if="helpEditForm.coverKey === media.key" class="life-media-cover">封面</span>
+        </div>
+        <button type="button" class="life-media-add" :disabled="helpMediaUploading" @click="triggerHelpMediaUpload">
+          <Upload :size="18" />
+          <span>{{ helpMediaUploading ? '上传中…' : '添加媒体' }}</span>
+        </button>
+        <input
+          ref="helpFileInput"
+          class="life-media-input"
+          type="file"
+          accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+          @change="onHelpMediaPicked"
+        />
+      </div>
+      <p class="life-media-hint">
+        支持 JPG / PNG / WebP 图片（最多 12 张）或 MP4 / MOV / WebM 短视频（仅 1 个）；可替换或删除已发布媒体，保存后移动端同步更新。
+      </p>
+    </template>
+    <template #footer>
+      <button @click="helpEditOpen = false">取消</button>
+      <button class="primary-button" :disabled="helpEditSubmitting" @click="saveHelpEdit">
+        {{ helpEditSubmitting ? '保存中…' : '保存修改' }}
       </button>
     </template>
   </NiDrawer>

@@ -19,6 +19,14 @@ export interface ServicePost {
   credit?: string
   serviceCount?: number
   rating?: string
+  status?: string
+  kindCode?: 'HELP' | 'OFFER'
+  expectedTime?: string
+  media?: string[]
+  mediaKeys?: string[]
+  mediaType?: 'GALLERY' | 'VIDEO'
+  cover?: string
+  coverKey?: string
 }
 
 export interface ServiceQuery {

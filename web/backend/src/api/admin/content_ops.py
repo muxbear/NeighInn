@@ -198,28 +198,45 @@ async def _help_row(db: DbSession, row: HelpRequest) -> dict:
     responses = int((await db.scalar(
         select(func.count()).select_from(HelpResponse)
         .where(HelpResponse.request_id == row.id))) or 0)
+    media_keys = [str(key) for key in (row.media or []) if key]
+    media = [public_media_url(key) for key in media_keys]
+    cover_key = row.cover_key or (media_keys[0] if media_keys else "")
+    kind_label = "邻里求助" if row.kind == "HELP" else "邻里服务"
+    time_label = row.expected_time or "时间待定"
     return {
-        "id": str(row.id), "title": row.title, "kind": row.kind, "category": row.category,
+        "id": str(row.id), "code": f"HZ-{row.id:05d}", "title": row.title,
+        "kind": row.kind, "kindCode": row.kind, "kindLabel": kind_label,
+        "subtitle": f"{kind_label} · {time_label} · {len(media_keys)} 个媒体",
+        "category": row.category,
         "status": row.status, "urgent": row.urgent, "location": row.location,
         "reward": row.reward, "description": row.description,
+        "expectedTime": row.expected_time,
+        "media": media, "mediaKeys": media_keys, "mediaType": row.media_type,
+        "cover": public_media_url(cover_key), "coverKey": cover_key,
         "requester": requester.nickname if requester else "",
         "matchedHelper": helper.nickname if helper else "",
         "responses": responses, "closedReason": row.closed_reason,
+        "performance": f"{responses} 人响应" if row.kind == "HELP" else "服务信息",
         "communityId": str(row.community_id),
         "communityName": community.name if community else "",
         "createdAt": int(row.created_at.timestamp() * 1000) if row.created_at else 0,
+        "updatedAt": int(row.updated_at.timestamp() * 1000) if row.updated_at else 0,
     }
 
 
 @router.get("/help-requests")
 async def list_help_requests(admin: CurrentAdmin, db: DbSession,
                              communityId: int | None = Query(default=None),
+                             kind: str | None = Query(default=None),
                              status: str | None = Query(default=None),
                              keyword: str | None = Query(default=None),
                              page: int = Query(default=1), pageSize: int = Query(default=20)):
     stmt = select(HelpRequest)
     if communityId:
         stmt = stmt.where(HelpRequest.community_id == communityId)
+    if kind:
+        code = {"求助": "HELP", "提供": "OFFER", "服务": "OFFER"}.get(kind, kind.upper())
+        stmt = stmt.where(HelpRequest.kind == code)
     if status:
         stmt = stmt.where(HelpRequest.status == status)
     if keyword:
@@ -237,6 +254,209 @@ async def help_detail(help_id: int, admin: CurrentAdmin, db: DbSession):
     return ok(await _help_row(db, row))
 
 
+class HelpUpdateIn(BaseModel):
+    """后台编辑互助/服务：仅传需要变更的字段，未传字段保持原值。"""
+
+    kind: str | None = None
+    category: str | None = None
+    title: str | None = None
+    description: str | None = None
+    expectedTime: str | None = None
+    location: str | None = None
+    reward: str | None = None
+    urgent: bool | None = None
+    media: list[str] | None = None
+    mediaType: str | None = None
+    coverKey: str | None = None
+
+
+def _is_video_key(key: str) -> bool:
+    return key.lower().split("?")[0].endswith((".mp4", ".mov", ".webm", ".m4v"))
+
+
+@router.put("/help-requests/{help_id}",
+            dependencies=[Depends(require_permission("community:help:update"))])
+async def update_help(help_id: int, payload: HelpUpdateIn, request: Request,
+                      admin: CurrentAdmin, db: DbSession):
+    """后台编辑互助/服务全字段，媒体以对象键增删替换。"""
+    row = await db.get(HelpRequest, help_id)
+    if not row:
+        raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+
+    kind = payload.kind.upper() if payload.kind is not None else row.kind
+    if kind not in ("HELP", "OFFER"):
+        raise ApiError(ERR_PARAM, "互助类型不合法", 400)
+
+    title = payload.title.strip() if payload.title is not None else row.title
+    if not (2 <= len(title) <= 30):
+        raise ApiError(ERR_PARAM, "标题需 2–30 个字", 400)
+
+    category = payload.category.strip() if payload.category is not None else row.category
+    if not (1 <= len(category) <= 32):
+        raise ApiError(ERR_PARAM, "分类需 1–32 个字", 400)
+
+    description = (payload.description.strip() if payload.description is not None
+                   else row.description)
+    if len(description) > 500:
+        raise ApiError(ERR_PARAM, "详细说明最多 500 个字", 400)
+
+    expected_time = (payload.expectedTime.strip() if payload.expectedTime is not None
+                     else row.expected_time)
+    location = payload.location.strip() if payload.location is not None else row.location
+    reward = payload.reward.strip() if payload.reward is not None else row.reward
+    if len(expected_time) > 64 or len(location) > 64 or len(reward) > 32:
+        raise ApiError(ERR_PARAM, "时间/地点/酬谢说明超出长度限制", 400)
+
+    media_keys = [str(key) for key in (row.media or []) if key]
+    if payload.media is not None:
+        media_keys = []
+        for raw_key in payload.media:
+            key = str(raw_key).strip()
+            if key and key not in media_keys:
+                media_keys.append(key)
+    if len(media_keys) > 12:
+        raise ApiError(ERR_PARAM, "图片/视频最多 12 个", 400)
+
+    media_type = payload.mediaType or row.media_type
+    if payload.media is not None and payload.mediaType is None:
+        media_type = ("VIDEO" if len(media_keys) == 1 and _is_video_key(media_keys[0])
+                      else "GALLERY")
+    if media_type not in ("VIDEO", "GALLERY"):
+        raise ApiError(ERR_PARAM, "媒体类型不合法", 400)
+    has_video = any(_is_video_key(key) for key in media_keys)
+    if media_type == "VIDEO" and (len(media_keys) != 1 or not has_video):
+        raise ApiError(ERR_PARAM, "短视频互助只能包含一个视频", 400)
+    if media_type == "GALLERY" and has_video:
+        raise ApiError(ERR_PARAM, "图片与短视频不能混排", 400)
+
+    cover_key = row.cover_key
+    if payload.coverKey is not None:
+        cover_key = payload.coverKey.strip()
+        if cover_key and cover_key not in media_keys:
+            raise ApiError(ERR_PARAM, "封面必须使用当前互助的媒体文件", 400)
+    if not cover_key or cover_key not in media_keys:
+        cover_key = media_keys[0] if media_keys else ""
+
+    before = {
+        "kind": row.kind, "title": row.title, "category": row.category,
+        "description": row.description, "expectedTime": row.expected_time,
+        "location": row.location, "reward": row.reward, "urgent": row.urgent,
+        "media": list(row.media or []), "coverKey": row.cover_key,
+        "mediaType": row.media_type,
+    }
+    row.kind = kind
+    row.title = title
+    row.category = category
+    row.description = description
+    row.expected_time = expected_time
+    row.location = location
+    row.reward = reward
+    if payload.urgent is not None:
+        row.urgent = payload.urgent
+    row.media = media_keys
+    row.cover_key = cover_key
+    row.media_type = media_type
+    await write_audit(db, request, actor=admin, action="help.update",
+                      resource_type="help_request", resource_id=row.id,
+                      before=before, after={
+                          "kind": kind, "title": title, "category": category,
+                          "expectedTime": expected_time, "location": location,
+                          "reward": reward, "urgent": row.urgent,
+                          "media": media_keys, "coverKey": cover_key,
+                          "mediaType": media_type,
+                      })
+    await db.commit()
+    return ok(await _help_row(db, row), "互助信息已更新")
+
+
+@router.post("/help-requests/{help_id}/review",
+             dependencies=[Depends(require_permission("community:help:review"))])
+async def review_help(help_id: int, payload: ReviewIn, request: Request,
+                      admin: CurrentAdmin, db: DbSession):
+    """审核邻里服务：通过后进入待响应；驳回必须填写原因并通知发布人。"""
+    row = await db.get(HelpRequest, help_id)
+    if not row:
+        raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    if row.kind != "OFFER":
+        raise ApiError(ERR_PARAM, "邻里求助默认直接发布，无需审核", 400)
+    before = {"status": row.status}
+    if payload.decision == "APPROVE":
+        row.status = help_sm.fire(row.status, E.HelpStatus.OPEN)
+        await notify_user(db, row.requester_id, category="COMMUNITY",
+                          title="邻里服务已通过审核",
+                          description=f"「{row.title}」已展示在邻里服务",
+                          icon="hand-heart", tag="审核",
+                          route={"type": "service", "id": str(row.id), "kind": "OFFER"})
+    else:
+        reason = payload.reason.strip()
+        if len(reason) < 5:
+            raise ApiError(ERR_PARAM, "驳回原因必填（不少于 5 个字）", 400)
+        row.status = help_sm.fire(row.status, E.HelpStatus.REJECTED)
+        row.closed_reason = reason
+        await notify_user(db, row.requester_id, category="COMMUNITY",
+                          title="邻里服务未通过审核", description=reason,
+                          icon="alert", tag="审核",
+                          route={"type": "service", "id": str(row.id), "kind": "OFFER"})
+    await write_audit(db, request, actor=admin, action="help.review",
+                      resource_type="help_request", resource_id=row.id,
+                      before=before,
+                      after={"status": row.status, "reason": payload.reason})
+    await db.commit()
+    return ok(await _help_row(db, row), "审核完成")
+
+
+async def _delete_help_row(db: DbSession, request: Request, admin: CurrentAdmin,
+                           row: HelpRequest) -> dict:
+    before = await _help_row(db, row)
+    requester_id, title = row.requester_id, row.title
+    await db.execute(delete(HelpResponse).where(HelpResponse.request_id == row.id))
+    await db.delete(row)
+    await notify_user(db, requester_id, category="COMMUNITY", title="互助信息已删除",
+                      description=f"「{title}」已被平台删除",
+                      icon="alert", tag="审核")
+    await write_audit(db, request, actor=admin, action="help.delete",
+                      resource_type="help_request", resource_id=before["id"],
+                      before=before, after=None)
+    return before
+
+
+@router.delete("/help-requests/{help_id}",
+               dependencies=[Depends(require_permission("community:help:delete"))])
+async def delete_help(help_id: int, request: Request,
+                      admin: CurrentAdmin, db: DbSession):
+    row = await db.get(HelpRequest, help_id)
+    if not row:
+        raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await _delete_help_row(db, request, admin, row)
+    await db.commit()
+    return ok({"id": str(help_id)}, "互助信息已删除")
+
+
+class BatchIdsIn(BaseModel):
+    ids: list[int] = []
+
+
+@router.post("/help-requests/batch-delete",
+             dependencies=[Depends(require_permission("community:help:delete"))])
+async def batch_delete_help(payload: BatchIdsIn, request: Request,
+                            admin: CurrentAdmin, db: DbSession):
+    """批量删除互助/服务：逐条写审计并返回成功/失败明细。"""
+    if not payload.ids:
+        raise ApiError(ERR_PARAM, "请选择要删除的互助信息", 400)
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for help_id in dict.fromkeys(payload.ids):
+        row = await db.get(HelpRequest, help_id)
+        if not row:
+            failed.append({"id": str(help_id), "reason": "互助不存在"})
+            continue
+        await _delete_help_row(db, request, admin, row)
+        deleted.append(str(help_id))
+    await db.commit()
+    return ok({"deleted": deleted, "failed": failed},
+              f"已删除 {len(deleted)} 条互助信息")
+
+
 @router.get("/help-requests/{help_id}/responses")
 async def help_responses(help_id: int, admin: CurrentAdmin, db: DbSession):
     rows = list((await db.execute(
@@ -246,6 +466,7 @@ async def help_responses(help_id: int, admin: CurrentAdmin, db: DbSession):
     for row in rows:
         responder = await db.get(User, row.responder_id)
         result.append({"id": str(row.id), "responder": responder.nickname if responder else "",
+                       "responderId": str(row.responder_id),
                        "message": row.message, "status": row.status,
                        "createdAt": int(row.created_at.timestamp() * 1000) if row.created_at else 0})
     return ok(result)

@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
+from src.core.permissions import require_any_permission
 from src.core.responses import (
     ERR_DEPENDENCY,
     ERR_FILE_TOO_LARGE,
@@ -46,7 +46,8 @@ ADMIN_MEDIA_SCENES: dict[str, set[str]] = {
 
 
 @router.post("/files/upload",
-             dependencies=[Depends(require_permission("community:life:update"))])
+             dependencies=[Depends(require_any_permission(
+                 "community:life:update", "community:help:update"))])
 async def upload_public_media(
     admin: CurrentAdmin,
     db: DbSession,
