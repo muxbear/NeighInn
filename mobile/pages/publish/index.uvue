@@ -559,7 +559,7 @@ const headerTitle = computed(() => {
   if (editingId.value) return '编辑闲置'
   if (mode.value === 'life') return '发布生活'
   if (mode.value === 'service') return '发布互助'
-  return '发布闲置'
+  return '发布物品'
 })
 // 编辑时服务端返回的是可直接展示的签名 URL，提交前需按 URL 还原为对象键，避免把临时 URL 写进媒体表。
 const imageKeyByUrl = ref<Record<string, string>>({})
