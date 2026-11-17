@@ -6,11 +6,9 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
-  FileText,
   Flag,
   MessageCircleMore,
   MoreHorizontal,
-  Plus,
   ShoppingBag,
   TrendingUp,
   Users,
@@ -86,11 +84,6 @@ watch(() => app.currentCommunityId, load)
 </script>
 
 <template>
-  <section class="dashboard-toolbar">
-    <button class="secondary-button" @click="app.showToast('运营简报已生成')"><FileText :size="17" />生成简报</button>
-    <button class="primary-button" @click="router.push('/communication/notices')"><Plus :size="17" />发布公告</button>
-  </section>
-
   <section class="metric-grid">
     <div v-for="metric in metrics" :key="metric.label" class="metric-card">
       <div :class="['metric-icon', metric.tone]"><component :is="metric.icon" :size="20" /></div>

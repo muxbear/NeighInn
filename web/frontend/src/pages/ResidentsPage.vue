@@ -5,6 +5,7 @@ import { certificationsApi, residentApi } from '@/api'
 import { fmtDateTime, mapStatus } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
@@ -12,6 +13,7 @@ import CommunityFilterBar from '@/components/CommunityFilterBar.vue'
 
 const app = useAppStore()
 const auth = useAuthStore()
+const { confirm } = useConfirm()
 const rows = ref<any[]>([])
 const summary = ref<any>({ total: 0, owner: 0, family: 0, pending: 0 })
 const activeTab = ref('全部人员')
@@ -124,7 +126,7 @@ async function save() {
 }
 
 async function remove(row: any) {
-  if (!window.confirm(`确定删除“${row.name}”的社区人员档案吗？`)) return
+  if (!(await confirm({ title: '删除人员档案', message: `确定删除“${row.name}”的社区人员档案吗？`, confirmText: '确认删除', danger: true }))) return
   try {
     await residentApi.remove(row.id)
     app.showToast('人员档案已删除')
@@ -217,7 +219,7 @@ async function onCertMaterialSelected(kind: 'realname' | 'owner', event: Event) 
 
 async function removeCertMaterial(kind: 'realname' | 'owner', objectKey: string) {
   if (!editing.value?.id) return
-  if (!window.confirm('确定删除该认证材料吗？对象文件将保留在私有桶供审计追溯。')) return
+  if (!(await confirm({ title: '删除认证材料', message: '确定删除该认证材料吗？对象文件将保留在私有桶供审计追溯。', confirmText: '确认删除', danger: true }))) return
   try {
     const data = await certificationsApi.removeMaterial(
       editing.value.id, CERT_TYPE_BY_KIND[kind], objectKey)

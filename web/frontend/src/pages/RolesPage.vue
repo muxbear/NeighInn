@@ -8,9 +8,11 @@ import {
 import { rolesApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useConfirm } from '@/composables/useConfirm'
 
 const app = useAppStore()
 const auth = useAuthStore()
+const { confirm } = useConfirm()
 const roles = ref<any[]>([])
 const selectedId = ref('')
 const checked = ref<Set<string>>(new Set())
@@ -148,7 +150,7 @@ async function savePermissions() {
 
 async function deleteRole(role: any, event: Event) {
   event.stopPropagation()
-  if (role.builtin || !window.confirm(`确定删除角色“${role.name}”吗？`)) return
+  if (role.builtin || !(await confirm({ title: '删除角色', message: `确定删除角色“${role.name}”吗？`, confirmText: '确认删除', danger: true }))) return
   try {
     await rolesApi.remove(role.id)
     await loadRoles()

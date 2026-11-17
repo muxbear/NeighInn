@@ -4,12 +4,14 @@ import { Gavel, MoreHorizontal, Search, ShieldAlert } from 'lucide-vue-next'
 import { disputesApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
 
 const app = useAppStore()
 const auth = useAuthStore()
+const { confirm } = useConfirm()
 const rows = ref<any[]>([])
 const query = ref('')
 const selected = ref<any>(null)
@@ -73,7 +75,7 @@ async function resolve() {
     payload.amountCents = cents
   }
   if (['CANCEL_REFUND', 'FORCE_RELEASE', 'PARTIAL_REFUND'].includes(form.conclusionType)
-    && !window.confirm('资金类结论将进入双人复核（由另一位管理员执行），确认提交？')) return
+    && !(await confirm({ title: '提交资金类结论', message: '资金类结论将进入双人复核（由另一位管理员执行），确认提交？', confirmText: '确认提交' }))) return
   try {
     await disputesApi.resolve(selected.value.id, payload)
     app.showToast('处理结论已提交')

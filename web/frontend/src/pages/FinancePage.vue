@@ -4,11 +4,13 @@ import { useRoute } from 'vue-router'
 import { Banknote, ChevronDown, Filter, MoreHorizontal, ReceiptText, Scale, Search, Wallet } from 'lucide-vue-next'
 import { financeApi } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const route = useRoute()
 const app = useAppStore()
+const { confirm } = useConfirm()
 const overview = ref<any>(null)
 const rows = ref<any[]>([])
 const query = ref('')
@@ -50,7 +52,7 @@ async function load() {
 }
 
 async function review(row: any) {
-  if (!window.confirm(`确认审核通过提现单 ${row.withdrawalNo}？`)) return
+  if (!(await confirm({ title: '审核提现单', message: `确认审核通过提现单 ${row.withdrawalNo}？`, confirmText: '审核通过' }))) return
   try {
     await financeApi.reviewWithdrawal(row.id, { decision: 'APPROVE', note: '资料齐全，风控已核' })
     app.showToast('提现审核完成')

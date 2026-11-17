@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Building2, ChevronDown, ChevronRight, Download, Filter, Folder, FolderOpen, Home, Map, MapPin, Plus, Search, Upload } from 'lucide-vue-next'
+import { Building2, ChevronDown, ChevronRight, Download, Filter, Folder, FolderOpen, Home, Map, MapPin, Pencil, Plus, Search, Trash2, Upload } from 'lucide-vue-next'
 import { communityApi } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
@@ -10,6 +11,7 @@ import { formatDateTime } from '@/utils/format'
 import { groupProvinces } from '@/utils/region'
 
 const app = useAppStore()
+const { confirm } = useConfirm()
 const regionRoots = ref<any[]>([])
 const childrenByParent = reactive<Record<string, any[]>>({})
 const cityLoading = reactive<Record<string, boolean>>({})
@@ -376,7 +378,7 @@ async function saveCommunity(): Promise<void> {
 }
 
 async function removeCommunity(row: any): Promise<void> {
-  if (!window.confirm(`确定删除社区“${row.name}”吗？删除后不可恢复。`)) return
+  if (!(await confirm({ title: '删除社区', message: `确定删除社区“${row.name}”吗？删除后不可恢复。`, confirmText: '确认删除', danger: true }))) return
   try {
     await communityApi.remove(row.id)
     app.showToast('社区已删除')
@@ -388,7 +390,7 @@ async function removeCommunity(row: any): Promise<void> {
 
 async function removeFromForm(): Promise<void> {
   if (!editingId.value) return
-  if (!window.confirm('确定删除当前社区吗？删除后不可恢复。')) return
+  if (!(await confirm({ title: '删除社区', message: '确定删除当前社区吗？删除后不可恢复。', confirmText: '确认删除', danger: true }))) return
   try {
     await communityApi.remove(editingId.value)
     app.showToast('社区已删除')
@@ -684,8 +686,10 @@ onMounted(loadRegions)
               <td><strong class="community-number">{{ Number(row.households || 0).toLocaleString() }}</strong> 户 · {{ Number(row.population || 0).toLocaleString() }} 人</td>
               <td>{{ row.managerName }}</td><td><StatusBadge :value="row.status" /></td><td>{{ formatDateTime(row.updatedAt) }}</td>
               <td>
-                <button class="row-action" @click="openEdit(row)">编辑</button>
-                <button class="row-action row-action--danger" @click="removeCommunity(row)">删除</button>
+                <div class="row-actions">
+                  <button class="row-icon-button" aria-label="编辑社区" data-tip="编辑社区" @click="openEdit(row)"><Pencil :size="15" /></button>
+                  <button class="row-icon-button danger" aria-label="删除社区" data-tip="删除社区" @click="removeCommunity(row)"><Trash2 :size="15" /></button>
+                </div>
               </td>
             </tr>
           </tbody>

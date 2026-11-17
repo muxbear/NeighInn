@@ -129,7 +129,6 @@ kbd {
 .content { max-width: 1500px; margin: 0 auto; padding: 29px 30px 42px; }
 
 /* Head + buttons */
-.dashboard-toolbar { margin-bottom: 15px; display: flex; justify-content: flex-end; gap: 9px; }
 .primary-button, .secondary-button {
   height: 38px; padding: 0 15px; display: inline-flex; align-items: center; gap: 7px;
   border-radius: 9px; font-size: var(--font-size-body); font-weight: 600; white-space: nowrap;
@@ -872,6 +871,11 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
 .toast { position: fixed; z-index: 100; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 10px 15px; display: flex; align-items: center; gap: 8px; border-radius: 9px; color: #fff; background: #272337; box-shadow: 0 12px 30px rgba(27,22,46,.24); font-size: var(--font-size-body); }
 .modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(30,26,46,.42); backdrop-filter: blur(3px); }
 .modal-card { width: min(520px, 100%); background: #fff; border-radius: 15px; box-shadow: 0 30px 80px rgba(26,21,49,.28); overflow: hidden; } .modal-card header { padding: 17px 20px; border-bottom: 1px solid $divider; font-size: var(--font-size-title); font-weight: 600; } .modal-card .modal-body { padding: 20px; } .modal-card footer { padding: 14px 20px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid $divider; }
+.ni-confirm-card { width: min(420px, 100%); }
+.ni-confirm-heading { display: flex; align-items: center; gap: 8px; color: #3f3b46; }
+.ni-confirm-heading.danger svg { color: #c9525e; }
+.ni-confirm-message { margin: 0; color: #5f5a68; font-size: var(--font-size-body); line-height: 1.7; }
+.ni-confirm-detail { margin: 8px 0 0; color: #c85660; font-size: var(--font-size-caption); line-height: 1.6; }
 .notification-popover { position: absolute; }
 .tree-empty { padding: 60px 10px; display: grid; justify-items: center; gap: 8px; color: #aaa6b2; font-size: var(--font-size-body); }
 
@@ -896,7 +900,6 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
   .search-trigger { width: 36px; padding: 0; justify-content: center; } .search-trigger span, .search-trigger kbd { display: none; }
   .notification-popover { right: 12px; top: 54px; width: min(360px, calc(100vw - 24px)); }
   .content { padding: 22px 15px 35px; }
-  .dashboard-toolbar button { flex: 1; justify-content: center; }
   .metric-grid { grid-template-columns: 1fr 1fr; gap: 9px; } .metric-card { padding: 14px; } .metric-card > strong { font-size: var(--font-size-heading); } .metric-bottom span { display: none; }
   .chart-area { height: 190px; padding-left: 10px; padding-right: 10px; gap: 5px; } .chart-column > span { font-size: var(--font-size-caption); transform: rotate(-28deg); margin-top: 12px; }
   .community-content { flex-direction: column; } .donut-legend { width: 100%; }

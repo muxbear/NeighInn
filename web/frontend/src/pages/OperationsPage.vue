@@ -7,6 +7,7 @@ import { mapTradeType } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useNavBadgeStore } from '@/stores/navBadges'
+import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
@@ -16,6 +17,7 @@ const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
 const navBadges = useNavBadgeStore()
+const { confirm } = useConfirm()
 const rows = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -737,35 +739,31 @@ async function saveLifeEdit() {
   }
 }
 
-const deleteOpen = ref(false)
-const deleteTarget = ref<any>(null)
-const deleteModule = ref('items')
-const deleteSubmitting = ref(false)
-
-function confirmDelete(row: any) {
-  deleteTarget.value = row
-  deleteModule.value = module.value
-  deleteOpen.value = true
-}
-
-async function submitDelete() {
-  const target = deleteTarget.value
-  if (!target || deleteSubmitting.value) return
-  deleteSubmitting.value = true
+async function confirmDelete(row: any): Promise<void> {
+  const isLife = module.value === 'life'
+  const confirmed = await confirm({
+    title: isLife ? '删除内容' : '删除物品',
+    message: isLife
+      ? `确定删除“${row.title}”吗？删除后不可恢复，内容评论与收藏记录将一并清理。`
+      : `确定删除“${row.title}”吗？删除后不可恢复，物品照片、质检记录与留言将一并清理。`,
+    details: [isLife
+      ? '若仅需停止展示，请改用「下架内容」保留运营数据；删除记录仍会写入审计日志。'
+      : '若物品已有订单记录，系统会拒绝删除，请改用「下架物品」保留交易凭证。'],
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!confirmed) return
   try {
-    if (deleteModule.value === 'life') {
-      await operationsApi.deleteLife(target.id)
+    if (isLife) {
+      await operationsApi.deleteLife(row.id)
       app.showToast('内容已删除')
     } else {
-      await operationsApi.deleteItem(target.id)
+      await operationsApi.deleteItem(row.id)
       app.showToast('物品已删除')
     }
-    deleteOpen.value = false
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '删除失败')
-  } finally {
-    deleteSubmitting.value = false
   }
 }
 
@@ -1303,45 +1301,4 @@ watch(() => app.currentCommunityId, () => {
     </template>
   </NiDrawer>
 
-  <NiDrawer
-    :open="deleteOpen"
-    :title="deleteModule === 'life' ? '删除内容' : '删除物品'"
-    :eyebrow="deleteModule === 'life' ? '社区生活' : '社区物品'"
-    @close="deleteOpen = false"
-  >
-    <template v-if="deleteTarget">
-      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
-        <Trash2 :size="18" style="color: #c9525e" />
-        <div style="flex: 1">
-          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
-            {{ deleteTarget.code }} · {{ deleteTarget.owner }}
-          </span>
-          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ deleteTarget.title }}</strong>
-        </div>
-        <StatusBadge :value="deleteTarget.status" />
-      </div>
-      <template v-if="deleteModule === 'life'">
-        <p style="color: #554761; font-size: var(--font-size-body); line-height: 1.7">
-          删除后不可恢复，内容评论与收藏记录将一并清理。
-        </p>
-        <p style="margin-top: 8px; color: #c85660; font-size: var(--font-size-caption)">
-          若仅需停止展示，请改用「下架内容」保留运营数据；删除记录仍会写入审计日志。
-        </p>
-      </template>
-      <template v-else>
-        <p style="color: #554761; font-size: var(--font-size-body); line-height: 1.7">
-          删除后不可恢复，物品照片、质检记录与留言将一并清理。
-        </p>
-        <p style="margin-top: 8px; color: #c85660; font-size: var(--font-size-caption)">
-          若物品已有订单记录，系统会拒绝删除，请改用「下架物品」保留交易凭证。
-        </p>
-      </template>
-    </template>
-    <template #footer>
-      <button @click="deleteOpen = false">取消</button>
-      <button class="danger-button" :disabled="deleteSubmitting" @click="submitDelete">
-        {{ deleteSubmitting ? '删除中…' : '确认删除' }}
-      </button>
-    </template>
-  </NiDrawer>
 </template>

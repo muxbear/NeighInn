@@ -6,6 +6,7 @@ import { certificationsApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useTodoStore } from '@/stores/todos'
+import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
@@ -14,6 +15,7 @@ const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
 const todos = useTodoStore()
+const { confirm } = useConfirm()
 const rows = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -112,7 +114,7 @@ async function refreshAfterAction() {
 }
 
 async function approve() {
-  if (!window.confirm('确认通过该认证申请？通过后账号将与小区强绑定。')) return
+  if (!(await confirm({ title: '通过认证申请', message: '确认通过该认证申请？通过后账号将与小区强绑定。', confirmText: '确认通过' }))) return
   try {
     await certificationsApi.approve(selected.value.id)
     app.showToast('已通过并通知申请人')
