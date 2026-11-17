@@ -107,6 +107,7 @@
         </view>
 
         <swiper
+          :vertical="true"
           class="home__swiper"
           :circular="true"
           :autoplay="true"
