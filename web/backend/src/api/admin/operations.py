@@ -25,6 +25,7 @@ from src.db.models import (
     Community,
     Conversation,
     Favorite,
+    HelpRequest,
     Item,
     ItemAudit,
     ItemCategory,
@@ -32,6 +33,7 @@ from src.db.models import (
     ItemMedia,
     LifePost,
     Order,
+    Resident,
     User,
     ViewHistory,
 )
@@ -147,6 +149,8 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
                               module: str = Query(default="items"),
                               communityId: int | None = Query(default=None)):
     """运营页指标卡与 Tab 计数：全部来自实时聚合，禁止前端硬编码。"""
+    if module == "help":
+        return await _help_overview(db, communityId)
     if module == "life":
         return await _life_overview(db, communityId)
     if module != "items":
@@ -208,6 +212,85 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
             "weekGmvCents": week_gmv_cents,
             "recommended": recommended,
             "recommendSlots": settings.item_recommend_slots,
+        },
+    })
+
+
+async def _help_overview(db: DbSession, community_id: int | None) -> dict:
+    """邻里互助指标：今日求助、待响应、本周完成与社区信用分实时聚合。
+
+    自然日/自然周按中国标准时间（UTC+8）划分；待响应平均等待时长按当前
+    仍未响应的请求创建时间计算；本周完成率 = 本周完成 /（本周完成 + 本周关闭）。
+    """
+    scope = [HelpRequest.community_id == community_id] if community_id else []
+    status_rows = (await db.execute(
+        select(HelpRequest.status, func.count()).where(*scope).group_by(HelpRequest.status))).all()
+    status_counts = {str(status): int(count) for status, count in status_rows}
+    total = sum(status_counts.values())
+
+    now = utcnow()
+    local_now = now + timedelta(hours=8)
+    today_start = local_now.replace(
+        hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=8)
+    week_start = (local_now - timedelta(days=local_now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=8)
+
+    today_help = int((await db.scalar(
+        select(func.count()).select_from(HelpRequest).where(
+            *scope, HelpRequest.kind == "HELP",
+            HelpRequest.created_at >= today_start))) or 0)
+    urgent_help = int((await db.scalar(
+        select(func.count()).select_from(HelpRequest).where(
+            *scope, HelpRequest.kind == "HELP", HelpRequest.urgent.is_(True),
+            HelpRequest.created_at >= today_start))) or 0)
+
+    pending_times = list((await db.execute(
+        select(HelpRequest.created_at).where(
+            *scope, HelpRequest.status == E.HelpStatus.OPEN))).scalars().all())
+    pending_waits = [
+        max(0, int((now - ensure_utc(created_at)).total_seconds() // 60))
+        for created_at in pending_times if created_at
+    ]
+    pending_avg_minutes = (
+        round(sum(pending_waits) / len(pending_waits)) if pending_waits else 0)
+
+    week_completed = int((await db.scalar(
+        select(func.count()).select_from(HelpRequest).where(
+            *scope, HelpRequest.status == E.HelpStatus.COMPLETED,
+            HelpRequest.closed_at >= week_start))) or 0)
+    week_closed = int((await db.scalar(
+        select(func.count()).select_from(HelpRequest).where(
+            *scope, HelpRequest.status == E.HelpStatus.CLOSED,
+            HelpRequest.closed_at >= week_start))) or 0)
+    completed_denominator = week_completed + week_closed
+    completion_rate = (
+        round(week_completed / completed_denominator * 100, 1)
+        if completed_denominator else 0.0
+    )
+
+    if community_id:
+        credit_stmt = (
+            select(func.avg(User.credit_score))
+            .join(Resident, Resident.user_id == User.id)
+            .where(Resident.community_id == community_id, Resident.status == "ACTIVE")
+        )
+    else:
+        credit_stmt = select(func.avg(User.credit_score))
+    credit_avg = float((await db.scalar(credit_stmt)) or 0)
+
+    return ok({
+        "module": "help",
+        "total": total,
+        "statusCounts": status_counts,
+        "metrics": {
+            "todayHelp": today_help,
+            "urgentHelp": urgent_help,
+            "pendingResponse": status_counts.get(E.HelpStatus.OPEN, 0),
+            "pendingAvgMinutes": pending_avg_minutes,
+            "weekCompleted": week_completed,
+            "weekClosed": week_closed,
+            "completionRate": completion_rate,
+            "creditScore": round(credit_avg, 1),
         },
     })
 

@@ -408,6 +408,33 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
 .life-media-add:disabled { cursor: wait; opacity: .65; }
 .life-media-input { display: none; }
 .life-media-hint { margin-top: 8px; color: #958b9f; font-size: var(--font-size-caption); }
+/* 邻里互助编辑：与移动端发布页一致的分段、标签与时间选择交互 */
+.help-edit-section { margin-bottom: 14px; }
+.help-field { min-width: 0; }
+.help-field-label { display: block; margin-bottom: 6px; color: #65616d; font-size: var(--font-size-body); font-weight: 500; }
+.help-segment { display: flex; flex-wrap: wrap; gap: 8px; }
+.help-segment-button { min-width: 108px; height: 34px; padding: 0 14px; border: 1px solid #e1dee5; border-radius: 9px; color: #6f6975; background: #fff; font-size: var(--font-size-body); font-weight: 500; cursor: pointer; }
+.help-segment-button:hover { border-color: #c5b8ea; color: #6650c2; }
+.help-segment-button.active { border-color: #7059d2; color: #fff; background: #7059d2; }
+.help-choice-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.help-choice { min-height: 32px; padding: 0 12px; border: 1px solid #e1dee5; border-radius: 9px; color: #6f6975; background: #fff; font-size: var(--font-size-caption); cursor: pointer; }
+.help-choice:hover { border-color: #c5b8ea; color: #6650c2; }
+.help-choice.active { border-color: #7059d2; color: #6650c2; background: #f4f0fe; font-weight: 600; }
+.help-edit-hint { margin: 6px 0 0; color: #958b9f; font-size: var(--font-size-caption); }
+.help-time-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.help-time-button { height: 34px; padding: 0 12px; border: 1px solid #e1dee5; border-radius: 9px; color: #6650c2; background: #f8f5fe; font-size: var(--font-size-body); cursor: pointer; }
+.help-time-button:hover { border-color: #c5b8ea; background: #f1ecfd; }
+.help-selected-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f8f5fe; color: #6f6975; font-size: var(--font-size-body); }
+.help-selected-row strong { flex: 1; color: #514d58; font-weight: 600; }
+.help-selected-row button, .help-time-footer button { border: 0; color: #6650c2; background: transparent; font-size: var(--font-size-caption); cursor: pointer; }
+.help-time-panel { margin-top: 10px; padding: 12px; border: 1px solid #e6e1ef; border-radius: 10px; background: #fbfaff; }
+.help-picker-label { display: block; margin: 10px 0 6px; color: #65616d; font-size: var(--font-size-caption); font-weight: 600; }
+.help-picker-label:first-child { margin-top: 0; }
+.help-date-grid, .help-time-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.help-date-button { width: calc(33.333% - 4px); min-height: 34px; padding: 4px 6px; border: 1px solid #e5e1ea; border-radius: 8px; color: #6f6975; background: #fff; font-size: var(--font-size-caption); cursor: pointer; }
+.help-date-button.active, .help-time-chip.active { border-color: #7059d2; color: #6650c2; background: #f4f0fe; font-weight: 600; }
+.help-time-chip { min-width: 52px; height: 30px; padding: 0 8px; border: 1px solid #e5e1ea; border-radius: 8px; color: #6f6975; background: #fff; font-size: var(--font-size-caption); cursor: pointer; }
+.help-time-footer { display: flex; justify-content: space-between; margin-top: 10px; }
 .resident-table-footer { min-height: 53px; padding: 9px 15px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #ece9f0; color: #96929e; font-size: var(--font-size-caption); }
 .resident-table-footer > div { display: flex; gap: 4px; } .resident-table-footer button { height: 28px; min-width: 28px; padding: 0 8px; border: 1px solid #e3e0e7; border-radius: 7px; color: #706b77; background: #fff; }
 .resident-table-footer button.current { color: #fff; border-color: #7059d2; background: #7059d2; } .resident-table-footer button:disabled { opacity: .42; }

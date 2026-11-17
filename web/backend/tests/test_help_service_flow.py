@@ -160,3 +160,59 @@ async def test_help_service_review_and_management_flow(client, db_session):
                                   params={"kind": "HELP"})).json()["data"]["items"]
     remaining_ids = {int(row["id"]) for row in remaining}
     assert not remaining_ids.intersection(batch_ids)
+
+
+@pytest.mark.asyncio
+async def test_help_overview_uses_real_metrics(client):
+    """互助概览按真实数据聚合：今日求助、待响应、本周完成与社区信用分。"""
+    requester = await verified_user(client, "13900003333")
+    helper = await verified_user(client, "13900004444")
+    csrf = admin_headers(client)
+
+    completed = await client.post(
+        f"{C_BASE}/services",
+        json=_service_payload("HELP", "帮忙接送孩子", category="接送照看"),
+        headers=bearer(requester["token"]))
+    assert completed.status_code == 200, completed.text
+    completed_id = completed.json()["data"]["id"]
+
+    pending = await client.post(
+        f"{C_BASE}/services",
+        json=_service_payload("HELP", "借用家用梯子", category="物品借用"),
+        headers=bearer(requester["token"]))
+    assert pending.status_code == 200, pending.text
+
+    offer = await client.post(
+        f"{C_BASE}/services",
+        json=_service_payload("OFFER", "可提供小学语文辅导", category="学习陪伴"),
+        headers=bearer(requester["token"]))
+    assert offer.status_code == 200, offer.text
+
+    responded = await client.post(
+        f"{C_BASE}/services/{completed_id}/respond", headers=bearer(helper["token"]))
+    assert responded.status_code == 200, responded.text
+    matched = await client.post(
+        f"{ADMIN_BASE}/help-requests/{completed_id}/match",
+        json={"responderId": int(helper["profile"]["id"])}, headers=csrf)
+    assert matched.status_code == 200, matched.text
+    closed = await client.post(
+        f"{ADMIN_BASE}/help-requests/{completed_id}/close",
+        json={"completed": True, "reason": "已完成"}, headers=csrf)
+    assert closed.status_code == 200, closed.text
+
+    overview = (await client.get(
+        f"{ADMIN_BASE}/operations/overview",
+        params={"module": "help", "communityId": 1},
+        headers=csrf,
+    )).json()["data"]
+    metrics = overview["metrics"]
+    assert overview["total"] == 3
+    assert overview["statusCounts"] == {"OPEN": 1, "PENDING_REVIEW": 1, "COMPLETED": 1}
+    assert metrics["todayHelp"] == 2
+    assert metrics["urgentHelp"] == 0
+    assert metrics["pendingResponse"] == 1
+    assert metrics["pendingAvgMinutes"] >= 0
+    assert metrics["weekCompleted"] == 1
+    assert metrics["weekClosed"] == 0
+    assert metrics["completionRate"] == 100.0
+    assert metrics["creditScore"] == 100.0

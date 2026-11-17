@@ -70,12 +70,6 @@ const configs: Record<string, any> = {
     ownerLabel: '互助归属小区', scopeNote: '互助列表仅展示所选小区',
     description: '管理居民求助、邻里响应、撮合履约及互助信用评价', create: '代发互助',
     tabs: ['全部', '待审核', '待响应', '匹配中', '进行中', '已完成', '已关闭', '已驳回'],
-    metrics: [
-      { label: '今日求助', value: '18', note: '紧急求助 2 条' },
-      { label: '待响应', value: '8', note: '平均等待 12 分钟', attention: true },
-      { label: '本周完成', value: '126', note: '完成率 94.6%' },
-      { label: '互助信用分', value: '96.2', note: '社区平均分' },
-    ],
   },
   life: {
     api: 'life-posts', title: '社区生活', tone: 'life', icon: Coffee,
@@ -157,6 +151,36 @@ const metrics = computed(() => {
       },
     ]
   }
+  if (module.value === 'help') {
+    const data = overview.value?.metrics || {}
+    const pending = Number(data.pendingResponse || 0)
+    const credit = Number(data.creditScore || 0)
+    return [
+      {
+        label: '今日求助',
+        value: String(Number(data.todayHelp || 0)),
+        note: Number(data.urgentHelp || 0) > 0
+          ? `紧急求助 ${Number(data.urgentHelp || 0)} 条`
+          : '暂无紧急求助',
+      },
+      {
+        label: '待响应',
+        value: String(pending),
+        note: pending ? `平均等待 ${Number(data.pendingAvgMinutes || 0)} 分钟` : '暂无待响应',
+        attention: true,
+      },
+      {
+        label: '本周完成',
+        value: String(Number(data.weekCompleted || 0)),
+        note: `完成率 ${Number(data.completionRate || 0).toFixed(1)}%`,
+      },
+      {
+        label: '互助信用分',
+        value: credit.toFixed(1),
+        note: credit ? '社区平均分' : '暂无社区评分',
+      },
+    ]
+  }
   if (module.value !== 'items') return config.value.metrics
   const data = overview.value?.metrics || {}
   const recommended = Number(data.recommended || 0)
@@ -202,7 +226,7 @@ function tabStatusCode(tab: string): string {
 }
 
 function statusCount(tab: string): number | string {
-  if ((module.value === 'items' || module.value === 'life') && overview.value) {
+  if ((module.value === 'items' || module.value === 'life' || module.value === 'help') && overview.value) {
     if (tab === '全部') return overview.value.total ?? 0
     const code = tabStatusCode(tab)
     return overview.value.statusCounts?.[code] ?? 0
@@ -227,7 +251,7 @@ async function load() {
       if (kindCode) params.kind = kindCode
     }
     if (query.value) params.keyword = query.value
-    const overviewModule = ['items', 'life'].includes(module.value) ? module.value : ''
+    const overviewModule = ['items', 'life', 'help'].includes(module.value) ? module.value : ''
     const [data, summary] = await Promise.all([
       operationsApi.list(config.value.api, params),
       overviewModule
@@ -850,20 +874,69 @@ const helpEditForm = ref({
   expectedTime: '',
   location: '',
   reward: '',
-  urgent: false,
   coverKey: '',
 })
 const helpEditMedia = ref<LifeMediaItem[]>([])
 const helpMediaUploading = ref(false)
 const helpFileInput = ref<HTMLInputElement | null>(null)
+const helpMediaType = ref<'gallery' | 'video'>('gallery')
+const helpCategoryCustomMode = ref(false)
+const helpTimePickerOpen = ref(false)
+const helpTimePickerMode = ref<'specific' | 'range'>('specific')
+const helpTimePickerDate = ref('')
+const helpTimePickerStart = ref('')
+const helpTimePickerEnd = ref('')
 
-const HELP_CATEGORIES = ['邻里帮忙', '物品借用', '临时照看', '维修安装', '接送照看', '宠物照看', '学习陪伴', '邻里活动', '信息咨询', '其他']
+const HELP_KIND_OPTIONS = [
+  { value: 'HELP', label: '邻里求助' },
+  { value: 'OFFER', label: '邻里服务' },
+]
+const HELP_CATEGORIES = ['接送照看', '宠物照看', '学习陪伴', '邻里活动', '维修安装', '其他']
+const HELP_REWARD_OPTIONS: Record<string, string[]> = {
+  HELP: ['邻里互助', '红包答谢', '酬谢可议'],
+  OFFER: ['免费帮忙', '邻里价', '按次收费', '面议'],
+}
+const HELP_TIME_SLOTS = Array.from(
+  { length: 16 },
+  (_, index) => `${String(index + 7).padStart(2, '0')}:00`,
+)
 const helpCategoryOptions = computed(() => {
-  const current = helpEditForm.value.category
-  return current && !HELP_CATEGORIES.includes(current)
+  const current = helpEditForm.value.category.trim()
+  return current && !helpCategoryCustomMode.value && !HELP_CATEGORIES.includes(current)
     ? [current, ...HELP_CATEGORIES]
     : HELP_CATEGORIES
 })
+const helpRewardOptions = computed(
+  () => HELP_REWARD_OPTIONS[helpEditForm.value.kind] || HELP_REWARD_OPTIONS.HELP,
+)
+const helpVisibleMedia = computed(() => helpEditMedia.value.filter(
+  (media) => media.type === (helpMediaType.value === 'video' ? 'video' : 'image'),
+))
+const helpDateChoices = computed(() => buildHelpDateOptions())
+const helpEndTimeChoices = computed(() => {
+  const startIndex = HELP_TIME_SLOTS.indexOf(helpTimePickerStart.value)
+  return startIndex >= 0 ? HELP_TIME_SLOTS.slice(startIndex + 1) : []
+})
+const helpTitlePlaceholder = computed(() => (
+  helpEditForm.value.kind === 'HELP'
+    ? '例如：今天临时加班，求帮忙接孩子'
+    : '例如：退休教师，可辅导小学语文'
+))
+const helpDescriptionPlaceholder = computed(() => (
+  helpEditForm.value.kind === 'HELP'
+    ? '说明具体情况、时间、注意事项，方便邻居判断能否帮忙'
+    : '介绍你的经验、可提供的服务和注意事项'
+))
+const helpLocationPlaceholder = computed(() => (
+  helpEditForm.value.kind === 'HELP'
+    ? '例如：实验小学北门 / 8号楼大堂'
+    : '例如：阳光花园及周边 1 公里'
+))
+const helpRewardPlaceholder = computed(() => (
+  helpEditForm.value.kind === 'HELP'
+    ? '也可补充具体金额或酬谢说明'
+    : '也可补充具体报价或计费方式'
+))
 
 function isVideoMediaKey(key: string): boolean {
   return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(key)
@@ -882,34 +955,45 @@ function buildHelpMedia(row: any): LifeMediaItem[] {
 async function openHelpEdit(row: any) {
   if (!canEditHelp.value) return
   helpEditTarget.value = row
+  const kind = row.kindCode === 'OFFER' ? 'OFFER' : 'HELP'
   helpEditForm.value = {
-    kind: row.kindCode || 'HELP',
+    kind,
     category: row.category || '',
     title: row.title || '',
     description: row.description || '',
     expectedTime: row.expectedTime || '',
     location: row.location || '',
     reward: row.reward || '',
-    urgent: Boolean(row.urgent),
     coverKey: row.coverKey || '',
   }
   helpEditMedia.value = buildHelpMedia(row)
+  helpMediaType.value = row.mediaType === 'VIDEO'
+    || helpEditMedia.value.some((media) => media.type === 'video') ? 'video' : 'gallery'
+  helpCategoryCustomMode.value = Boolean(
+    helpEditForm.value.category && !HELP_CATEGORIES.includes(helpEditForm.value.category),
+  )
+  helpTimePickerOpen.value = false
   helpEditOpen.value = true
   try {
     const detail = await operationsApi.helpDetail(row.id)
     if (!detail || helpEditTarget.value?.id !== row.id) return
+    const detailKind = detail.kindCode || detail.kind
     helpEditForm.value = {
-      kind: detail.kindCode || detail.kind || helpEditForm.value.kind,
+      kind: detailKind === 'OFFER' ? 'OFFER' : helpEditForm.value.kind,
       category: detail.category || helpEditForm.value.category,
       title: detail.title || helpEditForm.value.title,
       description: detail.description || helpEditForm.value.description,
       expectedTime: detail.expectedTime || helpEditForm.value.expectedTime,
       location: detail.location || helpEditForm.value.location,
       reward: detail.reward || helpEditForm.value.reward,
-      urgent: Boolean(detail.urgent),
       coverKey: detail.coverKey || helpEditForm.value.coverKey,
     }
     helpEditMedia.value = buildHelpMedia(detail)
+    helpMediaType.value = detail.mediaType === 'VIDEO'
+      || helpEditMedia.value.some((media) => media.type === 'video') ? 'video' : 'gallery'
+    helpCategoryCustomMode.value = Boolean(
+      helpEditForm.value.category && !HELP_CATEGORIES.includes(helpEditForm.value.category),
+    )
     if (!helpEditMedia.value.some((media) => media.key === helpEditForm.value.coverKey)) {
       helpEditForm.value.coverKey = helpEditMedia.value[0]?.key || ''
     }
@@ -918,10 +1002,86 @@ async function openHelpEdit(row: any) {
   }
 }
 
-function removeHelpMedia(index: number): void {
+function buildHelpDateOptions(): Array<{ label: string; value: string }> {
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  const now = new Date()
+  const options: Array<{ label: string; value: string }> = []
+  for (let offset = 0; offset < 14; offset += 1) {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset)
+    const value = `${date.getMonth() + 1}月${date.getDate()}日`
+    const relative = offset === 0 ? '（今天）' : offset === 1 ? '（明天）' : ''
+    options.push({ label: `${value} 周${weekdays[date.getDay()]}${relative}`, value })
+  }
+  return options
+}
+
+function selectHelpEditKind(kind: string): void {
+  if (helpEditForm.value.kind === kind) return
+  helpEditForm.value.kind = kind
+  helpEditForm.value.expectedTime = ''
+  helpEditForm.value.reward = ''
+  helpTimePickerOpen.value = false
+}
+
+function selectHelpCategory(category: string): void {
+  if (!category) {
+    helpEditForm.value.category = ''
+    helpCategoryCustomMode.value = false
+    return
+  }
+  helpCategoryCustomMode.value = category === '其他'
+  helpEditForm.value.category = category === '其他' ? '' : category
+}
+
+function selectHelpMediaType(type: 'gallery' | 'video'): void {
+  helpMediaType.value = type
+}
+
+function openHelpTimePicker(mode: 'specific' | 'range'): void {
+  helpTimePickerMode.value = mode
+  helpTimePickerDate.value = helpDateChoices.value[0]?.value ?? ''
+  helpTimePickerStart.value = ''
+  helpTimePickerEnd.value = ''
+  helpTimePickerOpen.value = true
+}
+
+function selectHelpTimeDate(date: string): void {
+  if (helpTimePickerDate.value === date) return
+  helpTimePickerDate.value = date
+  helpTimePickerStart.value = ''
+  helpTimePickerEnd.value = ''
+}
+
+function selectHelpTimeStart(time: string): void {
+  helpTimePickerStart.value = time
+  helpTimePickerEnd.value = ''
+  if (helpTimePickerMode.value === 'specific') {
+    helpEditForm.value.expectedTime = `${helpTimePickerDate.value} ${time}`
+    helpTimePickerOpen.value = false
+  }
+}
+
+function selectHelpTimeEnd(time: string): void {
+  if (!helpTimePickerStart.value || time <= helpTimePickerStart.value) return
+  helpTimePickerEnd.value = time
+  helpEditForm.value.expectedTime =
+    `${helpTimePickerDate.value} ${helpTimePickerStart.value}–${time}`
+  helpTimePickerOpen.value = false
+}
+
+function clearHelpTime(closePicker = false): void {
+  helpEditForm.value.expectedTime = ''
+  helpTimePickerStart.value = ''
+  helpTimePickerEnd.value = ''
+  if (closePicker) helpTimePickerOpen.value = false
+}
+
+function removeHelpMedia(key: string): void {
+  const index = helpEditMedia.value.findIndex((media) => media.key === key)
+  if (index < 0) return
   const [removed] = helpEditMedia.value.splice(index, 1)
   if (removed && helpEditForm.value.coverKey === removed.key) {
-    helpEditForm.value.coverKey = helpEditMedia.value[0]?.key || ''
+    helpEditForm.value.coverKey = helpVisibleMedia.value[0]?.key || helpEditMedia.value[0]?.key || ''
   }
 }
 
@@ -942,20 +1102,21 @@ async function onHelpMediaPicked(event: Event): Promise<void> {
       app.showToast(`「${file.name}」仅支持 JPG / PNG / WebP 图片或 MP4 / MOV / WebM 短视频`)
       continue
     }
-    if (isVideo) {
-      if (helpEditMedia.value.length > 0) {
-        app.showToast('短视频互助只能包含一个视频，请先移除其他媒体')
-        continue
-      }
-    } else {
-      if (helpEditMedia.value.some((media) => media.type === 'video')) {
-        app.showToast('图片与短视频不能混排，请先移除视频')
-        continue
-      }
-      if (helpEditMedia.value.length >= 12) {
-        app.showToast('图片最多上传 12 张')
-        break
-      }
+    if (helpMediaType.value === 'video' && !isVideo) {
+      app.showToast('当前为短视频模式，请切换为照片集后上传图片')
+      continue
+    }
+    if (helpMediaType.value === 'gallery' && !isImage) {
+      app.showToast('当前为照片集模式，请切换为短视频后上传视频')
+      continue
+    }
+    if (isVideo && helpEditMedia.value.some((media) => media.type === 'video')) {
+      app.showToast('短视频互助只能包含一个视频，请先移除已有视频')
+      continue
+    }
+    if (isImage && helpEditMedia.value.filter((media) => media.type === 'image').length >= 9) {
+      app.showToast('图片最多上传 9 张')
+      break
     }
     helpMediaUploading.value = true
     try {
@@ -990,6 +1151,10 @@ async function saveHelpEdit() {
     app.showToast('标题需 2–30 个字')
     return
   }
+  if (description.length < 5) {
+    app.showToast('请补充至少 5 个字的详细说明')
+    return
+  }
   if (description.length > 500) {
     app.showToast('详细说明最多 500 个字')
     return
@@ -998,12 +1163,17 @@ async function saveHelpEdit() {
     app.showToast('时间与地点最多 64 个字')
     return
   }
-  const hasVideo = helpEditMedia.value.some((media) => media.type === 'video')
-  if (hasVideo && helpEditMedia.value.length > 1) {
+  const mediaType = helpMediaType.value === 'video' ? 'VIDEO' : 'GALLERY'
+  const mediaList = helpVisibleMedia.value
+  if (mediaType === 'VIDEO' && mediaList.length > 1) {
     app.showToast('短视频互助只能包含一个视频')
     return
   }
-  const mediaKeys = helpEditMedia.value.map((media) => media.key)
+  if (mediaType === 'GALLERY' && mediaList.length > 9) {
+    app.showToast('图片最多上传 9 张')
+    return
+  }
+  const mediaKeys = mediaList.map((media) => media.key)
   const coverKey = mediaKeys.includes(form.coverKey) ? form.coverKey : (mediaKeys[0] || '')
   helpEditSubmitting.value = true
   try {
@@ -1015,9 +1185,8 @@ async function saveHelpEdit() {
       expectedTime: form.expectedTime.trim(),
       location: form.location.trim(),
       reward: form.reward.trim(),
-      urgent: form.urgent,
       media: mediaKeys,
-      mediaType: hasVideo ? 'VIDEO' : 'GALLERY',
+      mediaType,
       coverKey,
     })
     helpEditOpen.value = false
@@ -1493,71 +1662,208 @@ watch(() => app.currentCommunityId, () => {
         <StatusBadge :value="helpEditTarget.status" />
       </div>
 
+      <div class="help-edit-section">
+        <span class="help-field-label">发布类型 *</span>
+        <div class="help-segment">
+          <button
+            v-for="option in HELP_KIND_OPTIONS"
+            :key="option.value"
+            type="button"
+            class="help-segment-button"
+            :class="{ active: helpEditForm.kind === option.value }"
+            @click="selectHelpEditKind(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <p class="help-edit-hint">
+          {{ helpEditForm.kind === 'HELP' ? '求助发布后立即展示，并通过内容安全审核兜底。' : '邻里服务需平台审核，审核通过后展示。' }}
+        </p>
+      </div>
+
       <div class="form-grid">
-        <label>
-          <span>发布类型 *</span>
-          <select v-model="helpEditForm.kind">
-            <option value="HELP">邻里求助</option>
-            <option value="OFFER">邻里服务</option>
-          </select>
-        </label>
-        <label>
-          <span>互助分类</span>
-          <select v-model="helpEditForm.category">
-            <option value="">暂不选择</option>
-            <option v-for="category in helpCategoryOptions" :key="category" :value="category">{{ category }}</option>
-          </select>
-        </label>
         <label class="full">
           <span>标题 *（2–30 个字）</span>
-          <input v-model="helpEditForm.title" maxlength="30" placeholder="请输入互助标题" />
+          <input v-model="helpEditForm.title" maxlength="30" :placeholder="helpTitlePlaceholder" />
         </label>
-        <label>
-          <span>{{ helpEditForm.kind === 'HELP' ? '期望时间' : '可服务时间' }}</span>
-          <input v-model="helpEditForm.expectedTime" maxlength="64" placeholder="例如：周末 14:00–16:00" />
-        </label>
-        <label>
-          <span>地点 / 服务范围</span>
-          <input v-model="helpEditForm.location" maxlength="64" placeholder="例如：8 号楼大堂 / 小区周边 1 公里" />
-        </label>
-        <label>
-          <span>{{ helpEditForm.kind === 'HELP' ? '酬谢方式' : '收费方式' }}</span>
-          <input v-model="helpEditForm.reward" maxlength="32" placeholder="例如：奶茶一杯 / 面议" />
-        </label>
-        <label style="display: flex; align-items: center; gap: 8px; padding-top: 20px">
-          <input v-model="helpEditForm.urgent" type="checkbox" style="width: auto" />
-          <span style="margin: 0">标记为紧急</span>
-        </label>
+
+        <div class="full help-field">
+          <span class="help-field-label">互助分类</span>
+          <div class="help-choice-list">
+            <button
+              type="button"
+              class="help-choice"
+              :class="{ active: !helpEditForm.category && !helpCategoryCustomMode }"
+              @click="selectHelpCategory('')"
+            >
+              暂不选择
+            </button>
+            <button
+              v-for="category in helpCategoryOptions"
+              :key="category"
+              type="button"
+              class="help-choice"
+              :class="{ active: helpEditForm.category === category || (category === '其他' && helpCategoryCustomMode) }"
+              @click="selectHelpCategory(category)"
+            >
+              {{ category }}
+            </button>
+          </div>
+          <input
+            v-if="helpCategoryCustomMode"
+            v-model="helpEditForm.category"
+            maxlength="20"
+            placeholder="请输入互助分类"
+            style="margin-top: 8px"
+          />
+        </div>
+
+        <div class="full help-field">
+          <span class="help-field-label">{{ helpEditForm.kind === 'HELP' ? '期望时间' : '可服务时间' }}</span>
+          <div class="help-time-actions">
+            <button type="button" class="help-time-button" @click="openHelpTimePicker('specific')">选择具体时间</button>
+            <button type="button" class="help-time-button" @click="openHelpTimePicker('range')">选择时间段</button>
+          </div>
+          <div v-if="helpEditForm.expectedTime" class="help-selected-row">
+            <span>已选</span>
+            <strong>{{ helpEditForm.expectedTime }}</strong>
+            <button type="button" @click="clearHelpTime()">清除</button>
+          </div>
+          <div v-if="helpTimePickerOpen" class="help-time-panel">
+            <span class="help-picker-label">日期</span>
+            <div class="help-date-grid">
+              <button
+                v-for="dateOption in helpDateChoices"
+                :key="dateOption.value"
+                type="button"
+                class="help-date-button"
+                :class="{ active: helpTimePickerDate === dateOption.value }"
+                @click="selectHelpTimeDate(dateOption.value)"
+              >
+                {{ dateOption.label }}
+              </button>
+            </div>
+            <span class="help-picker-label">{{ helpTimePickerMode === 'range' ? '开始时间' : '时间' }}</span>
+            <div class="help-time-grid">
+              <button
+                v-for="timeSlot in HELP_TIME_SLOTS"
+                :key="`start-${timeSlot}`"
+                type="button"
+                class="help-time-chip"
+                :class="{ active: helpTimePickerStart === timeSlot }"
+                @click="selectHelpTimeStart(timeSlot)"
+              >
+                {{ timeSlot }}
+              </button>
+            </div>
+            <template v-if="helpTimePickerMode === 'range'">
+              <span class="help-picker-label">结束时间</span>
+              <p v-if="!helpTimePickerStart" class="help-edit-hint">请先选择开始时间</p>
+              <div v-else class="help-time-grid">
+                <button
+                  v-for="timeSlot in helpEndTimeChoices"
+                  :key="`end-${timeSlot}`"
+                  type="button"
+                  class="help-time-chip"
+                  :class="{ active: helpTimePickerEnd === timeSlot }"
+                  @click="selectHelpTimeEnd(timeSlot)"
+                >
+                  {{ timeSlot }}
+                </button>
+              </div>
+            </template>
+            <div class="help-time-footer">
+              <button type="button" @click="clearHelpTime(true)">清除已选时间</button>
+              <button type="button" @click="helpTimePickerOpen = false">收起</button>
+            </div>
+          </div>
+          <p class="help-edit-hint">可不选；支持选择一个具体时间或一个时间段。</p>
+        </div>
+
         <label class="full">
-          <span>详细说明（最多 500 个字）</span>
-          <textarea v-model="helpEditForm.description" maxlength="500" placeholder="请输入详细说明" />
+          <span>{{ helpEditForm.kind === 'HELP' ? '地点 / 交接位置' : '服务地点 / 范围' }}</span>
+          <input v-model="helpEditForm.location" maxlength="64" :placeholder="helpLocationPlaceholder" />
+        </label>
+
+        <div class="full help-field">
+          <span class="help-field-label">{{ helpEditForm.kind === 'HELP' ? '酬谢方式' : '收费方式' }}</span>
+          <div class="help-choice-list">
+            <button
+              v-for="reward in helpRewardOptions"
+              :key="reward"
+              type="button"
+              class="help-choice"
+              :class="{ active: helpEditForm.reward === reward }"
+              @click="helpEditForm.reward = reward"
+            >
+              {{ reward }}
+            </button>
+          </div>
+          <input
+            v-model="helpEditForm.reward"
+            maxlength="32"
+            :placeholder="helpRewardPlaceholder"
+            style="margin-top: 8px"
+          />
+        </div>
+
+        <label class="full">
+          <span>详细说明 *（5–500 个字）</span>
+          <textarea v-model="helpEditForm.description" maxlength="500" :placeholder="helpDescriptionPlaceholder" />
         </label>
       </div>
 
       <h4 class="section-title" style="margin-top: 20px">图片 / 视频</h4>
+      <div class="help-segment" style="margin-bottom: 10px">
+        <button
+          type="button"
+          class="help-segment-button"
+          :class="{ active: helpMediaType === 'video' }"
+          @click="selectHelpMediaType('video')"
+        >
+          短视频
+        </button>
+        <button
+          type="button"
+          class="help-segment-button"
+          :class="{ active: helpMediaType === 'gallery' }"
+          @click="selectHelpMediaType('gallery')"
+        >
+          照片集
+        </button>
+      </div>
       <div class="life-media-grid">
-        <div v-for="(media, index) in helpEditMedia" :key="media.key" class="life-media-item">
+        <div v-for="media in helpVisibleMedia" :key="media.key" class="life-media-item">
           <video v-if="media.type === 'video'" :src="media.url" controls preload="metadata" />
-          <img v-else :src="media.url" :alt="`媒体 ${index + 1}`" />
-          <button type="button" class="life-media-remove" aria-label="移除媒体" @click="removeHelpMedia(index)">
+          <img v-else :src="media.url" :alt="media.key" />
+          <button type="button" class="life-media-remove" aria-label="移除媒体" @click="removeHelpMedia(media.key)">
             <X :size="13" />
           </button>
           <span v-if="helpEditForm.coverKey === media.key" class="life-media-cover">封面</span>
         </div>
-        <button type="button" class="life-media-add" :disabled="helpMediaUploading" @click="triggerHelpMediaUpload">
+        <button
+          v-if="helpMediaType === 'gallery' ? helpVisibleMedia.length < 9 : helpVisibleMedia.length === 0"
+          type="button"
+          class="life-media-add"
+          :disabled="helpMediaUploading"
+          @click="triggerHelpMediaUpload"
+        >
           <Upload :size="18" />
-          <span>{{ helpMediaUploading ? '上传中…' : '添加媒体' }}</span>
+          <span>{{ helpMediaUploading ? '上传中…' : (helpMediaType === 'video' ? '添加短视频' : '添加照片') }}</span>
         </button>
         <input
           ref="helpFileInput"
           class="life-media-input"
           type="file"
-          accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+          :accept="helpMediaType === 'video' ? 'video/mp4,video/quicktime,video/webm' : 'image/jpeg,image/png,image/webp'"
+          :multiple="helpMediaType === 'gallery'"
           @change="onHelpMediaPicked"
         />
       </div>
       <p class="life-media-hint">
-        支持 JPG / PNG / WebP 图片（最多 12 张）或 MP4 / MOV / WebM 短视频（仅 1 个）；可替换或删除已发布媒体，保存后移动端同步更新。
+        {{ helpMediaType === 'video'
+          ? '支持 MP4 / MOV / WebM 短视频，最多 1 个；'
+          : '支持 JPG / PNG / WebP 图片，最多 9 张；' }}切换类型不会丢失已上传内容，保存时仅提交当前类型，移动端同步更新。
       </p>
     </template>
     <template #footer>
