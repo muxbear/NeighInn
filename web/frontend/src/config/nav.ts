@@ -55,13 +55,6 @@ export const figmaNavGroups: NavGroup[] = [
     ],
   },
   {
-    label: '触达中心',
-    items: [
-      { id: 'notices', label: '公告管理', route: '/communication/notices', icon: Bell, permission: 'communication:notice:view' },
-      { id: 'messages', label: '通知任务', route: '/communication/notification-tasks', icon: Activity, permission: 'communication:task:view' },
-    ],
-  },
-  {
     label: '社区管理',
     items: [
       { id: 'community-maintenance', label: '社区运维', route: '/community-management/maintenance', icon: Map, permission: 'community:maintenance:view' },
@@ -79,6 +72,13 @@ export const figmaNavGroups: NavGroup[] = [
       { id: 'finance-orders', label: '订单查询', route: '/finance/orders', icon: ClipboardList, permission: 'finance:order:view' },
       { id: 'disputes', label: '纠纷调解', route: '/governance/disputes', icon: Gavel, permission: 'governance:dispute:view' },
       { id: 'reports', label: '举报处理', route: '/governance/reports', icon: Flag, permission: 'governance:report:view' },
+    ],
+  },
+  {
+    label: '触达中心',
+    items: [
+      { id: 'notices', label: '公告管理', route: '/communication/notices', icon: Bell, permission: 'communication:notice:view' },
+      { id: 'messages', label: '通知任务', route: '/communication/notification-tasks', icon: Activity, permission: 'communication:task:view' },
     ],
   },
   {
