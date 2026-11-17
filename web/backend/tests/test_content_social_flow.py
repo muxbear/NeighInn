@@ -5,10 +5,14 @@
 公告下发、举报处理联动下架、参数发布即生效。
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import func, select
 
-from src.db.models import Favorite, Item, LifeComment
+from src.db.models import Broadcast, Favorite, Item, LifeComment
+from src.db.models.common import utcnow
+from src.workers.timeout_tasks import expire_broadcasts, publish_scheduled_broadcasts
 from tests.conftest import (
     ADMIN_BASE,
     C_BASE,
@@ -181,30 +185,117 @@ async def test_admin_life_edit_and_delete(client, db_session):
 
 @pytest.mark.asyncio
 async def test_broadcast_review_flow(client):
-    """喇叭审核闭环：后台发布 → 待审 → 通过 → 移动端喇叭站可见；下架即消失。"""
+    """喇叭发布闭环：无需审核即时生效，支持时间段、编辑、单删与批量删除。"""
     _seller, buyer, _csrf = await _two_users(client)
+    now = datetime.now(UTC)
+    now_ms = int(now.timestamp() * 1000)
     resp = await client.post(f"{ADMIN_BASE}/broadcasts", json={
         "communityId": 1, "title": "今晚中心广场露天电影",
-        "type": "NEW_ITEM", "content": "19:30 开场，自带小板凳", "important": True},
+        "type": "NEW_ITEM", "content": "19:30 开场，自带小板凳", "important": True,
+        "effectiveMode": "IMMEDIATE"},
         headers=admin_headers(client))
     assert resp.status_code == 200, resp.text
     broadcast_id = resp.json()["data"]["id"]
-    assert resp.json()["data"]["status"] == "PENDING_REVIEW"
+    created = resp.json()["data"]
+    assert created["status"] == "PUBLISHED"
+    assert created["expiresAt"] > created["publishedAt"] + 23 * 3600 * 1000
 
     before = (await client.get(f"{C_BASE}/broadcasts", headers=bearer(buyer["token"]))).json()["data"]
-    assert all(row["id"] != broadcast_id for row in before)
-
-    review = await client.post(f"{ADMIN_BASE}/broadcasts/{broadcast_id}/review",
-                               json={"decision": "APPROVE"}, headers=admin_headers(client))
-    assert review.status_code == 200
-    after = (await client.get(f"{C_BASE}/broadcasts", headers=bearer(buyer["token"]))).json()["data"]
-    target = next(row for row in after if row["id"] == broadcast_id)
+    target = next(row for row in before if row["id"] == broadcast_id)
     assert target["type"] == "新上架"  # 英文类型码映射为移动端中文标签
+    home = (await client.get(f"{C_BASE}/home", headers=bearer(buyer["token"]))).json()["data"]
+    assert any(row["id"] == broadcast_id for row in home["broadcasts"])
+
+    updated = await client.put(f"{ADMIN_BASE}/broadcasts/{broadcast_id}", json={
+        "communityId": 1, "title": "今晚中心广场露天电影（改期）",
+        "type": "NEW_ITEM", "content": "19:30 开场，自带小板凳",
+        "effectiveMode": "IMMEDIATE", "endAt": now_ms + 24 * 3600 * 1000,
+    }, headers=admin_headers(client))
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["data"]["title"] == "今晚中心广场露天电影（改期）"
+    after_update = (await client.get(f"{C_BASE}/broadcasts",
+                                    headers=bearer(buyer["token"]))).json()["data"]
+    assert next(row for row in after_update if row["id"] == broadcast_id)["title"] == "今晚中心广场露天电影（改期）"
+
+    scheduled_start = now + timedelta(hours=2)
+    scheduled = await client.post(f"{ADMIN_BASE}/broadcasts", json={
+        "communityId": 1, "title": "明日停水通知", "type": "URGENT_HELP",
+        "effectiveMode": "SCHEDULED",
+        "startAt": int(scheduled_start.timestamp() * 1000),
+        "endAt": int((scheduled_start + timedelta(hours=24)).timestamp() * 1000),
+    }, headers=admin_headers(client))
+    assert scheduled.status_code == 200, scheduled.text
+    scheduled_id = scheduled.json()["data"]["id"]
+    assert scheduled.json()["data"]["status"] == "SCHEDULED"
+    scheduled_visible = (await client.get(f"{C_BASE}/broadcasts",
+                                         headers=bearer(buyer["token"]))).json()["data"]
+    assert all(row["id"] != scheduled_id for row in scheduled_visible)
 
     offline = await client.post(f"{ADMIN_BASE}/broadcasts/{broadcast_id}/offline", headers=admin_headers(client))
     assert offline.status_code == 200
     final = (await client.get(f"{C_BASE}/broadcasts", headers=bearer(buyer["token"]))).json()["data"]
     assert all(row["id"] != broadcast_id for row in final)
+
+    first_del = await client.post(f"{ADMIN_BASE}/broadcasts", json={
+        "communityId": 1, "title": "批量删除一", "effectiveMode": "IMMEDIATE"},
+        headers=admin_headers(client))
+    second_del = await client.post(f"{ADMIN_BASE}/broadcasts", json={
+        "communityId": 1, "title": "批量删除二", "effectiveMode": "IMMEDIATE"},
+        headers=admin_headers(client))
+    ids = [first_del.json()["data"]["id"], second_del.json()["data"]["id"]]
+    batch = await client.post(f"{ADMIN_BASE}/broadcasts/batch-delete", json={"ids": [int(i) for i in ids]},
+                              headers=admin_headers(client))
+    assert batch.status_code == 200, batch.text
+    assert set(batch.json()["data"]["deleted"]) == set(ids)
+    remaining = (await client.get(f"{C_BASE}/broadcasts",
+                                  headers=bearer(buyer["token"]))).json()["data"]
+    assert all(row["id"] not in ids for row in remaining)
+
+    single = await client.post(f"{ADMIN_BASE}/broadcasts", json={
+        "communityId": 1, "title": "单条删除验证", "effectiveMode": "IMMEDIATE"},
+        headers=admin_headers(client))
+    single_id = single.json()["data"]["id"]
+    deleted = await client.delete(f"{ADMIN_BASE}/broadcasts/{single_id}",
+                                  headers=admin_headers(client))
+    assert deleted.status_code == 200, deleted.text
+    missing = await client.get(f"{ADMIN_BASE}/broadcasts/{single_id}",
+                               headers=admin_headers(client))
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_broadcast_effective_window_worker(client, db_session):
+    """定时喇叭到点自动发布，到期自动下架。"""
+    _seller, buyer, _csrf = await _two_users(client)
+    now = utcnow()
+    scheduled = await client.post(f"{ADMIN_BASE}/broadcasts", json={
+        "communityId": 1, "title": "到点自动发布的喇叭", "effectiveMode": "SCHEDULED",
+        "startAt": int((now + timedelta(hours=2)).replace(tzinfo=UTC).timestamp() * 1000),
+        "endAt": int((now + timedelta(hours=4)).replace(tzinfo=UTC).timestamp() * 1000),
+    }, headers=admin_headers(client))
+    assert scheduled.status_code == 200, scheduled.text
+    scheduled_id = int(scheduled.json()["data"]["id"])
+    assert scheduled.json()["data"]["status"] == "SCHEDULED"
+
+    row = await db_session.get(Broadcast, scheduled_id)
+    row.scheduled_at = now - timedelta(seconds=1)
+    await db_session.commit()
+    assert await publish_scheduled_broadcasts(db_session) >= 1
+    await db_session.commit()
+
+    visible = (await client.get(f"{C_BASE}/broadcasts",
+                                headers=bearer(buyer["token"]))).json()["data"]
+    assert any(item["id"] == str(scheduled_id) for item in visible)
+
+    row = await db_session.get(Broadcast, scheduled_id)
+    row.expires_at = utcnow() - timedelta(seconds=1)
+    await db_session.commit()
+    assert await expire_broadcasts(db_session) >= 1
+    await db_session.commit()
+
+    expired = (await client.get(f"{C_BASE}/broadcasts",
+                                headers=bearer(buyer["token"]))).json()["data"]
+    assert all(item["id"] != str(scheduled_id) for item in expired)
 
 
 @pytest.mark.asyncio

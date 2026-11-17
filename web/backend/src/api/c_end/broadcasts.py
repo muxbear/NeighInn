@@ -8,6 +8,7 @@ from src.core.responses import ERR_NOT_FOUND, ApiError, ok
 from src.db.models import Broadcast, Favorite
 from src.services import item_service as item_svc
 from src.services.auth_service import bound_resident
+from src.services.broadcast_service import is_visible, visibility_filters
 
 router = APIRouter(tags=["c:broadcasts"])
 
@@ -44,9 +45,9 @@ async def _row(db: DbSession, broadcast: Broadcast, viewer=None) -> dict:
 
 @router.get("/broadcasts")
 async def list_broadcasts(user: CurrentUser, db: DbSession):
-    """喇叭站事件流：仅已发布内容，紧急置顶。"""
+    """喇叭站事件流：仅生效时间窗内的已发布内容，紧急置顶。"""
     resident = await bound_resident(db, user.id)
-    stmt = select(Broadcast).where(Broadcast.status == "PUBLISHED")
+    stmt = select(Broadcast).where(*visibility_filters())
     if resident:
         stmt = stmt.where(Broadcast.community_id == resident.community_id)
     rows = list((await db.execute(
@@ -58,7 +59,7 @@ async def list_broadcasts(user: CurrentUser, db: DbSession):
 @router.get("/broadcasts/{broadcast_id}")
 async def broadcast_detail(broadcast_id: int, user: CurrentUser, db: DbSession):
     broadcast = await db.get(Broadcast, broadcast_id)
-    if not broadcast or broadcast.status != "PUBLISHED":
+    if not broadcast or not is_visible(broadcast):
         raise ApiError(ERR_NOT_FOUND, "内容不存在或未发布", 404)
     return ok(await _row(db, broadcast, user))
 
@@ -66,7 +67,7 @@ async def broadcast_detail(broadcast_id: int, user: CurrentUser, db: DbSession):
 @router.post("/broadcasts/{broadcast_id}/favorite")
 async def favorite_broadcast(broadcast_id: int, user: CurrentUser, db: DbSession):
     broadcast = await db.get(Broadcast, broadcast_id)
-    if not broadcast:
+    if not broadcast or not is_visible(broadcast):
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
     existing = await db.scalar(
         select(Favorite).where(Favorite.user_id == user.id,
@@ -85,7 +86,7 @@ async def favorite_broadcast(broadcast_id: int, user: CurrentUser, db: DbSession
 @router.post("/broadcasts/{broadcast_id}/respond")
 async def respond_broadcast(broadcast_id: int, user: CurrentUser, db: DbSession):
     broadcast = await db.get(Broadcast, broadcast_id)
-    if not broadcast or broadcast.status != "PUBLISHED":
+    if not broadcast or not is_visible(broadcast):
         raise ApiError(ERR_NOT_FOUND, "内容不存在或未发布", 404)
     broadcast.response_count += 1
     await db.commit()

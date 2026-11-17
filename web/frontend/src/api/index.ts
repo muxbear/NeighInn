@@ -197,6 +197,11 @@ export const operationsApi = {
   overview: (module: string, params: Dict = {}) => http.get<any, any>('/operations/overview', { params: { module, ...params } }),
   list: async (module: string, params: Dict = {}) => mapItems(await http.get<any, any>(`/${module}`, { params }), (row) => normalizeOperationRow(module, row)),
   create: (module: string, payload: Dict) => http.post<any, any>(`/${module}`, payload),
+  broadcastDetail: (id: number | string) => http.get<any, any>(`/broadcasts/${id}`),
+  updateBroadcast: (id: number | string, payload: Dict) => http.put<any, any>(`/broadcasts/${id}`, payload),
+  deleteBroadcast: (id: number | string) => http.delete<any, any>(`/broadcasts/${id}`),
+  batchDeleteBroadcasts: (ids: Array<string | number>) =>
+    http.post<any, any>('/broadcasts/batch-delete', { ids: ids.map((id) => Number(id)) }),
   itemDetail: (id: number | string) => http.get<any, any>(`/items/${id}`),
   lifeDetail: (id: number | string) => http.get<any, any>(`/life-posts/${id}`),
   helpDetail: (id: number | string) => http.get<any, any>(`/help-requests/${id}`),

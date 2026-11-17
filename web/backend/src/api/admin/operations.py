@@ -22,6 +22,7 @@ from src.core.responses import (
     paginated,
 )
 from src.db.models import (
+    Broadcast,
     Community,
     Conversation,
     Favorite,
@@ -40,6 +41,7 @@ from src.db.models import (
 from src.db.models.common import ensure_utc, utcnow
 from src.domain import enums as E
 from src.domain.state import item_sm
+from src.services.broadcast_service import visibility_filters
 from src.services.item_service import _public_media_url
 from src.services.notify_service import notify_user
 
@@ -153,6 +155,8 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
         return await _help_overview(db, communityId)
     if module == "life":
         return await _life_overview(db, communityId)
+    if module == "broadcast":
+        return await _broadcast_overview(db, communityId)
     if module != "items":
         raise ApiError(ERR_PARAM, "暂不支持该模块概览", 400)
     now = utcnow()
@@ -351,6 +355,44 @@ async def _life_overview(db: DbSession, community_id: int | None) -> dict:
             "totalViews": total_views,
             "totalLikes": total_likes,
             "favoriteRate": favorite_rate,
+        },
+    })
+
+
+async def _broadcast_overview(db: DbSession, community_id: int | None) -> dict:
+    """社区喇叭指标：生效中、定时待发、今日发布与累计互动实时聚合。"""
+    scope = [Broadcast.community_id == community_id] if community_id else []
+    status_rows = (await db.execute(
+        select(Broadcast.status, func.count()).where(*scope).group_by(Broadcast.status))).all()
+    status_counts = {str(status): int(count) for status, count in status_rows}
+    total = sum(status_counts.values())
+
+    now = utcnow()
+    local_now = now + timedelta(hours=8)
+    today_start = local_now.replace(
+        hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=8)
+    active = int((await db.scalar(
+        select(func.count()).select_from(Broadcast).where(
+            *scope, *visibility_filters(now)))) or 0)
+    today_published = int((await db.scalar(
+        select(func.count()).select_from(Broadcast).where(
+            *scope,
+            func.coalesce(Broadcast.published_at, Broadcast.created_at) >= today_start,
+            Broadcast.status.in_([E.ContentStatus.PUBLISHED, E.ContentStatus.SCHEDULED]),
+        ))) or 0)
+    total_responses = int((await db.scalar(
+        select(func.coalesce(func.sum(Broadcast.response_count), 0)).where(*scope))) or 0)
+
+    return ok({
+        "module": "broadcast",
+        "total": total,
+        "statusCounts": status_counts,
+        "metrics": {
+            "total": total,
+            "active": active,
+            "scheduled": status_counts.get(E.ContentStatus.SCHEDULED, 0),
+            "todayPublished": today_published,
+            "totalResponses": total_responses,
         },
     })
 

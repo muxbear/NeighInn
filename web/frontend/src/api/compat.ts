@@ -115,13 +115,17 @@ export function fmtMoney(cents: number | undefined | null): string {
 
 export function normalizeOperationRow(module: string, row: any): any {
   const stats = row.stats || {}
+  const displayStatus = module === 'broadcast'
+    ? (row.effectiveStatus ?? row.status)
+    : row.status
   return {
     ...row,
     owner: row.owner ?? row.seller ?? row.author ?? row.requester ?? '—',
     performance: row.performance
       ?? (stats.views !== undefined ? `${stats.views} 浏览 · ${stats.likes ?? 0} 赞` : '—'),
-    statusCode: row.status,
-    status: mapStatus(row.status),
+    storedStatus: row.status,
+    statusCode: displayStatus,
+    status: mapStatus(displayStatus),
     updatedAt: fmtRelative(row.updatedAt ?? row.createdAt),
   }
 }

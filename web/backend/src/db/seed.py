@@ -94,6 +94,8 @@ PERMISSIONS: list[tuple[str, str, str, str | None]] = [
     ("dashboard:export", "生成运营简报", "按钮", None),
     ("community:broadcast:view", "查看社区喇叭", "页面", "/community-operations/broadcast"),
     ("community:broadcast:create", "发布喇叭", "按钮", None),
+    ("community:broadcast:update", "编辑喇叭", "按钮", None),
+    ("community:broadcast:delete", "删除喇叭", "按钮", None),
     ("community:broadcast:review", "审核喇叭", "按钮", None),
     ("community:broadcast:offline", "下架喇叭", "按钮", None),
     ("community:item:view", "查看社区物品", "页面", "/community-operations/items"),

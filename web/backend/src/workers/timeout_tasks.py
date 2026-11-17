@@ -18,10 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import SessionLocal
-from src.db.models import Item, Order
-from src.db.models.common import utcnow
+from src.db.models import Broadcast, Item, Order
+from src.db.models.common import ensure_utc, utcnow
 from src.domain import enums as E
-from src.domain.state import item_sm, order_sm
+from src.domain.state import content_sm, item_sm, order_sm
 from src.services import order_service as order_svc
 from src.services import pay_service
 from src.services.notify_service import notify_user
@@ -114,6 +114,41 @@ async def expire_items(db: AsyncSession) -> int:
     return len(rows)
 
 
+async def publish_scheduled_broadcasts(db: AsyncSession) -> int:
+    """到点发布定时喇叭；时间窗已结束的直接转为下架。"""
+    current = utcnow()
+    rows = list((await db.execute(
+        select(Broadcast).where(
+            Broadcast.status == E.ContentStatus.SCHEDULED,
+            Broadcast.scheduled_at.is_not(None),
+            Broadcast.scheduled_at <= current))).scalars().all())
+    for broadcast in rows:
+        expires_at = ensure_utc(broadcast.expires_at)
+        if expires_at and expires_at <= current:
+            broadcast.status = content_sm.fire(
+                broadcast.status, E.ContentStatus.OFFLINE)
+        else:
+            broadcast.status = content_sm.fire(
+                broadcast.status, E.ContentStatus.PUBLISHED)
+            broadcast.published_at = (ensure_utc(broadcast.published_at)
+                                      or ensure_utc(broadcast.scheduled_at))
+    return len(rows)
+
+
+async def expire_broadcasts(db: AsyncSession) -> int:
+    """生效时间窗结束的喇叭自动下架，移动端不再展示。"""
+    current = utcnow()
+    rows = list((await db.execute(
+        select(Broadcast).where(
+            Broadcast.status == E.ContentStatus.PUBLISHED,
+            Broadcast.expires_at.is_not(None),
+            Broadcast.expires_at <= current))).scalars().all())
+    for broadcast in rows:
+        broadcast.status = content_sm.fire(
+            broadcast.status, E.ContentStatus.OFFLINE)
+    return len(rows)
+
+
 async def run_timeouts(db: AsyncSession) -> dict:
     """执行一轮全部超时任务（供定时循环与测试直接调用）。"""
     result = {
@@ -121,6 +156,8 @@ async def run_timeouts(db: AsyncSession) -> dict:
         "cancelledStale": await cancel_stale_confirmations(db),
         "autoReleased": await auto_release_orders(db),
         "expiredItems": await expire_items(db),
+        "publishedBroadcasts": await publish_scheduled_broadcasts(db),
+        "expiredBroadcasts": await expire_broadcasts(db),
     }
     await db.commit()
     return result

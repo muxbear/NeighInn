@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, or_, select
 from src.api.utils import epoch_ms, paginate
 from src.core.audit import write_audit, write_outbox
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
+from src.core.permissions import require_any_permission, require_permission
 from src.core.responses import (
     ERR_NOT_FOUND,
     ERR_PARAM,
@@ -28,9 +28,15 @@ from src.db.models import (
     LifePost,
     User,
 )
-from src.db.models.common import utcnow
+from src.db.models.common import ensure_utc, utcnow
 from src.domain import enums as E
 from src.domain.state import content_sm, help_sm
+from src.services.broadcast_service import (
+    TYPE_LABELS,
+    is_visible,
+    resolve_window,
+    to_epoch_ms,
+)
 from src.services.notify_service import notify_user
 
 router = APIRouter(tags=["admin:content"])
@@ -55,19 +61,59 @@ class BroadcastIn(BaseModel):
     content: str = ""
     media: list[str] = []
     important: bool = False
+    # 即时生效（IMMEDIATE）或指定时间段（SCHEDULED）；留空时按 startAt 自动判定。
+    effectiveMode: str = ""
+    startAt: int | str | None = None
+    endAt: int | str | None = None
+    # 兼容旧字段与外部调用方。
+    scheduledAt: int | str | None = None
+    expiresAt: int | str | None = None
+    durationHours: int | None = None
+
+
+class BroadcastBatchIn(BaseModel):
+    ids: list[int] = []
+
+
+TONE_BY_TYPE = {
+    "URGENT_HELP": "urgent",
+    "FREE_NEW": "free",
+    "REWARD": "reward",
+    "NEW_ITEM": "new",
+}
 
 
 async def _broadcast_row(db: DbSession, broadcast: Broadcast) -> dict:
     community = await db.get(Community, broadcast.community_id)
+    author = await db.get(User, broadcast.author_id) if broadcast.author_id else None
+    now = utcnow()
+    scheduled_at = ensure_utc(broadcast.scheduled_at)
+    expires_at = ensure_utc(broadcast.expires_at)
+    published_at = ensure_utc(broadcast.published_at)
+    updated_at = ensure_utc(broadcast.updated_at)
+    effective_status = broadcast.status
+    if broadcast.status == E.ContentStatus.PUBLISHED and not is_visible(broadcast, now):
+        effective_status = "EXPIRED"
+    elif (broadcast.status == E.ContentStatus.SCHEDULED and scheduled_at
+          and scheduled_at <= now):
+        effective_status = E.ContentStatus.PUBLISHED
+    type_label = TYPE_LABELS.get(broadcast.type, broadcast.type)
     return {
-        "id": str(broadcast.id), "title": broadcast.title, "subtitle": broadcast.subtitle,
-        "type": broadcast.type, "status": broadcast.status, "important": broadcast.important,
+        "id": str(broadcast.id), "code": f"LB-{broadcast.id:05d}",
+        "title": broadcast.title, "subtitle": broadcast.subtitle,
+        "type": broadcast.type, "typeLabel": type_label, "category": type_label,
+        "status": broadcast.status, "effectiveStatus": effective_status,
+        "important": broadcast.important,
+        "owner": author.nickname if author else "社区运营",
+        "performance": f"{broadcast.response_count} 次互动",
         "content": broadcast.content, "media": broadcast.media or [],
         "responseCount": broadcast.response_count,
         "communityId": str(broadcast.community_id),
         "communityName": community.name if community else "",
-        "publishedAt": int(broadcast.published_at.timestamp() * 1000) if broadcast.published_at else 0,
-        "updatedAt": int(broadcast.updated_at.timestamp() * 1000) if broadcast.updated_at else 0,
+        "scheduledAt": to_epoch_ms(scheduled_at),
+        "expiresAt": to_epoch_ms(expires_at),
+        "publishedAt": to_epoch_ms(published_at),
+        "updatedAt": to_epoch_ms(updated_at),
     }
 
 
@@ -92,26 +138,46 @@ async def list_broadcasts(admin: CurrentAdmin, db: DbSession,
              dependencies=[Depends(require_permission("community:broadcast:create"))])
 async def create_broadcast(payload: BroadcastIn, request: Request,
                            admin: CurrentAdmin, db: DbSession):
-    """发布喇叭：创建即进入待审核（内容状态机 PENDING_REVIEW）。"""
+    """发布喇叭：后台直接发布生效，无需审核；支持即时或指定时间段生效。"""
     community = await db.get(Community, payload.communityId)
     if not community:
         raise ApiError(ERR_PARAM, "社区不存在", 400)
     if len(payload.title.strip()) < 2:
         raise ApiError(ERR_PARAM, "标题必填", 400)
+    try:
+        start_at, expires_at, status = resolve_window(
+            effective_mode=payload.effectiveMode,
+            start_at=payload.startAt,
+            end_at=payload.endAt,
+            scheduled_at=payload.scheduledAt,
+            expires_at=payload.expiresAt,
+            duration_hours=payload.durationHours,
+        )
+    except ValueError as exc:
+        raise ApiError(ERR_PARAM, str(exc), 400) from exc
     broadcast = Broadcast(
         community_id=payload.communityId, author_id=admin.id,
         type=payload.type, title=payload.title.strip()[:120],
         subtitle=payload.subtitle[:255], content=payload.content,
         media=payload.media[:9], important=payload.important,
-        status=E.ContentStatus.PENDING_REVIEW,
+        tone=TONE_BY_TYPE.get(payload.type, "new"),
+        status=status, scheduled_at=start_at, expires_at=expires_at,
+        published_at=start_at if status == E.ContentStatus.PUBLISHED else None,
     )
     db.add(broadcast)
     await db.flush()
     await write_audit(db, request, actor=admin, action="broadcast.create",
                       resource_type="broadcast", resource_id=broadcast.id,
-                      before=None, after={"title": broadcast.title})
+                      before=None, after={"title": broadcast.title, "status": broadcast.status,
+                                          "scheduledAt": payload.startAt,
+                                          "expiresAt": payload.endAt})
+    if status == E.ContentStatus.PUBLISHED:
+        await write_outbox(db, event_type="BroadcastPublished", aggregate_type="broadcast",
+                           aggregate_id=broadcast.id, payload={"status": broadcast.status})
     await db.commit()
-    return ok(await _broadcast_row(db, broadcast), "喇叭已提交审核")
+    message = ("喇叭已发布并生效" if status == E.ContentStatus.PUBLISHED
+               else "喇叭已发布，将在设定时间自动生效")
+    return ok(await _broadcast_row(db, broadcast), message)
 
 
 @router.get("/broadcasts/{broadcast_id}")
@@ -123,41 +189,107 @@ async def broadcast_detail(broadcast_id: int, admin: CurrentAdmin, db: DbSession
 
 
 @router.put("/broadcasts/{broadcast_id}",
-            dependencies=[Depends(require_permission("community:broadcast:create"))])
+            dependencies=[Depends(require_any_permission(
+                "community:broadcast:update", "community:broadcast:create"))])
 async def update_broadcast(broadcast_id: int, payload: BroadcastIn,
                            request: Request, admin: CurrentAdmin, db: DbSession):
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
-    if broadcast.status not in (E.ContentStatus.DRAFT, E.ContentStatus.REJECTED,
-                                E.ContentStatus.PENDING_REVIEW):
-        raise ApiError(ERR_PARAM, "已发布内容需先下架再编辑", 400)
-    before = {"title": broadcast.title}
+    if len(payload.title.strip()) < 2:
+        raise ApiError(ERR_PARAM, "标题必填", 400)
+    before = {"title": broadcast.title, "status": broadcast.status}
     broadcast.title = payload.title.strip()[:120]
     broadcast.subtitle = payload.subtitle[:255]
     broadcast.content = payload.content
     broadcast.media = payload.media[:9]
     broadcast.important = payload.important
     broadcast.type = payload.type
+    broadcast.tone = TONE_BY_TYPE.get(payload.type, broadcast.tone or "new")
+    schedule_fields = {"effectiveMode", "startAt", "endAt", "scheduledAt",
+                       "expiresAt", "durationHours"}
+    if schedule_fields & payload.model_fields_set:
+        try:
+            start_at, expires_at, status = resolve_window(
+                effective_mode=payload.effectiveMode,
+                start_at=payload.startAt,
+                end_at=payload.endAt,
+                scheduled_at=payload.scheduledAt,
+                expires_at=payload.expiresAt,
+                duration_hours=payload.durationHours,
+            )
+        except ValueError as exc:
+            raise ApiError(ERR_PARAM, str(exc), 400) from exc
+        broadcast.scheduled_at = start_at
+        broadcast.expires_at = expires_at
+        broadcast.status = status
+        broadcast.published_at = start_at if status == E.ContentStatus.PUBLISHED else None
     await write_audit(db, request, actor=admin, action="broadcast.update",
                       resource_type="broadcast", resource_id=broadcast.id,
-                      before=before, after={"title": broadcast.title})
+                      before=before, after={"title": broadcast.title,
+                                            "status": broadcast.status})
     await db.commit()
     return ok(await _broadcast_row(db, broadcast), "已保存")
+
+
+async def _delete_broadcast_row(db: DbSession, request: Request,
+                                admin: CurrentAdmin, broadcast: Broadcast) -> None:
+    before = await _broadcast_row(db, broadcast)
+    await db.execute(delete(Favorite).where(Favorite.target_type == "BROADCAST",
+                                            Favorite.target_id == broadcast.id))
+    await db.delete(broadcast)
+    await write_audit(db, request, actor=admin, action="broadcast.delete",
+                      resource_type="broadcast", resource_id=broadcast.id,
+                      before=before, after=None)
+
+
+@router.delete("/broadcasts/{broadcast_id}",
+               dependencies=[Depends(require_any_permission(
+                   "community:broadcast:delete", "community:broadcast:offline"))])
+async def delete_broadcast(broadcast_id: int, request: Request,
+                           admin: CurrentAdmin, db: DbSession):
+    broadcast = await db.get(Broadcast, broadcast_id)
+    if not broadcast:
+        raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
+    await _delete_broadcast_row(db, request, admin, broadcast)
+    await db.commit()
+    return ok({"id": str(broadcast_id)}, "喇叭已删除")
+
+
+@router.post("/broadcasts/batch-delete",
+             dependencies=[Depends(require_any_permission(
+                 "community:broadcast:delete", "community:broadcast:offline"))])
+async def batch_delete_broadcasts(payload: BroadcastBatchIn, request: Request,
+                                  admin: CurrentAdmin, db: DbSession):
+    if not payload.ids:
+        raise ApiError(ERR_PARAM, "请选择要删除的喇叭", 400)
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for broadcast_id in dict.fromkeys(payload.ids):
+        broadcast = await db.get(Broadcast, broadcast_id)
+        if not broadcast:
+            failed.append({"id": str(broadcast_id), "reason": "喇叭不存在"})
+            continue
+        await _delete_broadcast_row(db, request, admin, broadcast)
+        deleted.append(str(broadcast_id))
+    await db.commit()
+    return ok({"deleted": deleted, "failed": failed},
+              f"已删除 {len(deleted)} 条喇叭")
 
 
 @router.post("/broadcasts/{broadcast_id}/review",
              dependencies=[Depends(require_permission("community:broadcast:review"))])
 async def review_broadcast(broadcast_id: int, payload: ReviewIn,
                            request: Request, admin: CurrentAdmin, db: DbSession):
-    """审核：通过 → 已发布（移动端喇叭站立即可见）；驳回 → 必填原因。"""
+    """存量待审核内容兼容接口；新喇叭发布后已直接生效。"""
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
     before = {"status": broadcast.status}
     if payload.decision == "APPROVE":
-        broadcast.status = content_sm.fire(broadcast.status, E.ContentStatus.PUBLISHED)
-        broadcast.published_at = utcnow()
+        if broadcast.status != E.ContentStatus.PUBLISHED:
+            broadcast.status = content_sm.fire(broadcast.status, E.ContentStatus.PUBLISHED)
+        broadcast.published_at = broadcast.published_at or utcnow()
     else:
         if len(payload.reason.strip()) < 5:
             raise ApiError(ERR_PARAM, "驳回原因必填（不少于 5 个字）", 400)

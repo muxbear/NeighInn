@@ -28,11 +28,27 @@ const helpKind = ref('全部')
 const selectedRows = ref<string[]>([])
 const loading = ref(false)
 const drawerOpen = ref(false)
-const form = ref({ title: '', subtitle: '', owner: '社区运营 · 李知夏', category: '', content: '' })
+const broadcastEditTarget = ref<any>(null)
+const form = ref({
+  title: '',
+  subtitle: '',
+  type: 'NEW_ITEM',
+  content: '',
+  important: false,
+  effectiveMode: 'IMMEDIATE',
+  startAt: '',
+  endAt: '',
+})
 const overview = ref<any>(null)
 const itemCategories = ref<any[]>([])
 
 const ITEM_CONDITIONS = ['全新', '九九新', '轻微使用痕迹', '明显使用痕迹', '有功能缺陷']
+const BROADCAST_TYPES = [
+  { value: 'URGENT_HELP', label: '紧急求助' },
+  { value: 'FREE_NEW', label: '免费上新' },
+  { value: 'REWARD', label: '悬赏服务' },
+  { value: 'NEW_ITEM', label: '新上架' },
+]
 /** 移动端生活分类 + 详设 4.7.3.5 运营频道分类，覆盖存量数据。 */
 const LIFE_CATEGORIES = [
   '小区风景', '邻里日常', '个人风采', '萌宠生活',
@@ -51,7 +67,7 @@ const configs: Record<string, any> = {
     api: 'broadcasts', title: '社区喇叭', tone: 'broadcast', icon: Megaphone,
     ownerLabel: '喇叭归属小区', scopeNote: '喇叭列表仅展示所选小区',
     description: '运营社区即时播报、邻里话题、重要提醒和互动内容', create: '发布喇叭',
-    tabs: ['全部', '已发布', '待审核', '定时发布', '已下架'],
+    tabs: ['全部', '已发布', '定时发布', '已下架'],
     metrics: [
       { label: '今日播报', value: '28', note: '较昨日 +6' },
       { label: '待审核', value: '6', note: '2 条高优先级', attention: true },
@@ -111,6 +127,10 @@ const config = computed(() => configs[module.value] || configs.broadcast)
 const tabs = computed(() => config.value.tabs)
 const filteredRows = computed(() => rows.value)
 const canCreate = computed(() => module.value === 'broadcast' && auth.hasPermission('community:broadcast:create'))
+const canEditBroadcast = computed(() => module.value === 'broadcast'
+  && (auth.hasPermission('community:broadcast:update') || auth.hasPermission('community:broadcast:create')))
+const canDeleteBroadcast = computed(() => module.value === 'broadcast'
+  && (auth.hasPermission('community:broadcast:delete') || auth.hasPermission('community:broadcast:offline')))
 const canEditHelp = computed(() => module.value === 'help' && auth.hasPermission('community:help:update'))
 const canDeleteHelp = computed(() => module.value === 'help' && auth.hasPermission('community:help:delete'))
 const canReviewHelp = computed(() => module.value === 'help' && auth.hasPermission('community:help:review'))
@@ -121,6 +141,32 @@ const canDeleteLife = computed(() => module.value === 'life' && auth.hasPermissi
 
 /** 运营指标卡：物品与社区生活均来自 /operations/overview 实时聚合（禁止硬编码）。 */
 const metrics = computed(() => {
+  if (module.value === 'broadcast') {
+    const data = overview.value?.metrics || {}
+    return [
+      {
+        label: '生效中',
+        value: String(Number(data.active || 0)),
+        note: `累计 ${Number(data.total || 0)} 条喇叭`,
+      },
+      {
+        label: '定时待发',
+        value: String(Number(data.scheduled || 0)),
+        note: Number(data.scheduled || 0) ? '到点自动生效' : '暂无定时喇叭',
+      },
+      {
+        label: '今日发布',
+        value: String(Number(data.todayPublished || 0)),
+        note: '即时与定时发布合计',
+        attention: true,
+      },
+      {
+        label: '累计互动',
+        value: String(Number(data.totalResponses || 0)),
+        note: '移动端邻居响应次数',
+      },
+    ]
+  }
   if (module.value === 'life') {
     const data = overview.value?.metrics || {}
     const delta = Number(data.todayViewsDelta || 0)
@@ -226,7 +272,7 @@ function tabStatusCode(tab: string): string {
 }
 
 function statusCount(tab: string): number | string {
-  if ((module.value === 'items' || module.value === 'life' || module.value === 'help') && overview.value) {
+  if (['items', 'life', 'help', 'broadcast'].includes(module.value) && overview.value) {
     if (tab === '全部') return overview.value.total ?? 0
     const code = tabStatusCode(tab)
     return overview.value.statusCounts?.[code] ?? 0
@@ -251,7 +297,7 @@ async function load() {
       if (kindCode) params.kind = kindCode
     }
     if (query.value) params.keyword = query.value
-    const overviewModule = ['items', 'life', 'help'].includes(module.value) ? module.value : ''
+    const overviewModule = ['items', 'life', 'help', 'broadcast'].includes(module.value) ? module.value : ''
     const [data, summary] = await Promise.all([
       operationsApi.list(config.value.api, params),
       overviewModule
@@ -285,27 +331,119 @@ function selectHelpKind(kind: string) {
   load()
 }
 
+const HOUR_MS = 60 * 60 * 1000
+
+function toLocalInput(ms: number): string {
+  const date = new Date(ms)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function fromLocalInput(value: string): number | null {
+  if (!value) return null
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function resetBroadcastForm(): void {
+  const now = Date.now()
+  form.value = {
+    title: '',
+    subtitle: '',
+    type: 'NEW_ITEM',
+    content: '',
+    important: false,
+    effectiveMode: 'IMMEDIATE',
+    startAt: toLocalInput(now),
+    endAt: toLocalInput(now + 24 * HOUR_MS),
+  }
+}
+
 function create() {
-  form.value = { title: '', subtitle: '', owner: '社区运营 · 李知夏', category: '', content: '' }
+  broadcastEditTarget.value = null
+  resetBroadcastForm()
+  drawerOpen.value = true
+}
+
+function onBroadcastModeChange(): void {
+  const now = Date.now()
+  if (form.value.effectiveMode === 'IMMEDIATE') {
+    form.value.startAt = toLocalInput(now)
+    form.value.endAt = toLocalInput(now + 24 * HOUR_MS)
+    return
+  }
+  const start = fromLocalInput(form.value.startAt)
+  const nextStart = start && start > now ? start : now + HOUR_MS
+  form.value.startAt = toLocalInput(nextStart)
+  form.value.endAt = toLocalInput(nextStart + 24 * HOUR_MS)
+}
+
+function openBroadcastEdit(row: any): void {
+  broadcastEditTarget.value = row
+  const now = Date.now()
+  const storedExpiresAt = Number(row.expiresAt || 0)
+  const expired = storedExpiresAt > 0 && storedExpiresAt <= now
+  const scheduledAt = expired ? now : Number(row.scheduledAt || row.publishedAt || now)
+  const expiresAt = expired || !storedExpiresAt ? now + 24 * HOUR_MS : storedExpiresAt
+  const storedStatus = String(row.storedStatus || row.status || '')
+  form.value = {
+    title: row.title || '',
+    subtitle: row.subtitle || '',
+    type: row.type || 'NEW_ITEM',
+    content: row.content || '',
+    important: Boolean(row.important),
+    effectiveMode: storedStatus === 'SCHEDULED' && scheduledAt > now ? 'SCHEDULED' : 'IMMEDIATE',
+    startAt: toLocalInput(scheduledAt),
+    endAt: toLocalInput(expiresAt),
+  }
   drawerOpen.value = true
 }
 
 async function save() {
-  if (!form.value.title.trim()) {
-    app.showToast('请填写标题')
+  const title = form.value.title.trim()
+  if (title.length < 2) {
+    app.showToast('标题至少 2 个字')
     return
   }
+  const endAt = fromLocalInput(form.value.endAt)
+  const startAt = fromLocalInput(form.value.startAt)
+  if (!endAt) {
+    app.showToast('请选择结束时间')
+    return
+  }
+  if (form.value.effectiveMode === 'SCHEDULED' && !startAt) {
+    app.showToast('请选择开始时间')
+    return
+  }
+  const effectiveStart = form.value.effectiveMode === 'SCHEDULED' ? startAt : Date.now()
+  if (effectiveStart && endAt <= effectiveStart) {
+    app.showToast('结束时间必须晚于开始时间')
+    return
+  }
+  const payload = {
+    communityId: app.currentCommunityId,
+    title,
+    subtitle: form.value.subtitle,
+    type: form.value.type,
+    content: form.value.content,
+    important: form.value.important,
+    effectiveMode: form.value.effectiveMode,
+    startAt: form.value.effectiveMode === 'SCHEDULED' ? startAt : Date.now(),
+    endAt,
+  }
   try {
-    await operationsApi.create(config.value.api, {
-      communityId: app.currentCommunityId,
-      title: form.value.title,
-      subtitle: form.value.subtitle,
-      owner: form.value.owner,
-      category: form.value.category,
-      content: form.value.content,
-    })
+    if (broadcastEditTarget.value) {
+      await operationsApi.updateBroadcast(broadcastEditTarget.value.id, payload)
+      app.showToast('喇叭已更新')
+    } else {
+      await operationsApi.create(config.value.api, payload)
+      app.showToast(form.value.effectiveMode === 'SCHEDULED'
+        ? '喇叭已发布，将按时生效'
+        : '喇叭已发布并生效')
+    }
     drawerOpen.value = false
-    app.showToast(`${config.value.create}已提交`)
+    broadcastEditTarget.value = null
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '保存失败')
@@ -596,28 +734,36 @@ async function openEdit(row: any) {
 }
 
 function canEditRow(row: any): boolean {
+  if (module.value === 'broadcast') return canEditBroadcast.value
   if (module.value === 'help') return canEditHelp.value
   if (module.value === 'life') return canEditLife.value
   return canEditItem.value && !['RESERVED', 'SOLD', 'GIFTED'].includes(row.statusCode)
 }
 
 function canDeleteRow(row: any): boolean {
+  if (module.value === 'broadcast') return canDeleteBroadcast.value
   if (module.value === 'help') return canDeleteHelp.value
   if (module.value === 'life') return canDeleteLife.value
   return canDeleteItem.value && !['RESERVED', 'SOLD', 'GIFTED'].includes(row.statusCode)
 }
 
 function rowEditLabel(): string {
+  if (module.value === 'broadcast') return '编辑喇叭'
   if (module.value === 'help') return '编辑互助'
   return module.value === 'life' ? '编辑内容' : '编辑物品'
 }
 
 function rowDeleteLabel(): string {
+  if (module.value === 'broadcast') return '删除喇叭'
   if (module.value === 'help') return '删除互助'
   return module.value === 'life' ? '删除内容' : '删除物品'
 }
 
 function editRow(row: any): void {
+  if (module.value === 'broadcast') {
+    openBroadcastEdit(row)
+    return
+  }
   if (module.value === 'help') {
     void openHelpEdit(row)
     return
@@ -1200,16 +1346,21 @@ async function saveHelpEdit() {
 }
 
 async function confirmDelete(row: any): Promise<void> {
+  const isBroadcast = module.value === 'broadcast'
   const isLife = module.value === 'life'
   const isHelp = module.value === 'help'
   const confirmed = await confirm({
-    title: isHelp ? '删除互助' : isLife ? '删除内容' : '删除物品',
-    message: isHelp
+    title: isBroadcast ? '删除喇叭' : isHelp ? '删除互助' : isLife ? '删除内容' : '删除物品',
+    message: isBroadcast
+      ? `确定删除“${row.title}”吗？删除后不可恢复，移动端喇叭站将立即移除。`
+      : isHelp
       ? `确定删除“${row.title}”吗？删除后不可恢复，邻居响应记录将一并清理。`
       : isLife
       ? `确定删除“${row.title}”吗？删除后不可恢复，内容评论与收藏记录将一并清理。`
       : `确定删除“${row.title}”吗？删除后不可恢复，物品照片、质检记录与留言将一并清理。`,
-    details: [isHelp
+    details: [isBroadcast
+      ? '删除会同时清理该喇叭的收藏记录，并写入审计日志。'
+      : isHelp
       ? '删除操作会通知发布人，并写入审计日志。'
       : isLife
       ? '若仅需停止展示，请改用「下架内容」保留运营数据；删除记录仍会写入审计日志。'
@@ -1219,7 +1370,10 @@ async function confirmDelete(row: any): Promise<void> {
   })
   if (!confirmed) return
   try {
-    if (isHelp) {
+    if (isBroadcast) {
+      await operationsApi.deleteBroadcast(row.id)
+      app.showToast('喇叭已删除')
+    } else if (isHelp) {
       await operationsApi.deleteHelp(row.id)
       app.showToast('互助信息已删除')
     } else if (isLife) {
@@ -1259,6 +1413,29 @@ async function batchDeleteHelp(): Promise<void> {
     const result = await operationsApi.batchDeleteHelp(selectedRows.value)
     const failed = result?.failed?.length || 0
     app.showToast(failed ? `已删除 ${result.deleted.length} 条，${failed} 条失败` : `已删除 ${result.deleted.length} 条`)
+    selectedRows.value = []
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '批量删除失败')
+  }
+}
+
+async function batchDeleteBroadcasts(): Promise<void> {
+  if (!selectedRows.value.length || !canDeleteBroadcast.value) return
+  const confirmed = await confirm({
+    title: '批量删除喇叭',
+    message: `确定删除已选择的 ${selectedRows.value.length} 条喇叭吗？删除后不可恢复。`,
+    details: ['移动端喇叭站将立即移除已删除内容；失败项会在完成后提示。'],
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!confirmed) return
+  try {
+    const result = await operationsApi.batchDeleteBroadcasts(selectedRows.value)
+    const failed = result?.failed?.length || 0
+    app.showToast(failed
+      ? `已删除 ${result.deleted.length} 条，${failed} 条失败`
+      : `已删除 ${result.deleted.length} 条`)
     selectedRows.value = []
     await load()
   } catch (exc: any) {
@@ -1385,7 +1562,10 @@ watch(() => app.currentCommunityId, () => {
     </div>
     <div v-if="selectedRows.length" class="batch-bar community-operation-batch">
       <span>已选择 <strong>{{ selectedRows.length }}</strong> 项</span>
-      <button v-if="module === 'help' && canDeleteHelp" class="danger-button" @click="batchDeleteHelp">
+      <button v-if="module === 'broadcast' && canDeleteBroadcast" class="danger-button" @click="batchDeleteBroadcasts">
+        批量删除
+      </button>
+      <button v-else-if="module === 'help' && canDeleteHelp" class="danger-button" @click="batchDeleteHelp">
         批量删除
       </button>
       <button v-else @click="app.showToast('批量状态变更已完成')">批量变更状态</button>
@@ -1445,17 +1625,50 @@ watch(() => app.currentCommunityId, () => {
     </div>
   </section>
 
-  <NiDrawer :open="drawerOpen" :title="config.create" eyebrow="运营内容" @close="drawerOpen = false">
+  <NiDrawer
+    :open="drawerOpen"
+    :title="broadcastEditTarget ? '编辑喇叭' : '发布喇叭'"
+    eyebrow="社区喇叭"
+    @close="drawerOpen = false"
+  >
     <div class="form-grid">
-      <label class="full"><span>标题 *</span><input v-model="form.title" placeholder="请输入标题" /></label>
-      <label class="full"><span>副标题 / 摘要</span><input v-model="form.subtitle" placeholder="如：含图片 · 覆盖全体住户" /></label>
-      <label><span>分类</span><input v-model="form.category" placeholder="如：邻里播报" /></label>
-      <label><span>发布人</span><input v-model="form.owner" /></label>
-      <label class="full"><span>正文</span><textarea v-model="form.content" placeholder="请输入正文内容" /></label>
+      <label class="full"><span>标题 *</span><input v-model="form.title" maxlength="120" placeholder="请输入喇叭标题" /></label>
+      <label class="full"><span>副标题 / 摘要</span><input v-model="form.subtitle" maxlength="255" placeholder="如：今晚 19:30 · 中心广场" /></label>
+      <label>
+        <span>喇叭类型</span>
+        <select v-model="form.type">
+          <option v-for="item in BROADCAST_TYPES" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
+      </label>
+      <label>
+        <span>生效方式</span>
+        <select v-model="form.effectiveMode" @change="onBroadcastModeChange">
+          <option value="IMMEDIATE">即时生效</option>
+          <option value="SCHEDULED">指定时间段</option>
+        </select>
+      </label>
+      <label v-if="form.effectiveMode === 'SCHEDULED'">
+        <span>开始时间 *</span>
+        <input v-model="form.startAt" type="datetime-local" />
+      </label>
+      <label>
+        <span>结束时间 *</span>
+        <input v-model="form.endAt" type="datetime-local" />
+      </label>
+      <label class="full broadcast-important">
+        <span style="display: flex; align-items: center; gap: 8px">
+          <input v-model="form.important" type="checkbox" style="width: auto" />
+          设为重要喇叭（移动端优先展示）
+        </span>
+      </label>
+      <label class="full"><span>正文</span><textarea v-model="form.content" placeholder="请输入喇叭详细内容" /></label>
     </div>
+    <p style="margin-top: 12px; color: #958b9f; font-size: var(--font-size-caption)">
+      发布后无需审批立即生效；未单独设置时默认生效 24 小时。指定时间段会在到点后自动生效，到期自动下架。
+    </p>
     <template #footer>
       <button @click="drawerOpen = false">取消</button>
-      <button class="primary-button" @click="save">提交</button>
+      <button class="primary-button" @click="save">{{ broadcastEditTarget ? '保存修改' : '发布' }}</button>
     </template>
   </NiDrawer>
 

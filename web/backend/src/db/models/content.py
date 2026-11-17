@@ -11,7 +11,10 @@ from src.db.models.common import BigIntPk, Entity, JsonDict, utcnow
 
 class Broadcast(Entity):
     """社区喇叭（移动端喇叭站：紧急求助/免费上新/悬赏服务/新上架事件流）。
-    与移动端 Broadcast 模型对齐；发布前必须审核（状态机见 enums.ContentStatus）。"""
+
+    后台发布即生效，无需审核；`scheduled_at` / `expires_at` 描述生效时间窗，
+    未配置有效期时默认 24 小时（由 API 层填充，兼容存量 NULL 数据）。
+    """
 
     __tablename__ = "broadcasts"
 
@@ -26,10 +29,11 @@ class Broadcast(Entity):
     media: Mapped[dict] = mapped_column(JsonDict, default=list)
     tone: Mapped[str] = mapped_column(String(16), default="new")
     facts: Mapped[dict] = mapped_column(JsonDict, default=list)
-    status: Mapped[str] = mapped_column(String(20), default="PENDING_REVIEW", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="PUBLISHED", index=True)
     response_count: Mapped[int] = mapped_column(default=0)
     important: Mapped[bool] = mapped_column(Boolean, default=False)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

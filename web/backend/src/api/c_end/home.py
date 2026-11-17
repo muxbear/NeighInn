@@ -9,6 +9,7 @@ from src.db.models import AppNotification, Broadcast, Community, HelpRequest, It
 from src.domain import enums as E
 from src.services import item_service as item_svc
 from src.services.auth_service import bound_resident
+from src.services.broadcast_service import visibility_filters
 
 router = APIRouter(tags=["c:home"])
 
@@ -54,7 +55,7 @@ async def home_bundle(user: CurrentUser, db: DbSession):
     if community_id:
         broadcast_rows = list((await db.execute(
             select(Broadcast).where(Broadcast.community_id == community_id,
-                                    Broadcast.status == "PUBLISHED")
+                                    *visibility_filters())
             .order_by(Broadcast.important.desc(), Broadcast.id.desc()).limit(5))
         ).scalars().all())
         from src.api.c_end.broadcasts import _row as broadcast_row
