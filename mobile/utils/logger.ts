@@ -10,7 +10,7 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = {
   error: 40,
 }
 
-const MIN_LEVEL: LogLevel = env.name === 'prod' ? 'warn' : 'debug'
+const MIN_LEVEL: LogLevel = env.name === 'prod' || env.name === 'docker' ? 'warn' : 'debug'
 let currentUserId = ''
 
 function shouldLog(level: LogLevel): boolean {

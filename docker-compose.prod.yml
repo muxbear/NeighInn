@@ -1,0 +1,51 @@
+# 邻里小栈生产编排（Linux + Docker Compose v2）。
+#
+# 百度云 Redis/PostgreSQL/MinIO 发布在部署机 127.0.0.1:5201/5205/5206，
+# 因此后端使用 host 网络；两个 nginx 也使用 host 网络，分别监听 5192/5191，
+# 并把 /api 反代到 127.0.0.1:5193。
+#
+# 启动（管理端 + 统一服务端）：
+#   docker compose -f docker-compose.prod.yml up -d --build
+# 同时启动移动端 H5（需先在 HBuilderX 生成 unpackage/dist/build/web）：
+#   docker compose -f docker-compose.prod.yml --profile mobile up -d --build
+#
+# 注意：host 网络模式不适用 Docker Desktop for Windows/macOS，请在 Linux 服务器运行。
+name: neighinn-prod
+
+services:
+  backend:
+    build:
+      context: ./web/backend
+    image: neighinn/backend:latest
+    network_mode: host
+    env_file:
+      - ./web/backend/.env.prod
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  admin-web:
+    build:
+      context: ./web/frontend
+    image: neighinn/admin-web:latest
+    network_mode: host
+    environment:
+      NGINX_PORT: "5192"
+      BACKEND_UPSTREAM: "http://127.0.0.1:5193"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mobile-h5:
+    profiles: ["mobile"]
+    build:
+      context: ./mobile
+    image: neighinn/mobile-h5:latest
+    network_mode: host
+    environment:
+      NGINX_PORT: "5191"
+      BACKEND_UPSTREAM: "http://127.0.0.1:5193"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

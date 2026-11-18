@@ -166,7 +166,7 @@ Built with uni-app x Vapor + Vue 3 Composition API + TypeScript + Pinia. Targets
 | Admin frontend | Vue 3.5, TypeScript, Pinia, Vue Router 4, Vite 6, SCSS, Lucide, Axios |
 | Backend | Python 3.11+, FastAPI, SQLAlchemy 2.0 async, Pydantic 2, Alembic, PyJWT, WebSocket |
 | Data and infrastructure | PostgreSQL 16, Redis 7, MinIO, RabbitMQ (optional), SQLite for tests |
-| Build and quality | HBuilderX 5.34, npm, Vitest, uv, ruff, pytest, Docker Compose |
+| Build and quality | HBuilderX 5.34, npm, Vitest, uv, ruff, pytest |
 
 ## Repository layout
 
@@ -197,6 +197,8 @@ NeighInn/
 │   ├── frontend/               # Vue 3 admin console
 │   └── docs/                   # admin console design specification
 ├── docs/                       # SRS, UI/UX specification, evaluation report
+├── docker-compose.prod.yml     # production deployment (backend / admin / mobile H5)
+├── DEPLOY.md                   # production deployment guide
 ├── CLAUDE.md                   # engineering guide for this repository
 └── README.zh-CN.md             # Chinese README
 ```
@@ -212,19 +214,21 @@ NeighInn/
 | Node.js + npm | Node 18+ (20+ recommended) | Admin console, mobile static checks and tests |
 | Python + uv | Python 3.11+, latest uv | Unified backend |
 | HBuilderX | 5.34 | Compile and run the uni-app x app |
-| Docker + Compose | Optional | PostgreSQL / Redis / MinIO / RabbitMQ |
-| PostgreSQL | 16 (optional if using Docker) | Production-style database |
+| Docker + Compose | Optional (production only) | Build and deploy the backend, admin console and mobile H5 images; see [DEPLOY.md](DEPLOY.md) |
+| PostgreSQL | 16 | Development database configured in `web/backend/.env.dev` (local overrides in `.env.local`) |
 | WeChat DevTools | Optional | WeChat Mini Program preview |
 
 ### 1. Start the unified backend
 
 ```bash
 cd web/backend
-cp .env.example .env      # review secrets and connection strings
+# .env (shared) and .env.dev (development defaults) are tracked; put machine-specific
+# database / Redis / MinIO connection strings in .env.local (gitignored).
 uv sync --dev
 
-# Optional: start PostgreSQL / Redis / MinIO / RabbitMQ
-docker compose up -d
+# Config load order: .env → .env.dev (or .env.prod) → .env.local (non-prod only).
+# Local development connects directly to the configured PostgreSQL / Redis / MinIO
+# instances; no Docker Compose is required. RabbitMQ is optional (empty = outbox logs).
 
 # Apply schema migrations
 uv run alembic upgrade head
@@ -235,10 +239,11 @@ uv run python run.py
 
 Notes:
 
+- Local development connects directly to the PostgreSQL / Redis / MinIO instances configured in `.env.dev` / `.env.local`; Docker Compose is only used for production deployment (see [DEPLOY.md](DEPLOY.md)).
 - On Windows, always use `uv run python run.py`. Do not run `uvicorn src.main:app` directly; psycopg's async driver needs the SelectorEventLoop configured in `run.py`.
 - With `APP_ENV=dev`, the application also creates missing tables and seeds development baseline data (regions, communities, categories, dictionaries, permissions, roles, the super admin, parameters, hot search terms). Production must use Alembic migrations and replace the seeded account.
 - The default local administrator is `admin / Admin@2025`. This account is for local development only.
-- To test with a physical phone, set `APP_HOST=0.0.0.0` in `web/backend/.env` and point the mobile `LOCAL_HOST` to your computer's LAN IP.
+- To test with a physical phone, set `APP_HOST=0.0.0.0` in `web/backend/.env.local` and point the mobile `LOCAL_HOST` to your computer's LAN IP.
 
 ### 2. Start the admin console
 
@@ -248,7 +253,7 @@ npm install
 npm run dev
 ```
 
-Open <http://127.0.0.1:5192>. Vite proxies `/api` to `http://127.0.0.1:5193` using the backend `.env` values.
+Open <http://127.0.0.1:5192>. Vite proxies `/api` to the backend at `http://127.0.0.1:5193`.
 
 ### 3. Run the mobile app
 
@@ -271,8 +276,15 @@ Environment switching is in `mobile/config/env.ts`:
 - `CURRENT_ENV = 'local'` — connects to the unified backend at `http://127.0.0.1:5193/api/v1` (default).
 - `CURRENT_ENV = 'dev'` — fully offline mock mode with seeded demo data.
 - For Android emulators, set `LOCAL_HOST = '10.0.2.2'`; for physical devices, use the LAN IP.
+- `CURRENT_ENV = 'docker'` — H5 served by the mobile nginx image, using same-origin `/api/v1`; build the H5 bundle with HBuilderX into `unpackage/dist/build/web` first.
+
+### 4. Production Docker deployment
+
+See [DEPLOY.md](DEPLOY.md) for the production images, `.env.prod`, host-network and HTTPS requirements, and the mobile H5 build steps.
 
 ## Ports and accounts
+
+The development infrastructure addresses below are defaults; actual values come from `web/backend/.env.dev` and `.env.local`.
 
 | Service | Address | Notes |
 | --- | --- | --- |
@@ -283,15 +295,15 @@ Environment switching is in `mobile/config/env.ts`:
 | WebSocket | `ws://127.0.0.1:5193/api/v1/ws?token=<accessToken>` | IM, order, audit, notifications |
 | Swagger / OpenAPI | <http://127.0.0.1:5193/docs> | Both contract groups are visible |
 | Health checks | `/health/live`, `/health/ready` | Liveness and readiness |
-| PostgreSQL | `127.0.0.1:5432` | Database `neighinn_platform` |
+| PostgreSQL | `127.0.0.1:5432` | Database from `web/backend/.env.dev` / `.env.local` (dev example: `neighinn_dev`) |
 | Redis | `127.0.0.1:6379` | Sessions, SMS codes, cache |
-| MinIO API / console | `127.0.0.1:9000` / `9001` | Buckets `ni-public`, `ni-private`, `ni-system` |
+| MinIO API / console | `127.0.0.1:9000` / `9001` | Buckets `neighinn-public`, `neighinn-private`, `neighinn-system` |
 | RabbitMQ | `127.0.0.1:5672` / `15672` | Optional outbox delivery |
 | Local admin account | `admin / Admin@2025` | Development only |
 
 ## Configuration
 
-The backend reads `web/backend/.env` (gitignored; see `.env.example`). Key settings:
+The backend loads configuration in layers: `.env` (shared) → `.env.dev` or `.env.prod` (selected by `APP_ENV`) → `.env.local` (local overrides, non-prod only). See `.env.example`. Key settings:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -421,7 +433,7 @@ Next up:
 1. Read `CLAUDE.md` and the relevant design document before changing a module.
 2. Create a feature branch and keep commits focused; the repository uses Conventional Commit-style messages (`feat:`, `fix:`, `docs:`, `refactor:`, ...).
 3. Run the relevant quality gates before opening a pull request.
-4. Never commit `web/backend/.env`, `.claude/settings.local.json`, or any credentials.
+4. Never commit `web/backend/.env.local`, `web/backend/.env.prod`, `.claude/settings.local.json`, or any credentials.
 5. For changes involving funds, certification, privacy, or moderation, verify the rules in SRS chapters 4/7/9 and the detailed design before coding.
 
 Engineering guardrails:

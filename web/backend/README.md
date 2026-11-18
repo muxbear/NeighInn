@@ -58,15 +58,25 @@ Web 管理端 Vue 3 ──/api/v1/admin（Cookie+CSRF+2FA）──┘
 
 ## 启动
 
+本地开发**不依赖容器编排**。环境变量按以下顺序加载（同名变量后者覆盖前者）：
+
+| 文件 | 职责 | 是否提交 |
+| --- | --- | --- |
+| `.env` | 公共配置，所有环境共享 | 是（禁止写入密钥） |
+| `.env.dev` / `.env.prod` | 环境默认值（由 `APP_ENV` 选择） | `.env.dev` 是；`.env.prod` 否 |
+| `.env.local` | 本机连接串与账号覆盖（`APP_ENV != prod` 时加载） | 否 |
+
+`DATABASE_URL`、`REDIS_URL`、`MINIO_*` 等随环境变化的配置放在 `.env.dev` / `.env.local`；
+生产配置放在 `.env.prod`，由 Docker Compose 的 `env_file` 注入。
+如无现成实例，请自行安装对应服务；项目不再提供本地中间件 compose。
+RabbitMQ 可选，留空时 Outbox 事件只写进程日志。
+
 ```bash
 cd web/backend
 uv sync --dev
 
-# 基础设施（PostgreSQL / Redis / MinIO / RabbitMQ）
-docker compose up -d
-
-# 建库（首次）
-docker compose exec postgres psql -U postgres -c "CREATE DATABASE neighinn_platform;"
+# 首次使用：确保 .env.dev / .env.local 中的数据库已创建（当前开发库示例：neighinn_dev）
+# 可用本机/远程 psql 创建，或由 DBA 提供现成库
 
 # 迁移
 uv run alembic upgrade head
@@ -74,6 +84,8 @@ uv run alembic upgrade head
 # 启动（Windows 必须用 run.py，SelectorEventLoop）
 uv run python run.py
 ```
+
+> Docker Compose 只用于生产部署，见根目录 `DEPLOY.md`。
 
 - C 端 API：<http://127.0.0.1:5193/api/v1>
 - 管理端 API：<http://127.0.0.1:5193/api/v1/admin>
@@ -85,7 +97,7 @@ uv run python run.py
 - SQL 日志与 `DEBUG` 解耦：默认 `SQL_ECHO=false`；排查时临时设为 `true`，SQL 只输出一次且带 `traceId`。
 - 访问日志由应用中间件输出（`event=http_request`），uvicorn 自带 access log 已关闭；`/health/live`、`/health/ready` 不记录。
 - 所有日志自动注入 `traceId`（与响应头 `X-Trace-Id` 一致），并对密码、Token、手机号、身份证号脱敏。
-- 常用配置：`LOG_LEVEL`、`LOG_FORMAT`、`LOG_TO_FILE`、`SQL_ECHO`、`ACCESS_LOG`、`SLOW_REQUEST_MS`、`ACCESS_LOG_SKIP_PATHS`，详见 `.env.example`。
+- 常用配置：`LOG_LEVEL`、`LOG_FORMAT`、`LOG_TO_FILE`、`SQL_ECHO`、`ACCESS_LOG_ENABLED`、`SLOW_REQUEST_MS`、`ACCESS_LOG_SKIP_PATHS`；公共项在 `.env`，环境差异在 `.env.dev` / `.env.local`，字段说明见 `.env.example`。
 
 ## 质量门槛
 
@@ -105,9 +117,9 @@ uv run pytest -q            # 121 个测试（状态机/认证注册/认证上�
 > **移动端联调注意**
 >
 > - 移动端 H5 端口为 **5191**（`manifest.json` 的 `web.devServer.port` / `h5.devServer.port`）。
->   `web/backend/.env` 的 `CORS_ORIGINS` 已包含 5191/5192/5173（5173 为 Vite 默认端口兼容）；开发环境 `CORS_ORIGIN_REGEX` 进一步放行本机/私网任意端口，
+>   `web/backend/.env.dev` / `.env.local` 的 `CORS_ORIGINS` 已包含 5191/5192/5173（5173 为 Vite 默认端口兼容）；开发环境 `CORS_ORIGIN_REGEX` 进一步放行本机/私网任意端口，
 >   否则浏览器预检会返回 `400 Disallowed CORS origin`。
-> - 真机联调：后端 `APP_HOST` 改为 `0.0.0.0`，并把 `mobile/config/env.ts` 的 `LOCAL_HOST` 改为电脑局域网 IP；
+> - 真机联调：在后端 `.env.local` 中设置 `APP_HOST=0.0.0.0`，并把 `mobile/config/env.ts` 的 `LOCAL_HOST` 改为电脑局域网 IP；
 >   开发环境 `CORS_ORIGIN_REGEX` 已放行私网 IP 的 H5 来源（生产不生效）。
 > - 验证码存储由 `SMS_CODE_BACKEND` 控制：`redis` 重启/多副本不丢（推荐）；`memory` 仅用于无 Redis 的开发降级。
 > - Redis 不可用或认证失败时，管理端会话与验证码存储会自动降级为进程内内存（启动日志告警）；补全 `REDIS_URL` 凭据后重启即可启用。
@@ -165,8 +177,11 @@ web/backend/
 │       └── admin/                     # 管理端契约（/api/v1/admin，Cookie+CSRF+2FA）
 ├── tests/                             # 状态机单测 + OpenAPI 契约冒烟
 ├── run.py                             # Windows SelectorEventLoop 启动
-├── docker-compose.yml                 # PostgreSQL / Redis / MinIO / RabbitMQ
-└── .env.example
+├── .env                               # 公共配置（所有环境共享）
+├── .env.dev                           # 开发环境默认值
+├── .env.local                         # 本机覆盖（gitignored）
+├── .env.prod                          # 生产配置（gitignored）
+└── .env.example                       # 配置项参考模板
 ```
 
 ## 下一步（Phase 1，按优先级）

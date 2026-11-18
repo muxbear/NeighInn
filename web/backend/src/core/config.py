@@ -1,14 +1,70 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# backend 根目录：src/core/config.py → src → backend。
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+
+def _read_dotenv_value(path: Path, key: str) -> str | None:
+    """从 .env 文件中读取单个键，用于在加载前确定 APP_ENV。"""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip() == key:
+            return value.strip().strip("'\"") or None
+    return None
+
+
+def _detect_app_env() -> str:
+    """确定当前运行环境，优先级：进程环境变量 → .env.local → .env → dev。"""
+    env = (os.getenv("APP_ENV") or "").strip()
+    if env:
+        return env
+    for name in (".env.local", ".env"):
+        value = _read_dotenv_value(BASE_DIR / name, "APP_ENV")
+        if value:
+            return value
+    return "dev"
+
+
+def _resolve_env_files() -> tuple[Path, ...]:
+    """按优先级从低到高返回需要加载的环境变量文件。
+
+    加载顺序（后加载的同名变量覆盖先加载的）：
+      1. .env                  公共配置，所有环境共享
+      2. .env.${APP_ENV}       环境配置，如 .env.dev / .env.prod
+      3. .env.local            本机覆盖，仅非生产环境加载
+
+    APP_ENV 优先取进程环境变量（Docker Compose 通过 env_file 注入），
+    本地未设置时读取 .env.local / .env，缺省为 dev。
+    实际不存在的文件会被跳过，便于容器内仅通过环境变量注入配置。
+    """
+    app_env = _detect_app_env()
+    candidates = [BASE_DIR / ".env", BASE_DIR / f".env.{app_env}"]
+    if app_env != "prod":
+        candidates.append(BASE_DIR / ".env.local")
+    return tuple(path for path in candidates if path.is_file())
 
 
 class Settings(BaseSettings):
     """统一服务端配置。所有密钥经环境变量注入，禁止提交真实值。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_resolve_env_files(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = "Neighbor's Inn Platform API"
     app_env: str = "dev"

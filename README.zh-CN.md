@@ -163,7 +163,7 @@ Android / iOS / HarmonyOS        Vite · 5192
 | 管理端前端 | Vue 3.5、TypeScript、Pinia、Vue Router 4、Vite 6、SCSS、Lucide、Axios |
 | 服务端 | Python 3.11+、FastAPI、SQLAlchemy 2.0 async、Pydantic 2、Alembic、PyJWT、WebSocket |
 | 数据与基础设施 | PostgreSQL 16、Redis 7、MinIO、RabbitMQ（可选）、测试用 SQLite |
-| 构建与质量 | HBuilderX 5.34、npm、Vitest、uv、ruff、pytest、Docker Compose |
+| 构建与质量 | HBuilderX 5.34、npm、Vitest、uv、ruff、pytest |
 
 ## 仓库结构
 
@@ -194,6 +194,8 @@ NeighInn/
 │   ├── frontend/               # Vue 3 管理端
 │   └── docs/                   # 后台管理系统详细设计
 ├── docs/                       # 需求规格、UI/UE 规范、双端评估报告
+├── docker-compose.prod.yml     # 生产部署（服务端 / 管理端 / 移动端 H5）
+├── DEPLOY.md                   # 生产部署说明
 ├── CLAUDE.md                   # 本仓库工程指南
 └── README.md                   # 英文版 README
 ```
@@ -209,19 +211,21 @@ NeighInn/
 | Node.js + npm | Node 18+（推荐 20+） | 管理端、移动端静态检查与测试 |
 | Python + uv | Python 3.11+、最新版 uv | 统一服务端 |
 | HBuilderX | 5.34 | 编译与运行 uni-app x 移动端 |
-| Docker + Compose | 可选 | PostgreSQL / Redis / MinIO / RabbitMQ |
-| PostgreSQL | 16（使用 Docker 时可不单独安装） | 生产同构数据库 |
+| Docker + Compose | 可选（仅生产部署） | 构建并部署服务端、管理端与移动端 H5 镜像；见 [DEPLOY.md](DEPLOY.md) |
+| PostgreSQL | 16 | 开发库默认值在 `web/backend/.env.dev`，本机覆盖写入 `.env.local` |
 | 微信开发者工具 | 可选 | 微信小程序预览 |
 
 ### 1. 启动统一服务端
 
 ```bash
 cd web/backend
-cp .env.example .env      # Windows PowerShell 可用：Copy-Item .env.example .env
+# .env（公共配置）与 .env.dev（开发默认值）随仓库提供；
+# 本机数据库 / Redis / MinIO 连接串与账号写入 .env.local（已 gitignore）。
 uv sync --dev
 
-# 可选：启动 PostgreSQL / Redis / MinIO / RabbitMQ
-docker compose up -d
+# 加载顺序：.env → .env.dev（或 .env.prod）→ .env.local（仅非生产环境）。
+# 本地开发直接使用上述文件配置的 PostgreSQL / Redis / MinIO，无需 Docker Compose；
+# RabbitMQ 可选，留空时 Outbox 事件只写进程日志。
 
 # 执行数据库迁移
 uv run alembic upgrade head
@@ -232,10 +236,11 @@ uv run python run.py
 
 说明：
 
+- 本地开发直接连接 `.env.dev` / `.env.local` 中配置的 PostgreSQL / Redis / MinIO；Docker Compose 仅用于生产部署（见 [DEPLOY.md](DEPLOY.md)）。
 - Windows 上必须使用 `uv run python run.py`，不要直接 `uvicorn src.main:app`；psycopg 异步驱动需要 `run.py` 中配置的 SelectorEventLoop。
 - `APP_ENV=dev` 时，应用会兜底建表并写入开发种子数据（区划、社区、类目、字典、权限、角色、超管、参数、搜索热词）。生产环境必须走 Alembic 迁移，并替换种子超管账号。
 - 本地开发管理员账号为 `admin / Admin@2025`，仅限本地开发使用。
-- 真机联调时，将 `web/backend/.env` 的 `APP_HOST` 改为 `0.0.0.0`，并把移动端 `LOCAL_HOST` 改为电脑局域网 IP。
+- 真机联调时，在 `web/backend/.env.local` 中设置 `APP_HOST=0.0.0.0`，并把移动端 `LOCAL_HOST` 改为电脑局域网 IP。
 
 ### 2. 启动管理端
 
@@ -245,7 +250,7 @@ npm install
 npm run dev
 ```
 
-访问 <http://127.0.0.1:5192>。Vite 会读取后端 `.env` 中的地址，将 `/api` 代理到 `http://127.0.0.1:5193`。
+访问 <http://127.0.0.1:5192>。Vite 会把 `/api` 代理到后端 `http://127.0.0.1:5193`。
 
 ### 3. 运行移动端
 
@@ -268,8 +273,15 @@ npm run check      # TypeScript + .uvue 解析 + 路由/导入校验 + Vitest
 - `CURRENT_ENV = 'local'` —— 连接统一服务端 `http://127.0.0.1:5193/api/v1`（默认）。
 - `CURRENT_ENV = 'dev'` —— 完全离线 Mock 演示模式。
 - Android 模拟器将 `LOCAL_HOST` 改为 `10.0.2.2`；真机使用局域网 IP。
+- `CURRENT_ENV = 'docker'` —— H5 由移动端 nginx 镜像同源托管，使用 `/api/v1`；需先由 HBuilderX 生成 `unpackage/dist/build/web`。
+
+### 4. 生产 Docker 部署
+
+三个镜像（`web/backend`、`web/frontend`、`mobile`）、`.env.prod`、host 网络与 HTTPS 要求、移动端 H5 产物步骤见根目录 [DEPLOY.md](DEPLOY.md)。
 
 ## 端口与账号
+
+下表中的开发基础设施地址为默认值，实际以 `web/backend/.env.dev` 与 `.env.local` 为准。
 
 | 服务 | 地址 | 说明 |
 | --- | --- | --- |
@@ -280,15 +292,15 @@ npm run check      # TypeScript + .uvue 解析 + 路由/导入校验 + Vitest
 | WebSocket | `ws://127.0.0.1:5193/api/v1/ws?token=<accessToken>` | IM、订单、审核、通知 |
 | Swagger / OpenAPI | <http://127.0.0.1:5193/docs> | 双端契约完整可见 |
 | 健康检查 | `/health/live`、`/health/ready` | 存活与就绪探针 |
-| PostgreSQL | `127.0.0.1:5432` | 数据库 `neighinn_platform` |
+| PostgreSQL | `127.0.0.1:5432` | 数据库以 `web/backend/.env.dev` / `.env.local` 为准（开发库示例：`neighinn_dev`） |
 | Redis | `127.0.0.1:6379` | 会话、验证码、缓存 |
-| MinIO API / 控制台 | `127.0.0.1:9000` / `9001` | 桶 `ni-public`、`ni-private`、`ni-system` |
+| MinIO API / 控制台 | `127.0.0.1:9000` / `9001` | 桶 `neighinn-public`、`neighinn-private`、`neighinn-system` |
 | RabbitMQ | `127.0.0.1:5672` / `15672` | 可选，用于 Outbox 投递 |
 | 本地管理员 | `admin / Admin@2025` | 仅开发环境 |
 
 ## 配置说明
 
-服务端读取 `web/backend/.env`（已被 gitignore，示例见 `.env.example`）。关键配置：
+服务端按以下顺序分层加载配置：`.env`（公共）→ `.env.dev` 或 `.env.prod`（由 `APP_ENV` 选择）→ `.env.local`（本机覆盖，仅非生产环境）。字段说明见 `.env.example`。关键配置：
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -418,7 +430,7 @@ npm run check        # 类型检查 + check:uvue + check:links + Vitest（41 个
 1. 修改任一模块前，先阅读 `CLAUDE.md` 与对应详细设计文档。
 2. 使用功能分支，保持提交聚焦；提交信息采用 Conventional Commits 风格（`feat:`、`fix:`、`docs:`、`refactor:` 等）。
 3. 提交 Pull Request 前执行对应端的质量门槛命令。
-4. 严禁提交 `web/backend/.env`、`.claude/settings.local.json` 或任何密钥。
+4. 严禁提交 `web/backend/.env.local`、`web/backend/.env.prod`、`.claude/settings.local.json` 或任何密钥。
 5. 涉及资金、认证、隐私、审核的改动，先对照需求规格第 4/7/9 章与详细设计确认规则。
 
 工程红线：

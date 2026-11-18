@@ -1,9 +1,9 @@
 /**
  * 环境配置。
- * 当前无后端联调环境，默认开启 Mock；接入真实网关时把 mock 改为 false，并替换 baseUrl / wsUrl。
+ * 默认 'local' 联调统一服务端；离线演示用 'dev'（Mock）；H5 Docker 部署用 'docker'。
  */
 export interface EnvConfig {
-  name: 'dev' | 'local' | 'test' | 'staging' | 'prod'
+  name: 'dev' | 'local' | 'docker' | 'test' | 'staging' | 'prod'
   baseUrl: string
   wsUrl: string
   uploadUrl: string
@@ -40,6 +40,20 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
     mockLatency: 0,
     requestTimeout: 15000,
   },
+  /**
+   * Docker / nginx 同源部署专用（仅 H5 使用）。
+   * nginx 把 /api/ 反代到统一服务端；WebSocket 地址在 ws.service 中按当前页面
+   * 的协议与域名补全为 ws:// 或 wss://。
+   */
+  docker: {
+    name: 'docker',
+    baseUrl: '/api/v1',
+    wsUrl: '/api/v1/ws',
+    uploadUrl: '/api/v1',
+    mock: false,
+    mockLatency: 0,
+    requestTimeout: 15000,
+  },
   test: {
     name: 'test',
     baseUrl: 'https://api-test.neighinn.example.com/v1',
@@ -70,7 +84,8 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
 }
 
 /** 切换环境：改这里即可；HBuilderX 发版前务必确认为 staging / prod。
- * dev = 本地 Mock（离线演示）；local = 联调 web/backend 统一服务端（http://127.0.0.1:5193）。 */
+ * dev = 本地 Mock（离线演示）；local = 联调 web/backend 统一服务端（http://127.0.0.1:5193）；
+ * docker = H5 由 mobile/Dockerfile 的 nginx 同源托管（/api/v1 反代到 5193）。 */
 export const CURRENT_ENV: EnvConfig['name'] = 'local'
 
 export const env: EnvConfig = ENVS[CURRENT_ENV]

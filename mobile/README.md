@@ -54,6 +54,22 @@ npm test             # Vitest 单元测试
 npm run icons        # 重新生成图标与内置头像资源
 ```
 
+## Docker H5 部署（可选）
+
+uni-app x 的 H5 产物由 HBuilderX 编译，Linux 容器内没有对应编译器，`mobile/Dockerfile` 只托管已编译好的静态文件：
+
+1. 把 `config/env.ts` 的 `CURRENT_ENV` 改为 `'docker'`（使用同源 `/api/v1`，由 nginx 反代到统一服务端）；
+2. HBuilderX → **发行 → 网站-PC Web或手机H5**，确认输出到 `unpackage/dist/build/web`；
+3. 构建并运行（生产建议使用根目录 `docker-compose.prod.yml`）：
+
+```bash
+docker build -t neighinn-mobile ./mobile
+docker run -d --name neighinn-mobile --network host \
+  -e NGINX_PORT=5191 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 neighinn-mobile
+```
+
+访问 `http://<服务器IP>:5191`。nginx 会把 `/api/`（含 WebSocket `/api/v1/ws`）反代到 5193。完整部署步骤见根目录 `DEPLOY.md`。
+
 ## Mock 与真实接口
 
 - `config/env.ts`：`CURRENT_ENV = 'local'`（联调统一服务端）；离线演示改为 `dev`（`env.mock = true`）。

@@ -17,7 +17,8 @@ if __name__ == "__main__":
         "src.main:app",
         host=settings.app_host,
         port=settings.app_port,
-        reload=True,
+        # 仅开发环境启用热重载；生产容器（APP_ENV=prod）直接运行，避免 reload 进程。
+        reload=settings.app_env == "dev",
         reload_dirs=["src"],
         # 日志统一由 src/main.py 在导入时初始化；关闭 uvicorn 自带 logging config 与 access log，
         # 避免重复 handler 和两条访问日志。

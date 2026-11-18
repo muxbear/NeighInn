@@ -1,6 +1,10 @@
-# local secrets
-backend/.env
-backend/.env.*
+# 敏感配置：仅保留在本地/服务器，不提交
+backend/.env.local
+backend/.env.prod
+backend/.env.*.local
+# 公共配置与开发默认值（不含密钥）可以提交
+!backend/.env
+!backend/.env.dev
 !backend/.env.example
 backend/.venv/
 backend/__pycache__/

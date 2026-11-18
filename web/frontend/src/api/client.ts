@@ -27,7 +27,13 @@ http.interceptors.request.use((config) => {
   if (csrf && config.method && !['get', 'head', 'options'].includes(config.method.toLowerCase())) {
     config.headers['X-CSRF-Token'] = csrf
   }
-  config.headers['X-Trace-Id'] = crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+  // crypto.randomUUID 仅在安全上下文（HTTPS / localhost）可用；
+  // HTTP 联调时退化为随机十六进制串，避免请求拦截器直接抛错。
+  const traceSource =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : Math.random().toString(16).slice(2) + Date.now().toString(16)
+  config.headers['X-Trace-Id'] = traceSource.slice(0, 16)
   return config
 })
 

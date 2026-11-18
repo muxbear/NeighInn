@@ -18,6 +18,19 @@ export type WsHandler = (action: WsAction | string, payload: any) => void
 const HEARTBEAT_INTERVAL = 30 * 1000
 const MAX_RECONNECT_DELAY = 60 * 1000
 
+/**
+ * Docker / H5 同源部署时 env.wsUrl 为相对路径（/api/v1/ws），浏览器 WebSocket
+ * 需要绝对地址；按当前页面的协议与域名补全为 ws:// 或 wss://。
+ * App / 小程序端使用绝对 ws:// / wss:// 地址时原样返回。
+ */
+function resolveWsUrl(raw: string): string {
+  if (!raw.startsWith('/')) return raw
+  const loc = (globalThis as any).location
+  if (!loc || !loc.host) return raw
+  const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${loc.host}${raw}`
+}
+
 class WsService {
   private task: any = null
   private handlers = new Set<WsHandler>()
@@ -48,7 +61,7 @@ class WsService {
 
     try {
       const task = uni.connectSocket({
-        url: `${env.wsUrl}?token=${encodeURIComponent(token)}`,
+        url: `${resolveWsUrl(env.wsUrl)}?token=${encodeURIComponent(token)}`,
         complete: () => undefined,
       })
       this.task = task

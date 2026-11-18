@@ -1,0 +1,13 @@
+# 依赖与 HBuilderX 缓存
+node_modules/
+.hbuilderx/
+unpackage/cache/
+unpackage/dist/cache/
+unpackage/dist/dev/
+
+# 仅保留发行产物 unpackage/dist/build/web 供 Dockerfile 使用
+tests/
+docs/
+*.log
+.DS_Store
+Thumbs.db
