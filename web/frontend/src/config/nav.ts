@@ -84,7 +84,7 @@ export const figmaNavGroups: NavGroup[] = [
   {
     label: '系统管理',
     items: [
-      { id: 'users', label: '用户管理', route: '/system/users', icon: Users, permission: 'system:user:view' },
+      { id: 'users', label: '用户管理', route: '/system/users', icon: Users, permission: 'system:admin-user:view' },
       { id: 'roles', label: '角色权限', route: '/system/roles', icon: ShieldCheck, permission: 'system:role:view' },
       { id: 'resources', label: '资源管理', route: '/system/resources', icon: Box, permission: 'system:resource:view' },
       { id: 'parameters', label: '参数配置', route: '/system/parameters', icon: SlidersHorizontal, permission: 'system:parameter:view' },

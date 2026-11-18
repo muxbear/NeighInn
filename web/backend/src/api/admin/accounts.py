@@ -2,6 +2,8 @@
 参数配置/字典/审计见 system.py；资源页面管理（sys_pages）Phase 2 后续。"""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select
@@ -12,15 +14,17 @@ from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.permissions import require_permission
 from src.core.responses import ERR_BIZ_RULE, ERR_NOT_FOUND, ERR_PARAM, ApiError, ok, paginated
-from src.core.security import hash_password
+from src.core.security import decrypt_field, encrypt_field, hash_password, mask_phone
 from src.db.models import (
     AdminUser,
+    Community,
     Permission,
     Role,
     admin_user_communities,
     admin_user_roles,
     role_permissions,
 )
+from src.db.models.common import ensure_utc, utcnow
 
 router = APIRouter(tags=["admin:system:accounts"])
 
@@ -198,33 +202,80 @@ class AdminUserIn(BaseModel):
 
 async def _admin_row(db: AsyncSession, row: AdminUser) -> dict:
     roles = (await db.execute(
-        select(Role.code, Role.name)
+        select(Role.id, Role.code, Role.name)
         .join(admin_user_roles, admin_user_roles.c.role_id == Role.id)
         .where(admin_user_roles.c.admin_user_id == row.id))).all()
-    communities = list((await db.execute(
+    community_ids = list((await db.execute(
         select(admin_user_communities.c.community_id)
         .where(admin_user_communities.c.admin_user_id == row.id))).scalars().all())
+    communities: list[dict] = []
+    if community_ids:
+        community_rows = (await db.execute(
+            select(Community.id, Community.name)
+            .where(Community.id.in_(community_ids))
+            .order_by(Community.id))).all()
+        by_id = {cid: name for cid, name in community_rows}
+        communities = [{"id": str(cid), "name": by_id.get(cid, "")}
+                       for cid in community_ids if cid in by_id]
+    locked_until = ensure_utc(row.locked_until)
+    phone = decrypt_field(row.phone_enc) if row.phone_enc else ""
     return {
         "id": str(row.id), "username": row.username, "realName": row.real_name,
+        "phone": mask_phone(phone) if phone else "",
         "email": row.email, "status": row.status,
         "isSuperAdmin": row.is_super_admin,
         "twoFactorEnabled": row.two_factor_enabled,
-        "roles": [{"code": code, "name": name} for code, name in roles],
-        "communityIds": [str(cid) for cid in communities],
+        "roles": [{"id": str(rid), "code": code, "name": name}
+                  for rid, code, name in roles],
+        "roleIds": [str(rid) for rid, _, _ in roles],
+        "communities": communities,
+        "communityIds": [str(cid) for cid in community_ids],
+        "locked": bool(locked_until and locked_until > utcnow()),
+        "lockedUntil": int(locked_until.timestamp() * 1000) if locked_until else 0,
+        "failedAttempts": int(row.failed_attempts or 0),
         "lastLoginAt": int(row.last_login_at.timestamp() * 1000) if row.last_login_at else 0,
+        "createdAt": int(row.created_at.timestamp() * 1000) if row.created_at else 0,
     }
+
+
+def _validate_admin_password(password: str) -> None:
+    """后台账号密码策略：≥12 位，且大小写字母/数字/符号至少三类。"""
+    if len(password) < 12:
+        raise ApiError(ERR_PARAM, "密码最短 12 位（三类字符）", 400)
+    kinds = sum(bool(re.search(pattern, password))
+                for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+    if kinds < 3:
+        raise ApiError(ERR_PARAM, "密码需包含大小写字母、数字、符号中的至少三类", 400)
+
+
+async def _admin_count(db: AsyncSession, stmt) -> int:
+    return int((await db.scalar(
+        select(func.count()).select_from(stmt.subquery()))) or 0)
 
 
 @router.get("/admin-users", dependencies=[Depends(require_permission("system:admin-user:view"))])
 async def list_admin_users(admin: CurrentAdmin, db: DbSession,
                            keyword: str | None = Query(default=None),
+                           status: str | None = Query(default=None),
                            page: int = Query(default=1), pageSize: int = Query(default=20)):
     stmt = select(AdminUser)
     if keyword:
         stmt = stmt.where(or_(AdminUser.username.ilike(f"%{keyword}%"),
                               AdminUser.real_name.ilike(f"%{keyword}%")))
+    if status in ("ACTIVE", "DISABLED"):
+        stmt = stmt.where(AdminUser.status == status)
     rows, total = await paginate(db, stmt.order_by(AdminUser.id), page, pageSize)
-    return paginated([await _admin_row(db, row) for row in rows], page, pageSize, total)
+    now = utcnow()
+    stats = {
+        "total": total,
+        "active": await _admin_count(db, stmt.where(AdminUser.status == "ACTIVE")),
+        "disabled": await _admin_count(db, stmt.where(AdminUser.status == "DISABLED")),
+        "locked": await _admin_count(db, stmt.where(
+            AdminUser.locked_until.is_not(None), AdminUser.locked_until > now)),
+    }
+    payload = paginated([await _admin_row(db, row) for row in rows], page, pageSize, total)
+    payload["data"]["stats"] = stats
+    return payload
 
 
 @router.post("/admin-users", dependencies=[Depends(require_permission("system:admin-user:create"))])
@@ -232,15 +283,18 @@ async def create_admin_user(payload: AdminUserIn, request: Request,
                             admin: CurrentAdmin, db: DbSession):
     if len(payload.username.strip()) < 3:
         raise ApiError(ERR_PARAM, "用户名至少 3 位", 400)
-    if len(payload.password) < 12:
-        raise ApiError(ERR_PARAM, "初始密码最短 12 位（三类字符）", 400)
+    _validate_admin_password(payload.password)
     if await db.scalar(select(AdminUser).where(AdminUser.username == payload.username.strip())):
         raise ApiError(40901, "用户名已存在", 409)
+    real_name = payload.realName.strip()
     row = AdminUser(
         username=payload.username.strip(),
         password_hash=hash_password(payload.password),
-        real_name=payload.realName.strip(),
-        phone_enc="", email=payload.email, status=payload.status,
+        real_name=real_name,
+        phone_enc=encrypt_field(payload.phone.strip()),
+        email=payload.email,
+        avatar_text=real_name[:1],
+        status="ACTIVE" if payload.status not in ("ACTIVE", "DISABLED") else payload.status,
     )
     db.add(row)
     await db.flush()
@@ -279,11 +333,19 @@ async def update_admin_user(admin_id: int, payload: AdminUserIn,
     before = {"realName": row.real_name, "email": row.email, "status": row.status}
     row.real_name = payload.realName.strip() or row.real_name
     row.email = payload.email
+    # 列表返回脱敏手机号；留空表示不修改，避免编辑时误清空。
+    if payload.phone.strip():
+        row.phone_enc = encrypt_field(payload.phone.strip())
+    row.avatar_text = row.real_name[:1]
+    if payload.status in ("ACTIVE", "DISABLED"):
+        row.status = payload.status
     await _assign_roles_and_communities(db, row, payload.roleIds, payload.communityIds)
     await write_audit(db, request, actor=admin, action="admin-user.update",
                       resource_type="admin_user", resource_id=row.id,
                       before=before,
-                      after={"realName": row.real_name, "roleIds": payload.roleIds})
+                      after={"realName": row.real_name, "roleIds": payload.roleIds,
+                             "communityIds": payload.communityIds,
+                             "status": row.status})
     await db.commit()
     return ok(await _admin_row(db, row), "管理员已更新")
 
@@ -298,6 +360,8 @@ async def toggle_admin_user(admin_id: int, payload: dict, request: Request,
     status = payload.get("status", "")
     if status not in ("ACTIVE", "DISABLED"):
         raise ApiError(ERR_PARAM, "状态不合法", 400)
+    if row.id == admin.id and status == "DISABLED":
+        raise ApiError(ERR_BIZ_RULE, "不能停用当前登录账号", 422)
     if row.is_super_admin and status == "DISABLED":
         active_supers = int((await db.scalar(
             select(func.count()).select_from(AdminUser).where(
@@ -320,8 +384,7 @@ async def reset_admin_password(admin_id: int, payload: dict, request: Request,
     if not row:
         raise ApiError(ERR_NOT_FOUND, "管理员不存在", 404)
     new_password = str(payload.get("password", ""))
-    if len(new_password) < 12:
-        raise ApiError(ERR_PARAM, "新密码最短 12 位（三类字符）", 400)
+    _validate_admin_password(new_password)
     row.password_hash = hash_password(new_password)
     row.failed_attempts = 0
     row.locked_until = None
@@ -329,4 +392,81 @@ async def reset_admin_password(admin_id: int, payload: dict, request: Request,
                       resource_type="admin_user", resource_id=row.id,
                       before=None, after={"reset": True})
     await db.commit()
-    return ok(None, "密码已重置")
+    return ok(await _admin_row(db, row), "密码已重置")
+
+
+@router.post("/admin-users/{admin_id}/unlock", dependencies=[AdminUserManagePerm])
+async def unlock_admin_user(admin_id: int, request: Request,
+                            admin: CurrentAdmin, db: DbSession):
+    """解除登录失败锁定（连续失败 5 次锁定 15 分钟）；不影响账号启停状态。"""
+    row = await db.get(AdminUser, admin_id)
+    if not row:
+        raise ApiError(ERR_NOT_FOUND, "管理员不存在", 404)
+    before = {"failedAttempts": row.failed_attempts,
+              "lockedUntil": int(row.locked_until.timestamp() * 1000) if row.locked_until else 0}
+    row.failed_attempts = 0
+    row.locked_until = None
+    await write_audit(db, request, actor=admin, action="admin-user.unlock",
+                      resource_type="admin_user", resource_id=row.id,
+                      before=before, after={"failedAttempts": 0, "lockedUntil": 0})
+    await db.commit()
+    return ok(await _admin_row(db, row), "账号已解锁")
+
+
+@router.delete("/admin-users/{admin_id}", dependencies=[AdminUserManagePerm])
+async def delete_admin_user(admin_id: int, request: Request,
+                            admin: CurrentAdmin, db: DbSession):
+    """物理删除后台管理员账号；超级管理员与当前登录账号不可删除。"""
+    row = await db.get(AdminUser, admin_id)
+    if not row:
+        raise ApiError(ERR_NOT_FOUND, "管理员不存在", 404)
+    if row.is_super_admin:
+        raise ApiError(ERR_BIZ_RULE, "超级管理员不可删除", 422)
+    if row.id == admin.id:
+        raise ApiError(ERR_BIZ_RULE, "不能删除当前登录账号", 422)
+    before = {"username": row.username, "realName": row.real_name, "email": row.email}
+    await db.execute(delete(admin_user_roles)
+                     .where(admin_user_roles.c.admin_user_id == row.id))
+    await db.execute(delete(admin_user_communities)
+                     .where(admin_user_communities.c.admin_user_id == row.id))
+    await db.delete(row)
+    await write_audit(db, request, actor=admin, action="admin-user.delete",
+                      resource_type="admin_user", resource_id=admin_id,
+                      before=before, after=None)
+    await db.commit()
+    return ok(None, "管理员已删除")
+
+
+class BatchDeleteIn(BaseModel):
+    ids: list[int] = []
+
+
+@router.post("/admin-users/batch-delete", dependencies=[AdminUserManagePerm])
+async def batch_delete_admin_users(payload: BatchDeleteIn, request: Request,
+                                   admin: CurrentAdmin, db: DbSession):
+    """批量物理删除后台管理员账号；含超级管理员或当前登录账号时整批拒绝。"""
+    ids = sorted({int(item) for item in payload.ids})
+    if not ids:
+        raise ApiError(ERR_PARAM, "请选择要删除的账号", 400)
+    rows = list((await db.execute(
+        select(AdminUser).where(AdminUser.id.in_(ids)))).scalars().all())
+    if not rows:
+        raise ApiError(ERR_NOT_FOUND, "账号不存在", 404)
+    supers = [row.username for row in rows if row.is_super_admin]
+    if supers:
+        raise ApiError(ERR_BIZ_RULE, f"超级管理员不可删除：{', '.join(supers)}", 422)
+    if any(row.id == admin.id for row in rows):
+        raise ApiError(ERR_BIZ_RULE, "不能删除当前登录账号", 422)
+    await db.execute(delete(admin_user_roles)
+                     .where(admin_user_roles.c.admin_user_id.in_(ids)))
+    await db.execute(delete(admin_user_communities)
+                     .where(admin_user_communities.c.admin_user_id.in_(ids)))
+    for row in rows:
+        await db.delete(row)
+    await write_audit(db, request, actor=admin, action="admin-user.batch-delete",
+                      resource_type="admin_user", resource_id=",".join(str(i) for i in ids),
+                      before={"accounts": [{"id": row.id, "username": row.username}
+                                           for row in rows]},
+                      after=None)
+    await db.commit()
+    return ok({"deleted": len(rows)}, f"已删除 {len(rows)} 个管理员账号")

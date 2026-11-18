@@ -250,6 +250,21 @@ export const usersApi = {
   toggle: (id: number | string) => http.patch<any, any>(`/users/${id}/status`, {}),
 }
 
+/** 后台管理员账号（系统管理 / 用户管理页）。 */
+export const adminUsersApi = {
+  list: (params: Dict = {}) => http.get<any, any>('/admin-users', { params }),
+  create: (payload: Dict) => http.post<any, any>('/admin-users', payload),
+  update: (id: number | string, payload: Dict) => http.put<any, any>(`/admin-users/${id}`, payload),
+  remove: (id: number | string) => http.delete<any, any>(`/admin-users/${id}`),
+  batchRemove: (ids: Array<string | number>) =>
+    http.post<any, any>('/admin-users/batch-delete', { ids: ids.map((id) => Number(id)) }),
+  toggleStatus: (id: number | string, status: 'ACTIVE' | 'DISABLED') =>
+    http.patch<any, any>(`/admin-users/${id}/status`, { status }),
+  resetPassword: (id: number | string, password: string) =>
+    http.post<any, any>(`/admin-users/${id}/reset-password`, { password }),
+  unlock: (id: number | string) => http.post<any, any>(`/admin-users/${id}/unlock`),
+}
+
 export const repairApi = {
   list: async (params: Dict = {}) => mapItems(await http.get<any, any>('/repair-orders', { params }), (row) => ({ ...row, status: row.status })),
   create: (payload: Dict) => http.post<any, any>('/repair-orders', payload),

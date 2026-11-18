@@ -226,6 +226,98 @@ async def test_admin_user_management(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_admin_user_unlock_and_delete(client, db_session):
+    """管理员账号：手机号脱敏、登录锁定解除、单删/批量删除与超管保护。"""
+    from datetime import timedelta
+
+    from src.db.models import AdminUser
+    from src.db.models.common import utcnow
+
+    await admin_login(client)
+    created = []
+    for username in ("batch01", "batch02"):
+        resp = await client.post(f"{ADMIN_BASE}/admin-users", json={
+            "username": username, "password": "Batch@2025Pass", "realName": username,
+            "phone": "13800001111"}, headers=admin_headers(client))
+        assert resp.status_code == 200, resp.text
+        created.append(resp.json()["data"])
+    ids = [row["id"] for row in created]
+    assert created[0]["phone"] == "138****1111"
+    assert created[0]["locked"] is False
+
+    # 模拟连续登录失败锁定 → 解锁清除锁定与失败次数
+    row = await db_session.get(AdminUser, int(ids[0]))
+    row.locked_until = utcnow() + timedelta(minutes=15)
+    row.failed_attempts = 3
+    await db_session.commit()
+    unlock = await client.post(f"{ADMIN_BASE}/admin-users/{ids[0]}/unlock",
+                               headers=admin_headers(client))
+    assert unlock.status_code == 200, unlock.text
+    assert unlock.json()["data"]["locked"] is False
+    await db_session.refresh(row)
+    assert row.failed_attempts == 0
+    assert row.locked_until is None
+
+    # 单个物理删除
+    delete = await client.delete(f"{ADMIN_BASE}/admin-users/{ids[0]}",
+                                 headers=admin_headers(client))
+    assert delete.status_code == 200, delete.text
+    db_session.expunge_all()
+    assert await db_session.get(AdminUser, int(ids[0])) is None
+
+    # 批量物理删除
+    batch = await client.post(f"{ADMIN_BASE}/admin-users/batch-delete",
+                              json={"ids": [int(ids[1])]}, headers=admin_headers(client))
+    assert batch.status_code == 200, batch.text
+    assert batch.json()["data"]["deleted"] == 1
+    db_session.expunge_all()
+    assert await db_session.get(AdminUser, int(ids[1])) is None
+
+    # 超级管理员不可删除
+    super_id = await db_session.scalar(
+        select(AdminUser.id).where(AdminUser.username == "admin"))
+    blocked = await client.delete(f"{ADMIN_BASE}/admin-users/{super_id}",
+                                  headers=admin_headers(client))
+    assert blocked.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_resource_pages_tree_detail_and_resource(client):
+    """资源管理：页面树、页面详情、页面资源列表与新增资源。"""
+    await admin_login(client)
+    tree = (await client.get(f"{ADMIN_BASE}/pages/tree")).json()["data"]
+    assert tree
+    routes = [item["route"] for group in tree for item in group["items"]]
+    assert "/system/resources" in routes
+    assert "/system/users" in routes
+    assert len(routes) == len(set(routes)), "同一路由不应重复展示"
+
+    system_group = next(group for group in tree if group["label"] == "系统管理")
+    page = next(item for item in system_group["items"] if item["route"] == "/system/resources")
+    detail = (await client.get(f"{ADMIN_BASE}/pages/{page['id']}")).json()["data"]
+    assert detail["code"] == "system:resource"
+    assert detail["statusLabel"] == "页面已启用"
+    assert detail["permissionCount"] >= 2
+
+    resources = (await client.get(
+        f"{ADMIN_BASE}/pages/{page['id']}/resources")).json()["data"]
+    assert "system:resource:create" in [row["permissionCode"] for row in resources]
+
+    created = await client.post(
+        f"{ADMIN_BASE}/pages/{page['id']}/resources",
+        json={"name": "导出资源清单", "type": "按钮"}, headers=admin_headers(client))
+    assert created.status_code == 200, created.text
+    data = created.json()["data"]
+    assert data["permissionCode"] == "system:resource:custom1"
+    assert data["status"] == "启用"
+
+    # 新资源进入权限表，可在权限树中用于角色授权
+    tree_perms = (await client.get(f"{ADMIN_BASE}/permissions/tree")).json()["data"]
+    codes = [item["code"] for group in tree_perms for item in group["items"]]
+    assert "system:resource:custom1" in codes
+
+
+@pytest.mark.asyncio
 async def test_export_flow(client):
     """W08-03：导出任务生成 CSV（默认脱敏）→ 下载写审计。"""
     await verified_user(client, "13944440003")

@@ -1,119 +1,119 @@
 {
-	"name": "邻里小栈",
-	"appid": "__UNI__04E3A11",
-	"description": "邻里小栈 —— 同一小区及邻近小区业主的闲置物品共享交易平台",
-	"versionName": "1.0.0",
-	"versionCode": "100",
-	"transformPx": false,
-	"uni-app-x": {
-		"vapor": true,
-		"styleIsolationVersion": "2",
-		"vapor-render-target": "bytecode",
-		"vapor-default-script-lang": "ts"
-	},
-	"app": {
-		"distribute": {
-			"android": {
-				"permissions": [
-					"<uses-permission android:name=\"android.permission.INTERNET\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
-					"<uses-permission android:name=\"android.permission.CAMERA\"/>",
-					"<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>",
-					"<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>"
-				],
-				"minSdkVersion": 23,
-				"targetSdkVersion": 35
-			},
-			"ios": {
-				"dSYMs": false,
-				"idfa": false,
-				"privacyDescription": {
-					"NSPhotoLibraryUsageDescription": "用于选择物品照片与生活动态图片",
-					"NSCameraUsageDescription": "用于拍摄物品照片与认证材料",
-					"NSLocationWhenInUseUsageDescription": "用于展示附近小区与物品距离",
-					"NSMicrophoneUsageDescription": "用于拍摄生活动态视频"
-				}
-			},
-			"sdkConfigs": {}
-		}
-	},
-	"mp-weixin": {
-		"appid": "wx13c50e39c5412929",
-		"setting": {
-			"urlCheck": false,
-			"es6": true,
-			"minified": true
-		},
-		"usingComponents": true,
-		"optimization": {
-			"subPackages": true
-		}
-	},
-	"mp-alipay": {
-		"usingComponents": true
-	},
-	"h5": {
-		"title": "邻里小栈",
-		"router": {
-			"mode": "hash"
-		},
-		"devServer": {
-			"port": 5191,
-			"strictPort": true
-		}
-	},
-	"app-android": {
-		"distribute": {
-			"permissions": [
-				"<uses-permission android:name=\"android.permission.INTERNET\"/>",
-				"<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
-				"<uses-permission android:name=\"android.permission.CAMERA\"/>",
-				"<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>",
-				"<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
-				"<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
-				"<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>"
-			],
-			"minSdkVersion": 23,
-			"targetSdkVersion": 35,
-			"modules": {},
-			"icons": {},
-			"splashScreens": {
-				"default": {}
-			}
-		}
-	},
-	"app-ios": {
-		"distribute": {
-			"dSYMs": false,
-			"idfa": false,
-			"privacyDescription": {
-				"NSPhotoLibraryUsageDescription": "用于选择物品照片与生活动态图片",
-				"NSCameraUsageDescription": "用于拍摄物品照片与认证材料",
-				"NSLocationWhenInUseUsageDescription": "用于展示附近小区与物品距离",
-				"NSMicrophoneUsageDescription": "用于拍摄生活动态视频"
-			},
-			"modules": {},
-			"icons": {},
-			"splashScreens": {}
-		}
-	},
-	"web": {
-		"router": {
-			"mode": "hash"
-		},
-		"title": "邻里小栈",
-		"devServer": {
-			"port": 5191,
-			"strictPort": true
-		},
-		"sdkConfigs": {
-			"maps": {
-				"amap": {
-					"key": ""
-				}
-			}
-		}
-	}
+    "name" : "邻里小栈",
+    "appid" : "__UNI__04E3A11",
+    "description" : "邻里小栈 —— 同一小区及邻近小区业主的闲置物品共享交易平台",
+    "versionName" : "1.0.0",
+    "versionCode" : "100",
+    "transformPx" : false,
+    "uni-app-x" : {
+        "vapor" : true,
+        "styleIsolationVersion" : "2",
+        "vapor-render-target" : "bytecode",
+        "vapor-default-script-lang" : "ts"
+    },
+    "app" : {
+        "distribute" : {
+            "android" : {
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>",
+                    "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>"
+                ],
+                "minSdkVersion" : 23,
+                "targetSdkVersion" : 35
+            },
+            "ios" : {
+                "dSYMs" : false,
+                "idfa" : false,
+                "privacyDescription" : {
+                    "NSPhotoLibraryUsageDescription" : "用于选择物品照片与生活动态图片",
+                    "NSCameraUsageDescription" : "用于拍摄物品照片与认证材料",
+                    "NSLocationWhenInUseUsageDescription" : "用于展示附近小区与物品距离",
+                    "NSMicrophoneUsageDescription" : "用于拍摄生活动态视频"
+                }
+            },
+            "sdkConfigs" : {}
+        }
+    },
+    "mp-weixin" : {
+        "appid" : "wx13c50e39c5412929",
+        "setting" : {
+            "urlCheck" : false,
+            "es6" : true,
+            "minified" : true
+        },
+        "usingComponents" : true,
+        "optimization" : {
+            "subPackages" : true
+        }
+    },
+    "mp-alipay" : {
+        "usingComponents" : true
+    },
+    "h5" : {
+        "title" : "邻里小栈",
+        "router" : {
+            "mode" : "hash"
+        },
+        "devServer" : {
+            "port" : 5191,
+            "strictPort" : true
+        }
+    },
+    "app-android" : {
+        "distribute" : {
+            "permissions" : [
+                "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>",
+                "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
+                "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
+                "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>"
+            ],
+            "minSdkVersion" : 23,
+            "targetSdkVersion" : 35,
+            "modules" : {},
+            "icons" : {},
+            "splashScreens" : {
+                "default" : {}
+            }
+        }
+    },
+    "app-ios" : {
+        "distribute" : {
+            "dSYMs" : false,
+            "idfa" : false,
+            "privacyDescription" : {
+                "NSPhotoLibraryUsageDescription" : "用于选择物品照片与生活动态图片",
+                "NSCameraUsageDescription" : "用于拍摄物品照片与认证材料",
+                "NSLocationWhenInUseUsageDescription" : "用于展示附近小区与物品距离",
+                "NSMicrophoneUsageDescription" : "用于拍摄生活动态视频"
+            },
+            "modules" : {},
+            "icons" : {},
+            "splashScreens" : {}
+        }
+    },
+    "web" : {
+        "router" : {
+            "mode" : "hash"
+        },
+        "title" : "邻里小栈",
+        "devServer" : {
+            "port" : 5191,
+            "strictPort" : true
+        },
+        "sdkConfigs" : {
+            "maps" : {
+                "amap" : {
+                    "key" : ""
+                }
+            }
+        }
+    }
 }

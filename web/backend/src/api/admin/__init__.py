@@ -16,6 +16,7 @@ from src.api.admin import (
     governance_extra,
     operations,
     residents,
+    resources,
     system,
     users,
 )
@@ -34,6 +35,7 @@ for module in (
     governance,
     governance_extra,
     finance,
+    resources,
     system,
     users,
     files,

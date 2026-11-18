@@ -23,10 +23,10 @@ const allPages = computed(() => groups.value.flatMap((group) => group.items))
 const selectedPage = computed(() => allPages.value.find((page) => page.id === selectedId.value))
 const visibleGroups = computed(() => groups.value.map((group) => ({ ...group, items: group.items.filter((page: any) => !treeQuery.value || `${page.name} ${page.code}`.toLowerCase().includes(treeQuery.value.toLowerCase())) })).filter((group) => group.items.length))
 const resourceSummary = computed(() => [
-  { label: '输入类资源', value: resources.value.filter((row) => row.type === '输入框').length, icon: AppWindow },
-  { label: '操作类资源', value: resources.value.filter((row) => row.type === '按钮').length, icon: AppWindow },
-  { label: '选择类资源', value: resources.value.filter((row) => row.type === '下拉列表').length, icon: AppWindow },
-  { label: '复合类资源', value: resources.value.filter((row) => ['弹出菜单', '表格'].includes(row.type)).length, icon: AppWindow },
+  { label: '页面与菜单', value: resources.value.filter((row) => ['页面', '菜单'].includes(row.type)).length, icon: AppWindow },
+  { label: '操作类资源', value: resources.value.filter((row) => ['按钮', '开关', '弹出菜单'].includes(row.type)).length, icon: AppWindow },
+  { label: '接口类资源', value: resources.value.filter((row) => ['接口', 'API'].includes(row.type)).length, icon: AppWindow },
+  { label: '其他资源', value: resources.value.filter((row) => !['页面', '菜单', '按钮', '开关', '弹出菜单', '接口', 'API'].includes(row.type)).length, icon: AppWindow },
 ])
 
 function toggleGroup(label: string) {
@@ -137,7 +137,7 @@ onMounted(loadTree)
           <label><span>所属区域</span><input :value="detail.region" disabled /></label>
           <label class="full"><span>页面说明</span><textarea :value="detail.description" :disabled="!editing" /></label>
         </div>
-        <div class="resource-info-strip"><div><span>资源数量</span><strong>{{ resources.length }}</strong></div><div><span>关联权限</span><strong>8 项</strong></div><div><span>页面状态</span><strong class="enabled">已启用</strong></div><div><span>最后更新</span><strong>2026-11-14 09:42</strong></div></div>
+        <div class="resource-info-strip"><div><span>资源数量</span><strong>{{ resources.length }}</strong></div><div><span>关联权限</span><strong>{{ detail.permissionCount ?? resources.length + 1 }} 项</strong></div><div><span>页面状态</span><strong class="enabled">{{ detail.statusLabel || '页面已启用' }}</strong></div><div><span>最后更新</span><strong>{{ formatDateTime(detail.updatedAt) }}</strong></div></div>
         <div class="resource-danger-zone"><div><Trash2 :size="17" /><div><strong>删除当前页面</strong><p>删除后，该页面及页面资源将不再参与角色授权。</p></div></div><button @click="app.showToast('删除页面需要二次确认')">删除页面</button></div>
       </div>
 

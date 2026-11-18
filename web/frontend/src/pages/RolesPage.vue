@@ -47,7 +47,7 @@ const groups: Group[] = [
     { label: '纠纷调解', code: 'governance:dispute', icon: ShieldCheck, resources: [{ code: 'governance:dispute:view', label: '查看纠纷', type: '页面' }, { code: 'governance:dispute:mediate', label: '调解记录', type: '按钮' }, { code: 'governance:dispute:resolve', label: '出具结论', type: '按钮' }] },
   ] },
   { label: '系统管理', items: [
-    { label: '用户管理', code: 'system:user', icon: Users, resources: [{ code: 'system:user:view', label: '查看用户', type: '页面' }, { code: 'system:user:create', label: '新增用户', type: '按钮' }, { code: 'system:user:update', label: '编辑用户', type: '按钮' }] },
+    { label: '用户管理', code: 'system:admin-user', icon: Users, resources: [{ code: 'system:admin-user:view', label: '查看账号', type: '页面' }, { code: 'system:admin-user:create', label: '新增账号', type: '按钮' }, { code: 'system:admin-user:update', label: '编辑/禁用/解锁/重置密码/删除', type: '弹出菜单' }] },
     { label: '角色权限', code: 'system:role', icon: ShieldCheck, resources: [{ code: 'system:role:view', label: '查看角色', type: '页面' }, { code: 'system:role:create', label: '新建角色', type: '按钮' }, { code: 'system:role:grant', label: '配置权限', type: '按钮' }] },
     { label: '资源管理', code: 'system:resource', icon: Box, resources: [{ code: 'system:resource:view', label: '查看资源', type: '页面' }, { code: 'system:resource:create', label: '新增资源', type: '按钮' }, { code: 'system:resource:update', label: '编辑资源', type: '按钮' }] },
     { label: '参数配置', code: 'system:parameter', icon: SlidersHorizontal, resources: [{ code: 'system:parameter:view', label: '查看参数', type: '页面' }, { code: 'system:parameter:update', label: '修改参数', type: '按钮' }, { code: 'system:parameter:publish', label: '发布参数', type: '按钮' }] },
