@@ -115,7 +115,7 @@ async function logout() {
 
 onMounted(() => {
   app.loadCommunities().catch(() => undefined)
-  todos.startPolling()
+  todos.startPolling(app.currentCommunityId)
   navBadges.refresh(app.currentCommunityId)
   window.addEventListener('keydown', (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {

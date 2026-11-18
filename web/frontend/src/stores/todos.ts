@@ -22,23 +22,27 @@ export const useTodoStore = defineStore('todos', () => {
   const loading = ref(false)
   const lastLoadedAt = ref(0)
   let timer: number | undefined
-  let inFlight = false
+  // 请求序号用于丢弃快速切换社区时较早返回的响应，避免旧社区数据覆盖新社区。
+  let requestSeq = 0
+  // 待办必须与顶部「当前运营空间」一致；未显式传参时沿用上一次社区。
+  let currentCommunityId: number | undefined
 
   const total = computed(() => items.value.reduce((sum, item) => sum + item.count, 0))
   const certTodo = computed(() => items.value.find((item) => item.key === 'certification'))
 
-  async function refresh(): Promise<void> {
-    if (inFlight) return
-    inFlight = true
+  async function refresh(communityId?: number): Promise<void> {
+    if (communityId !== undefined) currentCommunityId = communityId
+    const seq = ++requestSeq
     loading.value = true
     try {
-      items.value = (await dashboardApi.todos()) as TodoItem[]
+      const data = (await dashboardApi.todos(currentCommunityId)) as TodoItem[]
+      if (seq !== requestSeq) return
+      items.value = data
       lastLoadedAt.value = Date.now()
     } catch {
       // 保留上一次成功数据，后台操作不被待办刷新失败打断。
     } finally {
-      inFlight = false
-      loading.value = false
+      if (seq === requestSeq) loading.value = false
     }
   }
 
@@ -50,10 +54,11 @@ export const useTodoStore = defineStore('todos', () => {
     if (document.visibilityState === 'visible') refresh()
   }
 
-  function startPolling(intervalMs = 60_000): void {
+  function startPolling(communityId?: number, intervalMs = 60_000): void {
     stopPolling()
-    refresh()
-    timer = window.setInterval(refresh, intervalMs)
+    if (communityId !== undefined) currentCommunityId = communityId
+    refresh(currentCommunityId)
+    timer = window.setInterval(() => refresh(currentCommunityId), intervalMs)
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onVisibilityChange)
   }

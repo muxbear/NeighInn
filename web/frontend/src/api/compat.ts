@@ -273,24 +273,37 @@ export function normalizeFeedback(row: any): any {
 
 // ---------------------------------------------------------------- 工作台
 
+/**
+ * 工作台字段全部来自服务端真实聚合。早期版本在这里填充演示值（12,680 用户、
+ * 96.8% 满意度等），接口失败时会展示假数据；此处只做类型收敛，不再提供任何
+ * 业务兜底，空态与错误态由页面负责。
+ */
 export function normalizeDashboard(data: any): any {
   const metrics = data?.metrics || {}
+  const distribution = data?.distribution || {}
   return {
-    ...data,
+    scope: data?.scope === 'COMMUNITY' ? 'COMMUNITY' : 'PLATFORM',
+    community: data?.community ?? null,
+    generatedAt: Number(data?.generatedAt || 0),
     metrics: {
-      users: metrics.users ?? 0,
-      active: metrics.todayNewUsers ?? 0,
-      todos: (data?.todos || []).reduce((sum: number, item: any) => sum + (item.count || 0), 0),
-      satisfaction: metrics.satisfaction ?? 96.8,
-      gmvCents: metrics.gmvCents ?? 0,
-      usersChange: metrics.todayNewUsers ? `今日新增 ${metrics.todayNewUsers}` : '平稳',
-      activeChange: '真实统计',
-      todoChange: '需关注',
-      satisfactionChange: '',
-      usersDetail: '平台注册用户',
-      activeDetail: '今日新增注册',
-      todoDetail: '各业务待办合计',
-      satisfactionDetail: '待接入评价口径',
+      users: Number(metrics.users || 0),
+      platformUsers: Number(metrics.platformUsers || 0),
+      todayNewUsers: Number(metrics.todayNewUsers || 0),
+      activeUsers: Number(metrics.activeUsers || 0),
+      activeRate: Number(metrics.activeRate || 0),
+      itemsOnSale: Number(metrics.itemsOnSale || 0),
+      pendingReviews: Number(metrics.pendingReviews || 0),
+      ordersCompleted: Number(metrics.ordersCompleted || 0),
+      gmvCents: Number(metrics.gmvCents || 0),
+      giftCompleted: Number(metrics.giftCompleted || 0),
+      barterCompleted: Number(metrics.barterCompleted || 0),
+    },
+    distribution: {
+      owner: Number(distribution.owner || 0),
+      tenant: Number(distribution.tenant || 0),
+      family: Number(distribution.family || 0),
+      business: Number(distribution.business || 0),
+      total: Number(distribution.total || 0),
     },
     todos: (data?.todos || []).map(normalizeTodo),
   }
@@ -298,19 +311,25 @@ export function normalizeDashboard(data: any): any {
 
 export function normalizeTrend(data: any): any {
   return {
+    scope: data?.scope === 'COMMUNITY' ? 'COMMUNITY' : 'PLATFORM',
+    days: Number(data?.days || 0),
     labels: data?.labels || [],
-    active: data?.active || [],
-    interaction: data?.interaction ?? data?.published ?? [],
+    newUsers: data?.newUsers || [],
+    contentPublished: data?.contentPublished || [],
+    interactions: data?.interactions || [],
   }
 }
 
 export function normalizeActivity(row: any): any {
   return {
-    time: fmtRelative(row.time),
-    mark: (row.actor || '系')[0],
-    name: row.actor || '系统',
-    action: row.action,
+    id: row.id ?? `${row.kind || 'event'}:${row.time ?? ''}`,
+    kind: row.kind || 'event',
+    actor: row.actor || '系统',
+    action: row.action || '有新动态',
     target: row.target || '',
-    tone: 'violet',
+    time: Number(row.time || 0),
+    timeLabel: fmtRelative(row.time),
+    tone: row.tone || 'lavender',
+    mark: (row.actor || '系')[0],
   }
 }

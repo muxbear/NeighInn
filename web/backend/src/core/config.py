@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str = "dev-only-change-me-please-32bytes-min"
 
+    # 业务时区：工作台「今日」/趋势自然日按该时区切分（数据库统一存 UTC）。
+    business_timezone: str = "Asia/Shanghai"
+
     # ---- 日志 ----
     # DEBUG 仅作为调试标记保留；SQL 日志由 SQL_ECHO 独立控制，避免开发默认刷屏。
     log_level: str = "INFO"

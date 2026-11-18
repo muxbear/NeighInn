@@ -146,6 +146,8 @@ async def login_by_sms(payload: LoginSmsIn, db: DbSession):
 
     if payload.agreed:
         svc.record_agreement(user, payload.agreementVersion, payload.privacyVersion)
+    # 登录即活跃：工作台「近 7 日活跃」依赖该字段，避免指标永远为 0。
+    user.last_active_at = utcnow()
 
     await db.commit()
     profile = await svc.serialize_profile(db, user)
@@ -199,6 +201,9 @@ async def refresh_token(payload: RefreshIn, db: DbSession):
     user = await db.get(User, user_id)
     if not user or user.status != "ACTIVE":
         raise ApiError(ERR_UNAUTHORIZED, "账号不可用", 401)
+    # 刷新令牌同样代表活跃；与登录共同构成「近 7 日活跃」口径。
+    user.last_active_at = utcnow()
+    await db.commit()
     return ok({
         "accessToken": issue_access_token(user.id),
         "refreshToken": issue_refresh_token(user.id),

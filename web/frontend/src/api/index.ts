@@ -37,7 +37,7 @@ export const dashboardApi = {
   trend: async (days = 7, communityId?: number) => normalizeTrend(await http.get<any, any>('/dashboard/trend', { params: { days, communityId } })),
   todos: async (communityId?: number) =>
     ((await http.get<any, any>('/dashboard/todos', { params: { communityId } })) as any[]).map(normalizeTodo),
-  activities: async (communityId?: number, limit = 4) => (await http.get<any, any>('/dashboard/activities', { params: { communityId, limit } }) as any[]).map(normalizeActivity),
+  activities: async (communityId?: number, limit = 6) => (await http.get<any, any>('/dashboard/activities', { params: { communityId, limit } }) as any[]).map(normalizeActivity),
 }
 
 // 区划为低频变更数据：省级节点缓存到 sessionStorage，子级缓存在内存；
