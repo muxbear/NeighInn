@@ -83,7 +83,7 @@ uni-app x 的 H5 产物由 HBuilderX 编译，Linux 容器内没有对应编译�
 
 ## 5. 重要注意事项
 
-- **HTTPS**：`APP_ENV=prod` 时管理端会话 Cookie 带 `Secure` 属性，必须通过 HTTPS 访问；建议在 5191/5192 前加 Nginx/Caddy 做 TLS 终止（移动端 H5 的定位、相机等浏览器能力也要求安全上下文）。若只能用 HTTP 联调，可临时把 `APP_ENV` 改为 `staging`（Cookie 不带 Secure），验证后改回 `prod`。
+- **HTTPS**：管理端会话 Cookie 的 `Secure` 属性默认按实际访问协议自动判定（经 HTTPS 反向代理访问时带 `Secure`，纯 HTTP 访问时不带），也可用 `SESSION_COOKIE_SECURE=true|false` 强制覆盖。建议在 5191/5192 前加 Nginx/Caddy 做 TLS 终止（移动端 H5 的定位、相机等浏览器能力也要求安全上下文）；纯 HTTP 部署虽然可以登录，但会话凭据会明文传输，仅建议内网/临时联调使用。
 - **MinIO 预签名 URL**：`.env.prod` 中 `MINIO_ENDPOINT=127.0.0.1:5206` 只适用于部署机本机访问。若浏览器或移动端从其他机器访问，必须改成客户端可达的公网 IP/域名（建议 HTTPS 与同源反向代理），否则图片和认证材料 URL 无法加载；HTTPS 页面还必须把 `MINIO_SECURE` 设为 `true` 并配置有效证书，否则会被浏览器混合内容策略拦截。
 - **外层反向代理**：若在 5191/5192 前再加 Nginx/Caddy 做 TLS，请为 `/api/v1/ws` 保留 `Upgrade`/`Connection` 头，否则 IM/订单推送的 WebSocket 无法建立。
 - **CORS**：管理端与 H5 都通过 nginx 同源反代 `/api`，通常不会触发 CORS。若使用独立域名的 H5 直连后端，请把来源追加到 `CORS_ORIGINS`。

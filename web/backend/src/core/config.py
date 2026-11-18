@@ -105,6 +105,10 @@ class Settings(BaseSettings):
 
     session_cookie_name: str = "ni_admin_session"
     session_ttl_minutes: int = 480
+    # 管理端会话 Cookie 的 Secure 属性。None 表示按请求实际协议自动判定
+    # （优先 X-Forwarded-Proto，其次 request.url.scheme）：HTTPS 下强制 Secure，
+    # 纯 HTTP 内网/联调部署也能正常保存 Cookie。可显式设置 true/false 强制覆盖。
+    session_cookie_secure: bool | None = None
     auth_require_2fa: bool = True
     auth_enforce_csrf: bool = True
     cors_origins: str = (

@@ -48,6 +48,18 @@ class PasswordChangeIn(BaseModel):
     newPassword: str
 
 
+def _cookie_secure(request: Request) -> bool:
+    """会话 Cookie 是否带 Secure：配置显式指定优先，否则按实际访问协议判定。
+
+    生产环境经 HTTPS 反向代理时 X-Forwarded-Proto 为 https，Cookie 保持 Secure；
+    直接以 HTTP 暴露（如内网 IP + 端口）时若仍带 Secure，浏览器会直接丢弃 Cookie，
+    导致登录成功后所有接口 401。"""
+    if settings.session_cookie_secure is not None:
+        return settings.session_cookie_secure
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    return (forwarded or request.url.scheme) == "https"
+
+
 async def admin_payload(db: DbSession, admin: AdminUser) -> dict:
     role_rows = await db.execute(
         select(Role.code, Role.name)
@@ -117,7 +129,7 @@ async def login(payload: LoginIn, request: Request, response: Response, db: DbSe
     cookie_kwargs = {
         "httponly": True,
         "samesite": "lax",
-        "secure": settings.app_env == "prod",
+        "secure": _cookie_secure(request),
         "max_age": settings.session_ttl_minutes * 60,
         "path": "/",
     }
