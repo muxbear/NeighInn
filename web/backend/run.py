@@ -17,6 +17,10 @@ if __name__ == "__main__":
         "src.main:app",
         host=settings.app_host,
         port=settings.app_port,
+        # uvicorn >= 0.54 在 Windows 上默认显式使用 ProactorEventLoop，会覆盖上面的
+        # 事件循环策略设置，导致 psycopg 异步驱动报 InterfaceError。此处显式指定
+        # SelectorEventLoop；其他平台保持 auto（Linux 下可继续使用 uvloop）。
+        loop="asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto",
         # 仅开发环境启用热重载；生产容器（APP_ENV=prod）直接运行，避免 reload 进程。
         reload=settings.app_env == "dev",
         reload_dirs=["src"],

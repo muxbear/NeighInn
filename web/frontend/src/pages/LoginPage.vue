@@ -23,8 +23,8 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
-const username = ref('admin')
-const password = ref('Admin@2025')
+const username = ref('')
+const password = ref('')
 const showPassword = ref(false)
 const rememberDevice = ref(true)
 const captcha = ref('')
@@ -247,8 +247,6 @@ onUnmounted(() => {
             <p>登录行为将记录设备、时间与安全环境；连续失败 5 次将临时锁定。</p>
           </div>
         </div>
-
-        <div class="login-demo-note"><span>演示环境</span> 已预填安全演示账号，可直接登录体验</div>
       </div>
 
       <footer class="login-form-footer">
