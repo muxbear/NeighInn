@@ -191,6 +191,7 @@ export const residentApi = {
   create: (payload: Dict) => http.post<any, any>('/residents', payload),
   update: (id: number | string, payload: Dict) => http.put<any, any>(`/residents/${id}`, payload),
   remove: (id: number | string) => http.delete<any, any>(`/residents/${id}`),
+  batchRemove: (ids: Array<number | string>) => http.post<any, any>('/residents/batch-delete', { ids }),
 }
 
 export const operationsApi = {

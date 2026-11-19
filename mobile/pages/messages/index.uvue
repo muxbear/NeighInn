@@ -1,5 +1,12 @@
 <template>
-  <scroll-view class="messages" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+  <scroll-view
+    class="messages"
+    direction="vertical"
+    :show-scrollbar="false"
+    style="flex: 1; height: 1px;"
+    :lower-threshold="80"
+    @scrolltolower="onScrollToLower"
+  >
     <view class="messages__header">
       <ni-status-bar />
       <view class="messages__head-row">
@@ -14,7 +21,7 @@
       <view
         class="messages__segment-button"
         :class="{ 'messages__segment-button--active': tab === 'messages' }"
-        @click="tab = 'messages'"
+        @click="switchTab('messages')"
       >
         <text class="messages__segment-text" :class="{ 'messages__segment-text--active': tab === 'messages' }">消息</text>
         <text v-if="socialStore.unreadTotal > 0" class="messages__segment-count">{{ socialStore.unreadTotal }}</text>
@@ -22,10 +29,10 @@
       <view
         class="messages__segment-button"
         :class="{ 'messages__segment-button--active': tab === 'neighbors' }"
-        @click="tab = 'neighbors'"
+        @click="switchTab('neighbors')"
       >
         <text class="messages__segment-text" :class="{ 'messages__segment-text--active': tab === 'neighbors' }">邻居</text>
-        <text v-if="socialStore.friends.length > 0" class="messages__segment-count">{{ socialStore.friends.length }}</text>
+        <text v-if="neighborCountText" class="messages__segment-count">{{ neighborCountText }}</text>
       </view>
     </view>
 
@@ -45,15 +52,22 @@
           <text class="messages__quick-title">留言互动</text>
           <text class="messages__quick-desc">留言、点赞与评论</text>
         </view>
-        <view class="messages__quick-item" @click="goFriendRequests">
+        <view v-if="socialStore.pendingRequestCount > 0" class="messages__quick-item" @click="goFriendRequests">
           <view class="messages__quick-icon messages__quick-icon--friend">
             <ni-icon name="friend" :size="19" state="blue" />
-            <view v-if="socialStore.pendingRequestCount > 0" class="messages__quick-badge">
+            <view class="messages__quick-badge">
               <ni-badge :count="socialStore.pendingRequestCount" :max="9" />
             </view>
           </view>
-          <text class="messages__quick-title">好友申请</text>
+          <text class="messages__quick-title">历史好友申请</text>
           <text class="messages__quick-desc">{{ socialStore.pendingRequestCount }} 条待处理</text>
+        </view>
+        <view v-else class="messages__quick-item" @click="goFriends">
+          <view class="messages__quick-icon messages__quick-icon--friend">
+            <ni-icon name="friend" :size="19" state="blue" />
+          </view>
+          <text class="messages__quick-title">查找邻居</text>
+          <text class="messages__quick-desc">同小区认证邻居</text>
         </view>
       </view>
 
@@ -81,38 +95,90 @@
     </template>
 
     <template v-else>
-      <view class="messages__neighbor-actions">
-        <view class="messages__neighbor-action" @click="goFriendRequests">
-          <ni-icon name="friend" :size="17" state="blue" />
-          <text class="messages__neighbor-action-text">好友申请</text>
-          <ni-badge v-if="socialStore.pendingRequestCount > 0" :count="socialStore.pendingRequestCount" :max="9" />
+      <view v-if="eligibility && !eligibility.eligible" class="messages__eligibility">
+        <view class="messages__eligibility-head">
+          <ni-icon name="shield" :size="18" state="gold" />
+          <text class="messages__eligibility-title">完成认证，和邻居聊起来</text>
         </view>
-        <view class="messages__neighbor-action" @click="goFriends">
+        <text class="messages__eligibility-desc">{{ eligibility.reasonText || '完成实名认证与住户认证后，即可查看同小区邻居并聊天' }}</text>
+        <view class="messages__eligibility-tags">
+          <text class="messages__eligibility-tag" :class="{ 'messages__eligibility-tag--done': eligibility.realnameVerified }">
+            {{ eligibility.realnameVerified ? '实名认证 ✓' : '实名认证' }}
+          </text>
+          <text class="messages__eligibility-tag" :class="{ 'messages__eligibility-tag--done': eligibility.ownerVerified }">
+            {{ eligibility.ownerVerified ? '住户认证 ✓' : '住户认证' }}
+          </text>
+        </view>
+        <view class="messages__eligibility-action" @click="goAuth">
+          <text class="messages__eligibility-action-text">去认证中心</text>
+        </view>
+      </view>
+
+      <template v-else>
+        <view class="messages__neighbor-search">
           <ni-icon name="search" :size="17" state="tertiary" />
-          <text class="messages__neighbor-action-text">查找邻居</text>
+          <input
+            class="messages__neighbor-input"
+            :value="keyword"
+            placeholder="搜索邻居昵称或楼栋"
+            placeholder-class="messages__neighbor-placeholder"
+            confirm-type="search"
+            @input="onSearchInput"
+            @confirm="applySearch"
+          />
+          <text v-if="keyword" class="messages__neighbor-clear" @click="clearSearch">清除</text>
         </view>
-      </view>
 
-      <view v-if="socialStore.friends.length === 0" class="messages__empty">
-        <ni-empty icon="friend" title="还没有邻居好友" desc="认识同小区的邻居，从一次互助开始" action-text="去找邻居" @action="goFriends" />
-      </view>
+        <view class="messages__neighbor-actions">
+          <view class="messages__neighbor-action" @click="goFriends">
+            <ni-icon name="search" :size="17" state="tertiary" />
+            <text class="messages__neighbor-action-text">查找邻居</text>
+          </view>
+          <view class="messages__neighbor-action" @click="goBlacklist">
+            <ni-icon name="shield" :size="17" state="gold" />
+            <text class="messages__neighbor-action-text">黑名单</text>
+          </view>
+        </view>
 
-      <view v-else class="messages__friends">
-        <view v-for="friend in socialStore.friends" :key="friend.id" class="messages__friend" @click="chatWithFriend(friend.id)">
-          <ni-avatar :src="friend.avatar" :name="friend.name" :size="48" variant="green" />
-          <view class="messages__friend-copy">
-            <view class="messages__friend-row">
-              <text class="messages__friend-name">{{ friend.name }}</text>
-              <ni-icon v-if="friend.verified" name="shield" :size="9" state="gold" />
+        <view v-if="friends.length === 0 && !socialStore.neighborLoading" class="messages__empty">
+          <ni-empty
+            icon="friend"
+            title="还没有邻居好友"
+            :desc="keyword ? '没有找到相关邻居' : '同小区暂无其他已认证邻居'"
+            action-text="刷新"
+            @action="refreshNeighbors"
+          />
+        </view>
+
+        <view v-else class="messages__friends">
+          <view
+            v-for="friend in friends"
+            :key="friend.userId || friend.id"
+            class="messages__friend"
+            @click="chatWithFriend(friend.userId || friend.id)"
+            @longpress="openFriendActions(friend)"
+          >
+            <ni-avatar :src="friend.avatar" :name="friend.name" :size="48" variant="green" />
+            <view class="messages__friend-copy">
+              <view class="messages__friend-row">
+                <text class="messages__friend-name">{{ friend.name }}</text>
+                <ni-icon v-if="friend.verified" name="shield" :size="9" state="gold" />
+              </view>
+              <text class="messages__friend-meta">{{ friend.building || friend.community || '同小区邻居' }}</text>
             </view>
-            <text class="messages__friend-meta">{{ friend.community }}</text>
-          </view>
-          <view class="messages__friend-status">
-            <view v-if="friend.online" class="messages__online-dot" />
-            <ni-icon name="message" :size="18" state="tertiary" />
+            <view class="messages__friend-status">
+              <ni-icon name="message" :size="18" state="tertiary" />
+            </view>
           </view>
         </view>
-      </view>
+
+        <view v-if="socialStore.neighborLoading" class="messages__neighbor-loading">
+          <text class="messages__neighbor-loading-text">加载中…</text>
+        </view>
+        <view v-else-if="!socialStore.neighborHasMore && friends.length > 0" class="messages__neighbor-end">
+          <text class="messages__neighbor-end-text">没有更多邻居了</text>
+        </view>
+      </template>
     </template>
 
     <view class="messages__bottom-space" />
@@ -124,7 +190,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
-import type { Conversation } from '../../models'
+import type { Conversation, Friend } from '../../models'
 import { useSocialStore } from '../../stores/social.store'
 import { useNotificationStore } from '../../stores/notification.store'
 import { useToast } from '../../composables/useToast'
@@ -134,8 +200,17 @@ const notificationStore = useNotificationStore()
 const { toast, showToast } = useToast()
 
 const tab = ref<'messages' | 'neighbors'>('messages')
+const keyword = ref('')
+let searchTimer: any = null
 const loading = computed(() => socialStore.loading)
 const messages = computed<Conversation[]>(() => socialStore.conversations)
+const friends = computed<Friend[]>(() => socialStore.friends)
+const eligibility = computed(() => socialStore.eligibility)
+const neighborCountText = computed(() => {
+  const total = socialStore.neighborTotal || friends.value.length
+  if (!total) return ''
+  return total > 99 ? '99+' : String(total)
+})
 
 onLoad(() => {
   loadData()
@@ -148,19 +223,28 @@ onShow(() => {
 
 onPullDownRefresh(async () => {
   try {
-    await loadData()
+    await loadData(true)
   } finally {
     uni.stopPullDownRefresh()
   }
 })
 
-async function loadData(): Promise<void> {
+async function loadData(resetNeighbors = false): Promise<void> {
   await Promise.all([
     socialStore.fetchConversations().catch(() => undefined),
+    socialStore.fetchEligibility().catch(() => undefined),
     socialStore.fetchFriends().catch(() => undefined),
     socialStore.fetchRequests().catch(() => undefined),
     notificationStore.fetchUnread().catch(() => undefined),
   ])
+  if (resetNeighbors) await socialStore.fetchNeighbors(true).catch(() => undefined)
+}
+
+function switchTab(next: 'messages' | 'neighbors'): void {
+  tab.value = next
+  if (next === 'neighbors') {
+    socialStore.fetchNeighbors(true).catch(() => undefined)
+  }
 }
 
 async function readAll(): Promise<void> {
@@ -186,6 +270,78 @@ async function chatWithFriend(friendId: string): Promise<void> {
   }
 }
 
+function onSearchInput(event: any): void {
+  keyword.value = String(event?.detail?.value ?? '')
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    socialStore.setNeighborFilter(keyword.value).catch(() => undefined)
+  }, 300)
+}
+
+function applySearch(): void {
+  if (searchTimer) clearTimeout(searchTimer)
+  socialStore.setNeighborFilter(keyword.value).catch(() => undefined)
+}
+
+function clearSearch(): void {
+  keyword.value = ''
+  socialStore.setNeighborFilter('').catch(() => undefined)
+}
+
+function refreshNeighbors(): void {
+  socialStore.fetchNeighbors(true).catch(() => undefined)
+}
+
+function onScrollToLower(): void {
+  if (tab.value === 'neighbors') socialStore.loadMoreNeighbors().catch(() => undefined)
+}
+
+function openFriendActions(friend: Friend): void {
+  uni.showActionSheet({
+    itemList: ['设置备注', '加入黑名单', '举报该邻居'],
+    success: (res: any) => {
+      const index = Number(res.tapIndex)
+      if (index === 0) {
+        editRemark(friend)
+      } else if (index === 1) {
+        confirmBlock(friend)
+      } else if (index === 2) {
+        uni.navigateTo({ url: `/pages/report/index?type=user&targetId=${friend.userId || friend.id}` })
+      }
+    },
+  })
+}
+
+function editRemark(friend: Friend): void {
+  uni.showModal({
+    title: '设置备注',
+    editable: true,
+    placeholderText: friend.name,
+    content: friend.remark || '',
+    success: (res: any) => {
+      if (!res.confirm) return
+      socialStore.setRemark(friend.userId || friend.id, String(res.content ?? ''))
+        .then(() => showToast('备注已更新'))
+        .catch((error) => showToast(error instanceof Error ? error.message : '操作失败', 'alert'))
+    },
+  } as any)
+}
+
+function confirmBlock(friend: Friend): void {
+  uni.showModal({
+    title: '加入黑名单',
+    content: `拉黑后，你和「${friend.name}」将互相不可见，且不能互发消息。`,
+    confirmText: '拉黑',
+    confirmColor: '#E05B4B',
+    success: (res: any) => {
+      if (!res.confirm) return
+      socialStore.blockPeer(friend.userId || friend.id)
+        .then(() => showToast('已加入黑名单'))
+        .catch((error) => showToast(error instanceof Error ? error.message : '操作失败', 'alert'))
+    },
+  })
+}
+
 function goNotifications(): void {
   uni.navigateTo({ url: '/pages/notifications/index' })
 }
@@ -194,6 +350,12 @@ function goFriendRequests(): void {
 }
 function goFriends(): void {
   uni.navigateTo({ url: '/pages/social/friends' })
+}
+function goBlacklist(): void {
+  uni.navigateTo({ url: '/pages/social/blacklist' })
+}
+function goAuth(): void {
+  uni.navigateTo({ url: '/pages/auth/center' })
 }
 function goHome(): void {
   uni.switchTab({ url: '/pages/home/index' })
@@ -346,6 +508,83 @@ function goHome(): void {
   background-color: $ni-color-white;
   border-radius: $ni-radius-16;
 }
+.messages__eligibility {
+  margin: 0 14px 12px;
+  padding: 16px;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.messages__eligibility-head {
+  flex-direction: row;
+  align-items: center;
+}
+.messages__eligibility-title {
+  margin-left: 7px;
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.messages__eligibility-desc {
+  margin-top: 8px;
+  font-size: $ni-font-10;
+  line-height: 17px;
+  color: $ni-color-text-secondary;
+}
+.messages__eligibility-tags {
+  flex-direction: row;
+  margin-top: 10px;
+}
+.messages__eligibility-tag {
+  margin-right: 8px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background-color: #f3f0ed;
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.messages__eligibility-tag--done {
+  background-color: $ni-color-success-bg;
+  color: $ni-color-gift-deep;
+}
+.messages__eligibility-action {
+  margin-top: 12px;
+  height: 36px;
+  border-radius: 11px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.messages__eligibility-action-text {
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: #ffffff;
+}
+.messages__neighbor-search {
+  height: 40px;
+  margin: 0 14px 10px;
+  padding-left: 12px;
+  padding-right: 12px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-white;
+}
+.messages__neighbor-input {
+  flex: 1;
+  height: 100%;
+  margin-left: 6px;
+  font-size: $ni-font-11;
+  color: $ni-color-text-primary;
+}
+.messages__neighbor-placeholder {
+  color: $ni-color-text-placeholder;
+  font-size: $ni-font-11;
+}
+.messages__neighbor-clear {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
 .messages__neighbor-actions {
   flex-direction: row;
   padding-left: 14px;
@@ -366,7 +605,6 @@ function goHome(): void {
   font-size: $ni-font-10;
   font-weight: 600;
   color: $ni-color-text-primary;
-  margin-right: 5px;
 }
 .messages__friends {
   margin: 12px 14px 0;
@@ -403,12 +641,21 @@ function goHome(): void {
   flex-direction: row;
   align-items: center;
 }
-.messages__online-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
-  background-color: $ni-color-gift;
-  margin-right: 8px;
+.messages__neighbor-loading {
+  align-items: center;
+  padding: 14px 0;
+}
+.messages__neighbor-loading-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
+}
+.messages__neighbor-end {
+  align-items: center;
+  padding: 14px 0;
+}
+.messages__neighbor-end-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-tertiary;
 }
 .messages__bottom-space {
   height: calc(92px + env(safe-area-inset-bottom));

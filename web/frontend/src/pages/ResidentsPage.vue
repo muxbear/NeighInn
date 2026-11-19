@@ -23,6 +23,7 @@ const total = ref(0)
 const drawerOpen = ref(false)
 const editing = ref<any>(null)
 const form = ref<any>({})
+const selected = ref<Set<string>>(new Set())
 
 // 认证材料查看：点击身份认证 / 业主认证状态徽标后加载签名 URL 照片。
 const certViewerOpen = ref(false)
@@ -49,6 +50,10 @@ const summaryCards = computed(() => [
   { label: '家属与租户', value: summary.value.family, icon: UserRound, tone: 'green' },
   { label: '待完成认证', value: summary.value.pending, icon: ShieldCheck, tone: 'orange' },
 ])
+const canBatchRemove = computed(() => auth.hasPermission('community:resident:update'))
+const selectedCount = computed(() => selected.value.size)
+const allSelected = computed(() =>
+  rows.value.length > 0 && rows.value.every((row) => selected.value.has(row.id)))
 
 async function load() {
   try {
@@ -61,6 +66,7 @@ async function load() {
     rows.value = data.items || []
     total.value = data.total || 0
     summary.value = summaryData
+    selected.value = new Set()
   } catch (exc: any) {
     app.showToast(exc?.message || '业主档案加载失败')
   }
@@ -133,6 +139,44 @@ async function remove(row: any) {
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '删除失败')
+  }
+}
+
+function toggleRow(row: any) {
+  const next = new Set(selected.value)
+  if (next.has(row.id)) next.delete(row.id)
+  else next.add(row.id)
+  selected.value = next
+}
+
+function toggleAll() {
+  selected.value = allSelected.value ? new Set() : new Set(rows.value.map((row) => row.id))
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+async function batchRemove() {
+  const ids = Array.from(selected.value)
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id))
+  if (!ids.length) return
+  const ok = await confirm({
+    title: '批量删除人员档案',
+    message: `确定删除已选择的 ${ids.length} 份人员档案吗？`,
+    details: ['删除后档案将从当前社区移除，已关联的认证审核单保留历史记录。'],
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    const result = await residentApi.batchRemove(ids)
+    const deleted = Number(result?.deleted ?? ids.length)
+    app.showToast(`已删除 ${deleted} 份人员档案`)
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '批量删除失败')
   }
 }
 
@@ -268,17 +312,39 @@ watch(() => app.currentCommunityId, () => {
         <button v-if="auth.hasPermission('community:resident:create')" class="primary-button" @click="openCreate"><Plus :size="16" />新增人员</button>
       </div>
     </div>
+    <div v-if="selectedCount" class="batch-bar">
+      <span>已选择 {{ selectedCount }} 个人员</span>
+      <button @click="clearSelection">取消选择</button>
+      <button class="danger" @click="batchRemove"><Trash2 :size="14" />批量删除</button>
+    </div>
     <div class="table-wrap resident-table-wrap">
       <table class="resident-table">
         <thead>
           <tr>
-            <th>头像</th><th>姓名</th><th>昵称</th><th>身份类型</th><th>房屋 / 商铺</th><th>信用</th>
+            <th v-if="canBatchRemove" class="select-cell">
+              <input
+                type="checkbox"
+                aria-label="全选当前页人员"
+                :checked="allSelected"
+                :disabled="!rows.length"
+                @change="toggleAll"
+              />
+            </th>
+            <th class="avatar-cell">头像</th><th>姓名</th><th>昵称</th><th>身份类型</th><th>房屋 / 商铺</th><th>信用</th>
             <th>身份认证</th><th>业主认证</th><th>手机号</th><th>邮箱</th><th>个人描述</th><th>账号状态</th><th>加入时间</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.id">
-            <td>
+            <td v-if="canBatchRemove" class="select-cell">
+              <input
+                type="checkbox"
+                :aria-label="`选择 ${row.name}`"
+                :checked="selected.has(row.id)"
+                @change="toggleRow(row)"
+              />
+            </td>
+            <td class="avatar-cell">
               <span :class="['resident-avatar', avatarTone(row)]" :title="row.nickname || row.name">{{ avatarText(row) }}</span>
             </td>
             <td><span class="cell-ellipsis sm" :title="row.name">{{ row.name }}</span></td>

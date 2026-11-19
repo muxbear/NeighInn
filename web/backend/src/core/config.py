@@ -154,6 +154,18 @@ class Settings(BaseSettings):
     ai_fast_track_confidence: float = 0.95
     friend_max_count: int = 500
 
+    # ---- 邻居好友（消息-邻居 Tab） ----
+    neighbor_friends_enabled: bool = True
+    neighbor_emoji_enabled: bool = True
+    neighbor_block_enabled: bool = True
+    neighbor_block_max_count: int = 1000
+    neighbor_message_max_length: int = 500
+    neighbor_message_rate_per_minute: int = 20
+    neighbor_page_size: int = 50
+    neighbor_retention_days: int = 1095
+    # 兼容旧客户端 {type,data} WebSocket 帧；下个版本移除。
+    neighbor_ws_compat: bool = True
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

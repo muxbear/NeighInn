@@ -239,9 +239,9 @@ async def _admin_row(db: AsyncSession, row: AdminUser) -> dict:
 
 
 def _validate_admin_password(password: str) -> None:
-    """后台账号密码策略：≥12 位，且大小写字母/数字/符号至少三类。"""
-    if len(password) < 12:
-        raise ApiError(ERR_PARAM, "密码最短 12 位（三类字符）", 400)
+    """后台账号密码策略：≥6 位，且大小写字母/数字/符号至少三类。"""
+    if len(password) < 6:
+        raise ApiError(ERR_PARAM, "密码最短 6 位（三类字符）", 400)
     kinds = sum(bool(re.search(pattern, password))
                 for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
     if kinds < 3:

@@ -166,3 +166,43 @@ async def test_resident_cert_status_override_and_materials(client, db_session):
         params={"objectKey": "certs/a.jpg"}, headers=csrf)
     assert resp.status_code == 200, resp.text
     assert [item["objectKey"] for item in resp.json()["data"]["materials"]] == ["certs/b.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_resident_batch_delete(client, db_session):
+    """批量删除人员档案：返回删除数量，关联认证单仅解除档案引用。"""
+    csrf = await admin_login(client)
+    account = await register_user(client)
+
+    first = await client.post(f"{ADMIN_BASE}/residents",
+                              json=_resident_payload(phone=TEST_PHONE), headers=csrf)
+    second = await client.post(
+        f"{ADMIN_BASE}/residents",
+        json=_resident_payload(name="李叔叔", phone="13900004444"), headers=csrf)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    first_id = int(first.json()["data"]["id"])
+    second_id = int(second.json()["data"]["id"])
+
+    db_session.add(Certification(
+        user_id=int(account["profile"]["id"]), resident_id=first_id,
+        community_id=1, type="OWNER_PROOF", identity="owner"))
+    await db_session.commit()
+    cert_id = int(await db_session.scalar(
+        select(Certification.id).where(Certification.resident_id == first_id)))
+
+    empty = await client.post(f"{ADMIN_BASE}/residents/batch-delete",
+                              json={"ids": []}, headers=csrf)
+    assert empty.status_code == 400
+
+    resp = await client.post(f"{ADMIN_BASE}/residents/batch-delete",
+                             json={"ids": [first_id, second_id]}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["deleted"] == 2
+
+    db_session.expire_all()
+    assert await db_session.scalar(
+        select(Resident.id).where(Resident.id.in_([first_id, second_id]))) is None
+    cert = await db_session.get(Certification, cert_id)
+    await db_session.refresh(cert)
+    assert cert.resident_id is None

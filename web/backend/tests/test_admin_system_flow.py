@@ -368,7 +368,8 @@ async def test_websocket_auth_and_ping(client):
             import json
 
             first = json.loads(await ws.receive_text())
-            assert first["type"] == "PONG"
+            assert first["action"] == "PONG"
+            # 旧 type/data 帧仍兼容一个版本
             await ws.send_text(json.dumps({"type": "PING", "data": {}}))
             pong = json.loads(await ws.receive_text())
-            assert pong["type"] == "PONG"
+            assert pong["action"] == "PONG"

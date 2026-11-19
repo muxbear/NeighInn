@@ -20,6 +20,7 @@ const communityOpen = ref(false)
 const commandOpen = ref(false)
 const commandQuery = ref('')
 const avatarOpen = ref(false)
+const contentRef = ref<HTMLElement | null>(null)
 
 const visibleTodos = computed(() =>
   todos.items.filter((item) => item.count > 0 && (!item.permission || auth.hasPermission(item.permission))),
@@ -114,6 +115,7 @@ async function logout() {
 }
 
 onMounted(() => {
+  document.body.classList.add('app-shell-active')
   app.loadCommunities().catch(() => undefined)
   todos.startPolling(app.currentCommunityId)
   navBadges.refresh(app.currentCommunityId)
@@ -132,12 +134,18 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  document.body.classList.remove('app-shell-active')
   todos.stopPolling()
 })
 
 watch(() => route.path, () => {
   noticeOpen.value = false
   navBadges.refresh(app.currentCommunityId)
+})
+
+// 内容区改为独立滚动容器后，路由切换需要手动回到顶部
+watch(() => route.fullPath, () => {
+  contentRef.value?.scrollTo({ top: 0, behavior: 'auto' })
 })
 
 watch(() => app.currentCommunityId, (id) => {
@@ -258,7 +266,7 @@ watch(() => todos.lastLoadedAt, () => {
         </div>
       </header>
 
-      <div class="content">
+      <div ref="contentRef" class="content">
         <RouterView />
       </div>
     </main>

@@ -331,46 +331,30 @@ async def test_help_match_flow(client, db_session):
 
 
 @pytest.mark.asyncio
-async def test_friend_request_and_messaging(client, db_session):
-    """BR-14/M05：好友申请 → 同意 → 好友私信；实名门禁；消息幂等与敏感词提醒。"""
+async def test_neighbor_friend_and_messaging(client, db_session):
+    """BR-14/M05：同小区双认证自动互为邻居；好友私信；消息幂等与敏感词提醒。"""
     seller, buyer, _csrf = await _two_users(client)
     seller_name = seller["profile"]["nickname"]
 
-    # 发送好友申请（按昵称）
-    req = await client.post(f"{C_BASE}/friends/requests",
-                            json={"name": seller_name, "message": "邻居你好，想跟你换绘本"},
-                            headers=bearer(buyer["token"]))
-    assert req.status_code == 200, req.text
-
-    # 重复申请被幂等拦截
-    dup = await client.post(f"{C_BASE}/friends/requests",
-                            json={"name": seller_name, "message": "再次申请"},
-                            headers=bearer(buyer["token"]))
-    assert dup.status_code == 409
-
-    # 对方收到申请红点并同意
-    requests = (await client.get(f"{C_BASE}/friends/requests",
-                                 headers=bearer(seller["token"]))).json()["data"]
-    assert len(requests) == 1
-    accept = await client.post(f"{C_BASE}/friends/requests/{requests[0]['id']}/accept",
-                               headers=bearer(seller["token"]))
-    assert accept.status_code == 200
-
-    friends = (await client.get(f"{C_BASE}/friends", headers=bearer(buyer["token"]))).json()["data"]
-    assert len(friends) == 1 and friends[0]["name"] == seller_name
+    # 同小区双认证住户自动互为邻居，无需好友申请
+    friends = (await client.get(f"{C_BASE}/friends",
+                                headers=bearer(buyer["token"]))).json()["data"]
+    assert any(row["name"] == seller_name for row in friends["items"])
+    assert friends["eligibility"]["eligible"] is True
 
     # 好友私信（不依赖物品）
     conv = await client.post(f"{C_BASE}/conversations",
                              json={"peerId": int(seller["profile"]["id"])},
                              headers=bearer(buyer["token"]))
-    assert conv.status_code == 200
+    assert conv.status_code == 200, conv.text
     conv_id = conv.json()["data"]["id"]
+    assert conv.json()["data"]["canSend"] is True
 
     # 消息发送 + client_msg_id 幂等
     payload = {"content": "你好，明天下午方便见面吗？", "clientMsgId": "msg-0001"}
     first = await client.post(f"{C_BASE}/conversations/{conv_id}/messages",
                               json=payload, headers=bearer(buyer["token"]))
-    assert first.status_code == 200
+    assert first.status_code == 200, first.text
     again = await client.post(f"{C_BASE}/conversations/{conv_id}/messages",
                               json=payload, headers=bearer(buyer["token"]))
     assert again.status_code == 200
@@ -390,8 +374,9 @@ async def test_friend_request_and_messaging(client, db_session):
     # 已读
     messages = (await client.get(f"{C_BASE}/conversations/{conv_id}/messages",
                                  headers=bearer(seller["token"]))).json()["data"]
-    assert len(messages) == 2  # 幂等去重后
+    assert len(messages["items"]) == 2  # 幂等去重后
     read = await client.post(f"{C_BASE}/conversations/{conv_id}/read",
+                             json={"lastSeq": first.json()["data"]["seq"]},
                              headers=bearer(seller["token"]))
     assert read.status_code == 200
 

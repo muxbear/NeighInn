@@ -184,7 +184,7 @@ function openEdit(row: any) {
 }
 
 function passwordError(value: string): string {
-  if (value.length < 12) return '密码最短 12 位'
+  if (value.length < 6) return '密码最短 6 位'
   const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((rule) => rule.test(value)).length
   if (kinds < 3) return '需包含大小写字母、数字、符号中的至少三类'
   return ''
@@ -556,7 +556,7 @@ onMounted(async () => {
     </div>
     <p class="form-hint">多角色权限取并集；未分配角色时账号仅能登录，无业务权限。</p>
 
-    <h4 class="section-title" style="margin-top: 22px">可访问社区</h4>
+    <h4 class="section-title" style="margin-top: 22px">可访问社区<em class="optional-tag">选填</em></h4>
     <div class="choice-grid community-choices">
       <label v-for="community in communities" :key="community.id" class="choice-item">
         <input v-model="form.communityIds" type="checkbox" :value="Number(community.id)" />
@@ -564,7 +564,7 @@ onMounted(async () => {
       </label>
       <p v-if="!communities.length" class="muted-text">暂无社区数据</p>
     </div>
-    <p class="form-hint">按角色数据范围生效：角色为“全部数据”时不受社区限制；否则仅能访问勾选的社区。</p>
+    <p class="form-hint">创建用户时可不选择可访问社区；角色数据范围为“全部数据”时不受社区限制，其他角色可在创建后编辑补充。</p>
 
     <template #footer>
       <button @click="drawerOpen = false">取消</button>
@@ -633,6 +633,16 @@ onMounted(async () => {
   font-size: var(--font-size-caption);
 }
 .muted-text { color: #aaa6b1; font-size: var(--font-size-caption); }
+.optional-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: #8f8a97;
+  background: #f2f0f6;
+  font-size: var(--font-size-caption);
+  font-style: normal;
+  font-weight: 400;
+}
 .status-cell { display: flex; align-items: center; gap: 6px; }
 .lock-tag {
   display: inline-flex;

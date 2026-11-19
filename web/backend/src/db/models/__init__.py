@@ -39,7 +39,14 @@ from src.db.models.notification import (
     NotificationTask,
     NotificationTemplate,
 )
-from src.db.models.social import Conversation, Friend, FriendRequest, Message
+from src.db.models.social import (
+    Conversation,
+    Friend,
+    FriendBlock,
+    FriendRemark,
+    FriendRequest,
+    Message,
+)
 from src.db.models.system import (
     AdminUser,
     AuditLog,

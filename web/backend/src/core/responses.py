@@ -48,6 +48,7 @@ ERR_FORBIDDEN = 40301      # 无权限
 ERR_DATA_SCOPE = 40302     # 数据范围越界
 ERR_FIELD_SCOPE = 40303    # 字段权限不足
 ERR_NOT_VERIFIED = 40304   # 未完成认证
+ERR_RELATION_BLOCKED = 40305  # 关系已阻断（拉黑/认证失效）
 ERR_NOT_FOUND = 40401
 ERR_CONFLICT = 40901       # 占用/处理中（如物品已被预约、幂等处理中）
 ERR_IDEMPOTENT_CONFLICT = 40902  # 同一幂等键不同请求体

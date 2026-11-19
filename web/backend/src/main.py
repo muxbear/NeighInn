@@ -98,6 +98,10 @@ async def lifespan(_: FastAPI):
                 extra={"event": "startup", "step": "sms_store",
                        "backend": sms_backend, "durationMs": _elapsed_ms(step_at)})
 
+    from src.core.ws_manager import ws_manager
+
+    await ws_manager.start()
+
     if settings.app_env == "dev":
         # 幂等种子：区划/社区/类目/字典/权限/角色/超管/参数/热词（生产用 alembic data migration）
         step_at = time.perf_counter()
@@ -141,6 +145,9 @@ async def lifespan(_: FastAPI):
         task.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+    from src.core.ws_manager import ws_manager
+
+    await ws_manager.stop()
     await sms_code_store.close()
     await session_store.close()
     logger.info("shutdown complete durationMs=%.1f", _elapsed_ms(shutdown_at),

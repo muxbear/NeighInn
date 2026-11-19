@@ -189,7 +189,7 @@ function goPrivacy(): void {
   uni.navigateTo({ url: '/pages/profile/edit' })
 }
 function openBlacklist(): void {
-  showToast('暂无被屏蔽的邻居')
+  uni.navigateTo({ url: '/pages/social/blacklist' })
 }
 function openContentSafety(): void {
   uni.showModal({

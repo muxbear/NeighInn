@@ -59,6 +59,15 @@ async def db_session(session_maker):
 
 
 @pytest.fixture(autouse=True)
+def reset_message_rate_limit():
+    """消息限流为进程内滑动窗口，测试间清空避免用户 ID 复用造成误判。"""
+    from src.services.chat_service import _RATE_BUCKETS
+
+    _RATE_BUCKETS.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def bypass_material_validation(request, monkeypatch):
     """存量认证测试使用夹具对象键；标注 cert_materials 的用例走真实归属校验。"""
     if request.node.get_closest_marker("cert_materials"):

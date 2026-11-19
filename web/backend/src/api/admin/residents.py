@@ -544,6 +544,40 @@ async def delete_resident(resident_id: int, request: Request,
     return ok({"id": str(resident_id)}, "人员档案已删除")
 
 
+class ResidentBatchDeleteIn(BaseModel):
+    ids: list[int] = []
+
+
+@router.post("/residents/batch-delete",
+             dependencies=[Depends(require_permission("community:resident:update"))])
+async def batch_delete_residents(payload: ResidentBatchDeleteIn, request: Request,
+                                 admin: CurrentAdmin, db: DbSession):
+    """批量删除人员档案；认证审核单保留历史，仅解除档案引用。"""
+    ids = sorted({int(item) for item in payload.ids})
+    if not ids:
+        raise ApiError(ERR_PARAM, "请选择要删除的人员档案", 400)
+    residents = list((await db.execute(
+        select(Resident).where(Resident.id.in_(ids)))).scalars().all())
+    if not residents:
+        raise ApiError(ERR_NOT_FOUND, "人员档案不存在", 404)
+    before = [await _resident_row(db, resident) for resident in residents]
+    for resident in residents:
+        certs = (await db.execute(
+            select(Certification).where(Certification.resident_id == resident.id)
+        )).scalars().all()
+        for cert in certs:
+            cert.resident_id = None
+        await db.delete(resident)
+    audit_ids = ",".join(str(resident.id) for resident in residents)
+    if len(audit_ids) > 64:
+        audit_ids = f"{residents[0].id}+{len(residents) - 1}"
+    await write_audit(db, request, actor=admin, action="resident.batch-delete",
+                      resource_type="resident", resource_id=audit_ids,
+                      before={"residents": before}, after=None)
+    await db.commit()
+    return ok({"deleted": len(residents)}, f"已删除 {len(residents)} 份人员档案")
+
+
 # ---------------------------------------------------------------- 认证材料维护（后台直改）
 
 MAX_CERT_MATERIAL_BYTES = 10 * 1024 * 1024

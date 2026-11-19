@@ -1094,7 +1094,12 @@ async function route(
   // ---------------- 社交 ----------------
   if (path === '/conversations' && method === 'GET') {
     const list = [...state.conversations].sort((a, b) => b.unread - a.unread)
-    return list
+    return list.map((item) => ({
+      ...item,
+      type: item.type ?? (item.itemId ? 'ITEM' : 'FRIEND'),
+      canSend: true,
+      readOnlyReason: null,
+    }))
   }
   if (path === '/conversations' && method === 'POST') {
     const peerId = String(body.peerId ?? '')
@@ -1105,6 +1110,7 @@ async function route(
       state.friends.find((item) => item.id === peerId)
     const conversation: Conversation = {
       id: `c-${Date.now()}`,
+      type: body.itemId ? 'ITEM' : 'FRIEND',
       peerId,
       peerName: peer?.name ?? '新邻居',
       peerAvatar: peer?.avatar ?? '/static/avatars/avatar-person-1.svg',
@@ -1113,6 +1119,8 @@ async function route(
       lastTime: '刚刚',
       unread: 0,
       itemId: body.itemId,
+      canSend: true,
+      readOnlyReason: null,
     }
     state.conversations.unshift(conversation)
     state.messages[conversation.id] = []
@@ -1126,23 +1134,32 @@ async function route(
   }
   if (segments[0] === 'conversations' && segments[2] === 'messages') {
     const conversationId = segments[1]
-    if (method === 'GET') return clone(state.messages[conversationId] ?? [])
+    if (method === 'GET') {
+      return {
+        items: clone(state.messages[conversationId] ?? []),
+        hasMoreBefore: false,
+        hasMoreAfter: false,
+      }
+    }
     if (method === 'POST') {
+      const list = state.messages[conversationId] ?? []
+      const seq = list.reduce((max, item) => Math.max(max, item.seq ?? 0), 0) + 1
       const message: ChatMessage = {
         id: `m-${Date.now()}`,
         clientMsgId: body.clientMsgId,
         conversationId,
+        seq,
         senderId: 'me',
         senderName: '我',
         type: body.type ?? 'TEXT',
         content: String(body.content ?? ''),
         image: body.image,
+        extra: body.extra ?? {},
         createdAt: Date.now(),
         timeText: '刚刚',
         status: 'SENT',
         mine: true,
       }
-      const list = state.messages[conversationId] ?? []
       state.messages[conversationId] = [...list, message]
       const conversation = state.conversations.find((item) => item.id === conversationId)
       if (conversation) {
@@ -1157,8 +1174,74 @@ async function route(
     if (conversation) conversation.unread = 0
     return { success: true }
   }
+  const mockEligibility = {
+    eligible: true,
+    realnameVerified: true,
+    ownerVerified: true,
+    communityId: '1',
+    communityName: '阳光花园小区',
+    reasonCode: 'OK',
+    reasonText: '',
+  }
+  if (path === '/friends/eligibility' && method === 'GET') {
+    return clone(mockEligibility)
+  }
+  if (path === '/friends/blocks' && method === 'GET') {
+    return { items: [], page: 1, pageSize: 20, total: 0, hasMore: false }
+  }
   if (path === '/friends' && method === 'GET') {
-    return clone(state.friends)
+    const items = state.friends.map((friend) => ({
+      ...friend,
+      userId: friend.userId ?? friend.id,
+      building: friend.building ?? friend.community,
+      identityType: friend.identityType ?? '业主',
+    }))
+    return {
+      items,
+      page: 1,
+      pageSize: 50,
+      total: items.length,
+      hasMore: false,
+      eligibility: mockEligibility,
+    }
+  }
+  if (
+    segments[0] === 'friends' &&
+    segments[1] &&
+    segments[1] !== 'requests' &&
+    segments.length === 2 &&
+    method === 'GET'
+  ) {
+    const friend = state.friends.find((item) => (item.userId ?? item.id) === segments[1])
+    if (!friend) fail(40401, '邻居不存在')
+    return {
+      ...friend,
+      userId: friend.userId ?? friend.id,
+      relation: 'FRIEND',
+      blockedByMe: false,
+      blockedMe: false,
+      canMessage: true,
+      reasonCode: 'OK',
+    }
+  }
+  if (
+    segments[0] === 'friends' &&
+    segments[2] === 'remark' &&
+    method === 'PUT'
+  ) {
+    const friend = state.friends.find((item) => (item.userId ?? item.id) === segments[1])
+    if (friend) {
+      friend.remark = String(body.remark ?? '')
+      friend.name = friend.remark || friend.name
+    }
+    return { peerId: segments[1], remark: String(body.remark ?? '') }
+  }
+  if (segments[0] === 'friends' && segments[2] === 'block') {
+    if (method === 'POST') {
+      state.friends = state.friends.filter((item) => (item.userId ?? item.id) !== segments[1])
+      return { blocked: true }
+    }
+    if (method === 'DELETE') return { blocked: false }
   }
   if (
     segments[0] === 'friends' &&

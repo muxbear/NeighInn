@@ -180,11 +180,11 @@ onUnmounted(() => {
 
         <form class="login-form" @submit.prevent="handleSubmit">
           <label>
-            <span>用户名</span>
             <div :class="error ? 'login-input error' : 'login-input'">
-              <UserRound :size="17" />
+              <UserRound :size="18" />
               <input
                 v-model="username"
+                aria-label="用户名"
                 autocomplete="username"
                 spellcheck="false"
                 placeholder="请输入用户名"
@@ -194,14 +194,11 @@ onUnmounted(() => {
           </label>
 
           <label>
-            <div class="login-label-row">
-              <span>密码</span>
-              <button type="button" @click="forgetPassword">忘记密码？</button>
-            </div>
             <div :class="error ? 'login-input error' : 'login-input'">
-              <Lock :size="17" />
+              <Lock :size="18" />
               <input
                 v-model="password"
+                aria-label="密码"
                 :type="showPassword ? 'text' : 'password'"
                 autocomplete="current-password"
                 placeholder="请输入密码"
@@ -209,7 +206,7 @@ onUnmounted(() => {
                 @keyup="onPasswordKeyUp"
               />
               <button type="button" class="password-toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">
-                <EyeOff v-if="showPassword" :size="17" /><Eye v-else :size="17" />
+                <EyeOff v-if="!showPassword" :size="18" /><Eye v-else :size="18" />
               </button>
             </div>
             <em v-if="capsLock" class="caps-lock"><AlertCircle :size="12" />大写锁定已开启</em>
@@ -230,7 +227,7 @@ onUnmounted(() => {
 
           <div class="login-options">
             <label><input v-model="rememberDevice" type="checkbox" /><span>信任此设备 7 天</span></label>
-            <span><LockKeyhole :size="12" />传输已加密</span>
+            <button type="button" class="forget-password" @click="forgetPassword">忘记密码？</button>
           </div>
 
           <button class="login-submit" type="submit" :disabled="locked || submitting">

@@ -1,0 +1,185 @@
+<template>
+  <scroll-view class="blacklist" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <view class="blacklist__header">
+      <ni-status-bar />
+      <view class="blacklist__nav">
+        <view class="blacklist__nav-button" @click="goBack">
+          <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+        </view>
+        <text class="blacklist__nav-title">黑名单</text>
+        <view class="blacklist__nav-placeholder" />
+      </view>
+    </view>
+
+    <view class="blacklist__content">
+      <view v-if="socialStore.blocks.length === 0" class="blacklist__empty">
+        <ni-empty icon="shield" title="还没有拉黑任何邻居" desc="拉黑后，对方将不再出现在邻居列表中，也不能互发消息" />
+      </view>
+
+      <view v-else class="blacklist__list">
+        <view v-for="blocked in socialStore.blocks" :key="blocked.userId" class="blacklist__card">
+          <ni-avatar :src="blocked.avatar" :name="blocked.name" :size="46" variant="green" />
+          <view class="blacklist__copy">
+            <text class="blacklist__name">{{ blocked.name }}</text>
+            <text class="blacklist__reason">{{ blocked.reason || '已加入黑名单' }}</text>
+            <text class="blacklist__time">{{ formatBlockedAt(blocked.blockedAt) }}</text>
+          </view>
+          <view class="blacklist__action" @click="confirmUnblock(blocked.userId, blocked.name)">
+            <text class="blacklist__action-text">解除</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="blacklist__tip">
+        <ni-icon name="shield" :size="14" state="gold" />
+        <text class="blacklist__tip-text">解除拉黑后，如果双方仍满足同小区双认证条件，会自动恢复为邻居好友。</text>
+      </view>
+    </view>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { onLoad } from '@dcloudio/uni-app'
+import { useSocialStore } from '../../stores/social.store'
+import { useToast } from '../../composables/useToast'
+
+const socialStore = useSocialStore()
+const { toast, showToast } = useToast()
+
+onLoad(() => {
+  socialStore.fetchBlocks().catch((error) => {
+    showToast(error instanceof Error ? error.message : '加载失败', 'alert')
+  })
+})
+
+function confirmUnblock(userId: string, name: string): void {
+  uni.showModal({
+    title: '解除拉黑',
+    content: `确定要将「${name}」移出黑名单吗？`,
+    confirmText: '解除',
+    success: async (res: any) => {
+      if (!res.confirm) return
+      try {
+        await socialStore.unblockPeer(userId)
+        showToast('已解除拉黑')
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+      }
+    },
+  })
+}
+
+function formatBlockedAt(value: number): string {
+  if (!value) return ''
+  const date = new Date(value)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+function goBack(): void {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+  if (pages.length > 1) uni.navigateBack({ delta: 1 })
+  else uni.switchTab({ url: '/pages/messages/index' })
+}
+</script>
+
+<style scoped lang="scss">
+.blacklist {
+  flex: 1;
+  background-color: $ni-color-page;
+  padding-bottom: 30px;
+}
+.blacklist__header {
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.blacklist__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.blacklist__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.blacklist__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.blacklist__nav-placeholder {
+  width: 42px;
+}
+.blacklist__content {
+  padding: 14px;
+}
+.blacklist__empty {
+  background-color: $ni-color-white;
+  border-radius: $ni-radius-16;
+}
+.blacklist__card {
+  margin-bottom: 10px;
+  padding: 13px;
+  flex-direction: row;
+  align-items: center;
+  border-radius: $ni-radius-16;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.blacklist__copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.blacklist__name {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.blacklist__reason {
+  margin-top: 3px;
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.blacklist__time {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-text-tertiary;
+}
+.blacklist__action {
+  height: 30px;
+  padding-left: 13px;
+  padding-right: 13px;
+  border-radius: 10px;
+  border: 1px solid #e8e1db;
+  align-items: center;
+  justify-content: center;
+}
+.blacklist__action-text {
+  font-size: $ni-font-9;
+  color: $ni-color-text-secondary;
+}
+.blacklist__tip {
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: $ni-radius-11;
+  background-color: #fff8e8;
+}
+.blacklist__tip-text {
+  flex: 1;
+  margin-left: 5px;
+  font-size: 7px;
+  line-height: 13px;
+  color: #9a7c45;
+}
+</style>

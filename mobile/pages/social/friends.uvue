@@ -22,19 +22,19 @@
         <input
           class="friends__search-input"
           :value="keyword"
-          placeholder="搜索邻居昵称或小区"
+          placeholder="搜索邻居昵称或楼栋"
           placeholder-class="friends__placeholder"
           @input="onSearch"
         />
       </view>
     </view>
 
-    <view class="friends__requests" @click="goRequests">
+    <view v-if="socialStore.pendingRequestCount > 0" class="friends__requests" @click="goRequests">
       <view class="friends__requests-icon">
         <ni-icon name="friend" :size="19" state="blue" />
       </view>
       <view class="friends__requests-copy">
-        <text class="friends__requests-title">好友申请</text>
+        <text class="friends__requests-title">历史好友申请</text>
         <text class="friends__requests-desc">{{ socialStore.pendingRequestCount }} 条待处理</text>
       </view>
       <ni-icon name="chevron" :size="15" state="tertiary" />
@@ -48,14 +48,20 @@
       <view v-for="group in groups" :key="group.letter" class="friends__group">
         <text class="friends__letter">{{ group.letter }}</text>
         <view class="friends__group-card">
-          <view v-for="friend in group.friends" :key="friend.id" class="friends__row" @click="chatWith(friend.id)">
+          <view
+            v-for="friend in group.friends"
+            :key="friend.userId || friend.id"
+            class="friends__row"
+            @click="chatWith(friend.userId || friend.id)"
+            @longpress="openFriendActions(friend)"
+          >
             <ni-avatar :src="friend.avatar" :name="friend.name" :size="44" variant="green" />
             <view class="friends__row-copy">
               <view class="friends__row-name">
                 <text class="friends__name">{{ friend.name }}</text>
                 <ni-icon v-if="friend.verified" name="shield" :size="9" state="gold" />
               </view>
-              <text class="friends__community">{{ friend.community }}</text>
+              <text class="friends__community">{{ friend.building || friend.community }}</text>
             </view>
             <view class="friends__row-right">
               <view v-if="friend.online" class="friends__online" />
@@ -86,7 +92,11 @@ const groups = computed(() => {
   const filtered = socialStore.friends.filter((friend) => {
     const value = keyword.value.trim()
     if (!value) return true
-    return friend.name.indexOf(value) >= 0 || friend.community.indexOf(value) >= 0
+    return (
+      friend.name.indexOf(value) >= 0 ||
+      friend.community.indexOf(value) >= 0 ||
+      (friend.building || '').indexOf(value) >= 0
+    )
   })
   const map: Record<string, Friend[]> = {}
   filtered.forEach((friend) => {
@@ -100,6 +110,7 @@ const groups = computed(() => {
 })
 
 onLoad(() => {
+  socialStore.fetchEligibility().catch(() => undefined)
   socialStore.fetchFriends().catch(() => undefined)
   socialStore.fetchRequests().catch(() => undefined)
 })
@@ -115,6 +126,52 @@ async function chatWith(friendId: string): Promise<void> {
   } catch (error) {
     showToast(error instanceof Error ? error.message : '打开会话失败', 'alert')
   }
+}
+
+function openFriendActions(friend: Friend): void {
+  uni.showActionSheet({
+    itemList: ['设置备注', '加入黑名单', '举报该邻居'],
+    success: (res: any) => {
+      const index = Number(res.tapIndex)
+      if (index === 0) {
+        editRemark(friend)
+      } else if (index === 1) {
+        confirmBlock(friend)
+      } else if (index === 2) {
+        uni.navigateTo({ url: `/pages/report/index?type=user&targetId=${friend.userId || friend.id}` })
+      }
+    },
+  })
+}
+
+function editRemark(friend: Friend): void {
+  uni.showModal({
+    title: '设置备注',
+    editable: true,
+    placeholderText: friend.name,
+    content: friend.remark || '',
+    success: (res: any) => {
+      if (!res.confirm) return
+      socialStore.setRemark(friend.userId || friend.id, String(res.content ?? ''))
+        .then(() => showToast('备注已更新'))
+        .catch((error) => showToast(error instanceof Error ? error.message : '操作失败', 'alert'))
+    },
+  } as any)
+}
+
+function confirmBlock(friend: Friend): void {
+  uni.showModal({
+    title: '加入黑名单',
+    content: `拉黑后，你和「${friend.name}」将互相不可见，且不能互发消息。`,
+    confirmText: '拉黑',
+    confirmColor: '#E05B4B',
+    success: (res: any) => {
+      if (!res.confirm) return
+      socialStore.blockPeer(friend.userId || friend.id)
+        .then(() => showToast('已加入黑名单'))
+        .catch((error) => showToast(error instanceof Error ? error.message : '操作失败', 'alert'))
+    },
+  })
 }
 
 function goBack(): void {

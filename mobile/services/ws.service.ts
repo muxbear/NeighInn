@@ -11,6 +11,8 @@ export type WsAction =
   | 'ORDER_EVENT'
   | 'AUDIT_EVENT'
   | 'NOTIFY'
+  | 'RELATION_CHANGED'
+  | 'ERROR'
   | 'PONG'
 
 export type WsHandler = (action: WsAction | string, payload: any) => void
@@ -126,8 +128,12 @@ class WsService {
     if (!this.connected) this.connect()
   }
 
+  isConnected(): boolean {
+    return this.connected
+  }
+
   send(action: WsAction, payload: Record<string, any> = {}): void {
-    const frame = { action, payload }
+    const frame = { v: 1, action, payload, ts: Date.now() }
     if (env.mock) {
       if (action === 'MSG_SEND') {
         setTimeout(() => {
@@ -147,22 +153,36 @@ class WsService {
     }
   }
 
-  sendMessage(conversationId: string, content: string, clientMsgId: string): void {
-    this.send('MSG_SEND', { clientMsgId, conversationId, type: 'TEXT', content })
+  sendMessage(
+    conversationId: string,
+    content: string,
+    clientMsgId: string,
+    options: { type?: string; extra?: Record<string, any> } = {},
+  ): void {
+    this.send('MSG_SEND', {
+      clientMsgId,
+      conversationId,
+      type: options.type ?? 'TEXT',
+      content,
+      extra: options.extra ?? {},
+    })
   }
 
-  markRead(conversationId: string, lastMsgSeq: number): void {
-    this.send('MSG_READ', { conversationId, lastMsgSeq })
+  markRead(conversationId: string, lastSeq: number): void {
+    this.send('MSG_READ', { conversationId, lastSeq })
   }
 
   private handleIncoming(raw: unknown): void {
     if (typeof raw !== 'string') return
     try {
       const frame = JSON.parse(raw)
-      if (frame && typeof frame.action === 'string') {
-        if (frame.action === 'PONG') this.waitingPong = 0
-        this.dispatch(frame.action, frame.payload ?? {})
-      }
+      if (!frame || typeof frame !== 'object') return
+      // 新协议 action/payload；兼容旧协议 type/data。
+      const action = frame.action ?? frame.type
+      if (typeof action !== 'string') return
+      const payload = frame.payload ?? frame.data ?? {}
+      if (action === 'PONG') this.waitingPong = 0
+      this.dispatch(action, payload)
     } catch (error) {
       logger.warn('WS', 'invalid frame', error)
     }

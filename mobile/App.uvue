@@ -41,6 +41,14 @@ onLaunch(() => {
       social.applyIncomingMessage(payload.message)
       return
     }
+    if (action === 'MSG_ACK' && payload) {
+      social.applyAck(payload)
+      return
+    }
+    if (action === 'RELATION_CHANGED' && payload && payload.peerId) {
+      social.applyRelationChanged(String(payload.peerId), String(payload.state || ''))
+      return
+    }
     if (action === 'ORDER_EVENT' && payload && payload.orderId) {
       if (orders.currentOrder && orders.currentOrder.id === payload.orderId) {
         orders.fetchDetail(payload.orderId).catch(() => undefined)

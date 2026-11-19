@@ -267,6 +267,13 @@
             "navigationStyle": "custom",
             "backgroundColor": "#FAF8F5"
           }
+        },
+        {
+          "path": "blacklist",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#FAF8F5"
+          }
         }
       ]
     },

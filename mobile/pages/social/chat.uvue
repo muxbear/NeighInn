@@ -23,20 +23,31 @@
       </view>
     </view>
 
+    <view v-if="conversation && conversation.canSend === false" class="chat__banner">
+      <ni-icon name="shield" :size="14" state="gold" />
+      <text class="chat__banner-text">{{ readOnlyText }}</text>
+    </view>
+
     <scroll-view
       class="chat__scroll"
       scroll-y
       :show-scrollbar="false"
       :scroll-into-view="scrollTarget"
       :scroll-with-animation="true"
+      :upper-threshold="60"
+      @scrolltoupper="loadOlder"
     >
       <view class="chat__notice">
         <ni-icon name="shield" :size="13" state="gold" />
         <text class="chat__notice-text">请勿私下转账；平台担保交易更安全。遇到可疑信息请举报。</text>
       </view>
 
+      <view v-if="loadingOlder" class="chat__loading-older">
+        <text class="chat__loading-older-text">加载更早消息…</text>
+      </view>
+
       <view v-if="messages.length === 0" class="chat__empty">
-        <ni-empty icon="message" title="还没有消息" desc="和邻居打个招呼，问问物品细节吧" />
+        <ni-empty icon="message" title="还没有消息" desc="和邻居打个招呼吧" />
       </view>
 
       <view v-for="message in messages" :key="message.id" :id="`msg-${message.id}`">
@@ -52,9 +63,33 @@
             variant="green"
           />
           <view class="chat__message" :class="{ 'chat__message--mine': message.mine }">
-            <view class="chat__bubble" :class="{ 'chat__bubble--mine': message.mine }">
-              <text v-if="message.type === 'TEXT'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
+            <view
+              class="chat__bubble"
+              :class="{ 'chat__bubble--mine': message.mine }"
+              @longpress="openMessageActions(message)"
+            >
+              <text
+                v-if="message.type === 'TEXT'"
+                class="chat__text"
+                :class="{ 'chat__text--mine': message.mine, 'chat__text--emoji': isEmojiOnly(message.content) }"
+              >
                 {{ message.content }}
+              </text>
+              <text
+                v-else-if="message.type === 'EMOJI'"
+                class="chat__text chat__text--emoji"
+                :class="{ 'chat__text--mine': message.mine }"
+              >
+                {{ message.content }}
+              </text>
+              <text v-else-if="message.type === 'IMAGE'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
+                [图片]
+              </text>
+              <text v-else-if="message.type === 'VIDEO'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
+                [视频]
+              </text>
+              <text v-else-if="message.type === 'VOICE'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
+                [语音]
               </text>
               <view v-else-if="message.type === 'ITEM' && message.item" class="chat__item" @click="goItem(message.item.id)">
                 <image class="chat__item-image" :src="message.item.image" mode="aspectFill" />
@@ -65,10 +100,20 @@
                 <ni-icon name="chevron" :size="12" state="tertiary" />
               </view>
             </view>
+            <view v-if="message.riskFlag" class="chat__risk">
+              <ni-icon name="alert" :size="10" state="danger" />
+              <text class="chat__risk-text">注意保护个人信息，谨防诈骗</text>
+            </view>
             <view class="chat__meta">
               <text class="chat__time">{{ message.timeText }}</text>
               <text v-if="message.mine && message.status === 'SENDING'" class="chat__status">发送中…</text>
-              <text v-if="message.mine && message.status === 'FAILED'" class="chat__status chat__status--failed">发送失败</text>
+              <text
+                v-if="message.mine && message.status === 'FAILED'"
+                class="chat__status chat__status--failed"
+                @click="resend(message)"
+              >
+                发送失败，点击重发
+              </text>
             </view>
           </view>
         </view>
@@ -76,12 +121,24 @@
       <view class="chat__scroll-space" />
     </scroll-view>
 
+    <view v-if="emojiPanelVisible" class="chat__emoji-panel">
+      <view v-for="(row, rowIndex) in emojiRows" :key="rowIndex" class="chat__emoji-row">
+        <view v-for="emoji in row" :key="emoji" class="chat__emoji-item" @click="insertEmoji(emoji)">
+          <text class="chat__emoji-text">{{ emoji }}</text>
+        </view>
+      </view>
+    </view>
+
     <view class="chat__input-bar">
+      <view class="chat__emoji-toggle" @click="toggleEmoji">
+        <text class="chat__emoji-toggle-text">{{ emojiPanelVisible ? '⌨' : '☺' }}</text>
+      </view>
       <view class="chat__input-wrap">
         <input
           class="chat__input"
           :value="draft"
-          placeholder="和邻居说点什么…"
+          :disabled="!canSend"
+          :placeholder="canSend ? '和邻居说点什么…' : '当前会话暂不可发送消息'"
           placeholder-class="chat__placeholder"
           confirm-type="send"
           :adjust-position="true"
@@ -89,8 +146,8 @@
           @confirm="send"
         />
       </view>
-      <view class="chat__send" :class="{ 'chat__send--active': draft.trim().length > 0 }" @click="send">
-        <text class="chat__send-text" :class="{ 'chat__send-text--active': draft.trim().length > 0 }">发送</text>
+      <view class="chat__send" :class="{ 'chat__send--active': canSend && draft.trim().length > 0 }" @click="send">
+        <text class="chat__send-text" :class="{ 'chat__send-text--active': canSend && draft.trim().length > 0 }">发送</text>
       </view>
     </view>
 
@@ -108,30 +165,58 @@ import { useToast } from '../../composables/useToast'
 const socialStore = useSocialStore()
 const { toast, showToast } = useToast()
 
+const EMOJIS = [
+  '😀', '😄', '😁', '😆', '😅', '😂', '🙂', '🙃',
+  '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗',
+  '😋', '😛', '😜', '🤪', '🤗', '🤭', '🤔', '🤨',
+  '😐', '😑', '😶', '🙄', '😏', '😣', '😥', '😮',
+  '👍', '👎', '👏', '🙌', '🤝', '🙏', '💪', '👌',
+  '❤️', '🧡', '💛', '💚', '💙', '💜', '🤍', '💔',
+  '🎉', '🎊', '🌹', '🌸', '🌻', '🍀', '⭐', '✨',
+  '🐶', '🐱', '🐼', '🐰', '🍎', '🍉', '☕', '🍰',
+]
+
 const conversationId = ref('')
-const pendingItemId = ref('')
 const draft = ref('')
 const scrollTarget = ref('')
 const sending = ref(false)
+const loadingOlder = ref(false)
+const emojiPanelVisible = ref(false)
 
 const conversation = computed<Conversation | null>(
   () => socialStore.conversations.find((item) => item.id === conversationId.value) ?? null,
 )
 const messages = computed<ChatMessage[]>(() => socialStore.messagesByConv[conversationId.value] ?? [])
+const canSend = computed(() => Boolean(conversation.value) && conversation.value?.canSend !== false)
+const readOnlyText = computed(() => {
+  if (conversation.value?.readOnlyReason === 'BLOCKED') {
+    return '你们已互相拉黑，当前会话无法继续发送消息'
+  }
+  if (conversation.value?.readOnlyReason === 'INELIGIBLE') {
+    return '对方认证状态已变更，当前会话只读'
+  }
+  return '当前会话暂不可发送消息'
+})
+const emojiRows = computed(() => {
+  const rows: string[][] = []
+  for (let index = 0; index < EMOJIS.length; index += 8) {
+    rows.push(EMOJIS.slice(index, index + 8))
+  }
+  return rows
+})
 
 onLoad(async (options: any) => {
   conversationId.value = String(options?.id ?? '')
-  pendingItemId.value = String(options?.itemId ?? '')
   if (!conversationId.value) return
   try {
     if (!socialStore.conversations.length) await socialStore.fetchConversations()
-    const conversation = socialStore.conversations.find((item) => item.id === conversationId.value)
-    if (!conversation) {
+    const current = socialStore.conversations.find((item) => item.id === conversationId.value)
+    if (!current) {
       showToast('会话不存在', 'alert')
       return
     }
     await socialStore.fetchMessages(conversationId.value)
-    if (conversation.unread > 0) {
+    if (current.unread > 0) {
       await socialStore.markConversationRead(conversationId.value)
     }
     scrollToBottom()
@@ -147,8 +232,13 @@ function onInput(event: any): void {
 async function send(): Promise<void> {
   const text = draft.value.trim()
   if (!text || sending.value) return
+  if (!canSend.value) {
+    showToast(readOnlyText.value, 'alert')
+    return
+  }
   sending.value = true
   draft.value = ''
+  emojiPanelVisible.value = false
   try {
     await socialStore.sendMessage(conversationId.value, text)
     scrollToBottom()
@@ -159,6 +249,46 @@ async function send(): Promise<void> {
   }
 }
 
+async function resend(message: ChatMessage): Promise<void> {
+  try {
+    await socialStore.resendMessage(conversationId.value, message)
+    scrollToBottom()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '重发失败', 'alert')
+  }
+}
+
+async function loadOlder(): Promise<void> {
+  if (loadingOlder.value) return
+  const first = messages.value.find((item) => (item.seq ?? 0) > 0)
+  if (!first || !first.seq) return
+  loadingOlder.value = true
+  try {
+    await socialStore.fetchMessages(conversationId.value, first.seq)
+  } catch {
+    // 忽略加载更早消息失败，用户可再次上拉
+  } finally {
+    loadingOlder.value = false
+  }
+}
+
+function toggleEmoji(): void {
+  emojiPanelVisible.value = !emojiPanelVisible.value
+  if (emojiPanelVisible.value && typeof uni !== 'undefined' && typeof uni.hideKeyboard === 'function') {
+    uni.hideKeyboard()
+  }
+}
+
+function insertEmoji(emoji: string): void {
+  draft.value = `${draft.value}${emoji}`
+}
+
+function isEmojiOnly(content: string): boolean {
+  const value = (content || '').trim()
+  if (!value) return false
+  return !/[0-9A-Za-z\u4e00-\u9fa5]/.test(value)
+}
+
 function scrollToBottom(): void {
   setTimeout(() => {
     const list = messages.value
@@ -166,8 +296,22 @@ function scrollToBottom(): void {
   }, 80)
 }
 
-function goItem(id: string): void {
-  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
+function openMessageActions(message: ChatMessage): void {
+  const items = ['复制', '举报该消息']
+  uni.showActionSheet({
+    itemList: items,
+    success: (res: any) => {
+      const index = Number(res.tapIndex)
+      if (index === 0) {
+        uni.setClipboardData({
+          data: message.content,
+          success: () => showToast('已复制'),
+        })
+      } else if (index === 1) {
+        uni.navigateTo({ url: `/pages/report/index?type=message&targetId=${message.id}` })
+      }
+    },
+  })
 }
 
 function openMore(): void {
@@ -176,14 +320,39 @@ function openMore(): void {
     success: (res: any) => {
       const index = Number(res.tapIndex)
       if (index === 0) {
-        uni.navigateTo({ url: '/pages/report/index?type=user' })
+        uni.navigateTo({ url: `/pages/report/index?type=user&targetId=${conversation.value?.peerId ?? ''}` })
       } else if (index === 1) {
-        showToast('已加入黑名单')
+        confirmBlock()
       } else {
-        showToast('聊天记录已清空')
+        showToast('聊天记录已在本地清空')
       }
     },
   })
+}
+
+function confirmBlock(): void {
+  const peer = conversation.value
+  if (!peer) return
+  uni.showModal({
+    title: '加入黑名单',
+    content: `拉黑后，你和「${peer.peerName}」将互相不可见，且不能互发消息。`,
+    confirmText: '拉黑',
+    confirmColor: '#E05B4B',
+    success: async (res: any) => {
+      if (!res.confirm) return
+      try {
+        await socialStore.blockPeer(peer.peerId)
+        showToast('已加入黑名单')
+        setTimeout(() => goBack(), 500)
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : '操作失败', 'alert')
+      }
+    },
+  })
+}
+
+function goItem(id: string): void {
+  uni.navigateTo({ url: `/pages/item/detail?id=${id}` })
 }
 
 function goBack(): void {
@@ -246,6 +415,20 @@ function goBack(): void {
   font-weight: 700;
   color: $ni-color-text-primary;
 }
+.chat__banner {
+  flex-direction: row;
+  align-items: center;
+  padding: 9px 13px;
+  background-color: #fff8e8;
+  border-bottom: 1px solid #f2e4c8;
+}
+.chat__banner-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: 9px;
+  line-height: 15px;
+  color: #9a7c45;
+}
 .chat__scroll {
   flex: 1;
   padding-left: 13px;
@@ -265,6 +448,14 @@ function goBack(): void {
   font-size: 7px;
   line-height: 13px;
   color: #9a7c45;
+}
+.chat__loading-older {
+  align-items: center;
+  padding: 8px 0;
+}
+.chat__loading-older-text {
+  font-size: 8px;
+  color: $ni-color-text-tertiary;
 }
 .chat__empty {
   padding-top: 20px;
@@ -320,6 +511,20 @@ function goBack(): void {
 .chat__text--mine {
   color: #ffffff;
 }
+.chat__text--emoji {
+  font-size: 26px;
+  line-height: 34px;
+}
+.chat__risk {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 4px;
+}
+.chat__risk-text {
+  margin-left: 3px;
+  font-size: 7px;
+  color: $ni-color-danger-deep;
+}
 .chat__item {
   flex-direction: row;
   align-items: center;
@@ -368,6 +573,24 @@ function goBack(): void {
 .chat__scroll-space {
   height: 16px;
 }
+.chat__emoji-panel {
+  padding: 8px 10px;
+  background-color: #ffffff;
+  border-top: 1px solid #eee9e4;
+}
+.chat__emoji-row {
+  flex-direction: row;
+  align-items: center;
+}
+.chat__emoji-item {
+  flex: 1;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.chat__emoji-text {
+  font-size: 24px;
+}
 .chat__input-bar {
   padding: 8px 12px;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
@@ -375,6 +598,16 @@ function goBack(): void {
   align-items: center;
   background-color: rgba(255, 255, 255, 0.98);
   border-top: 1px solid #eee9e4;
+}
+.chat__emoji-toggle {
+  width: 36px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+}
+.chat__emoji-toggle-text {
+  font-size: 22px;
+  color: $ni-color-text-secondary;
 }
 .chat__input-wrap {
   flex: 1;
