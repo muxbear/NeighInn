@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Building2, Camera, ChevronDown, Filter, Home, Pencil, Plus, Search, Settings2, ShieldCheck, Trash2, UserRound, Users, X } from 'lucide-vue-next'
-import { certificationsApi, residentApi } from '@/api'
+import { Building2, Camera, ChevronDown, Copy, Filter, Home, KeyRound, Pencil, Plus, Search, Settings2, ShieldCheck, ShieldOff, Trash2, UserRound, Users, X } from 'lucide-vue-next'
+import { certificationsApi, residentAdminApi, residentApi } from '@/api'
 import { fmtDateTime, mapStatus } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -39,6 +39,21 @@ const certMaterials = ref<Record<'realname' | 'owner', any[]>>({ realname: [], o
 const certMaterialsLoading = ref<Record<'realname' | 'owner', boolean>>({ realname: false, owner: false })
 const certUploading = ref<Record<'realname' | 'owner', boolean>>({ realname: false, owner: false })
 const certMaterialErrors = ref<Record<string, boolean>>({})
+
+// 住户后台身份授权：社区业主页选择住户 → 授予「角色权限」中可授予住户的角色。
+const grantOpen = ref(false)
+const grantTarget = ref<any>(null)
+const grantLoading = ref(false)
+const grantSubmitting = ref(false)
+const grantRoles = ref<any[]>([])
+const grantState = ref<any>({ eligible: false, eligibleReason: '', account: null })
+const grantForm = ref({ roleIds: [] as number[], username: '', reason: '' })
+const grantResult = ref<any>(null)
+const resetting = ref('')
+
+const canGrantAdmin = computed(() => auth.hasPermission('community:resident:admin-grant'))
+const canRevokeAdmin = computed(() => auth.hasPermission('community:resident:admin-revoke'))
+const loginUrl = computed(() => `${window.location.origin}/login`)
 
 const AVATAR_TONES = ['violet', 'blue', 'green', 'orange', 'plum', 'teal']
 
@@ -278,6 +293,129 @@ function markCertMaterialError(objectKey: string) {
   certMaterialErrors.value = { ...certMaterialErrors.value, [objectKey]: true }
 }
 
+// ---------------------------------------------------------------- 后台身份
+
+function adminLabel(row: any): string {
+  const account = row.adminAccount
+  if (!account) return '未开通'
+  if (account.status === 'DISABLED') return '已停用'
+  const roles = (account.roles || []).map((role: any) => role.name).filter(Boolean)
+  return roles.length ? roles.join('、') : '后台用户'
+}
+
+async function openGrant(row: any) {
+  grantTarget.value = row
+  grantOpen.value = true
+  grantLoading.value = true
+  grantResult.value = null
+  grantForm.value = {
+    roleIds: (row.adminAccount?.roles || []).length
+      ? (row.adminAccount.roles || []).map((role: any) => Number(role.id)).filter((id: number) => id)
+      : [],
+    username: row.adminAccount?.username || '',
+    reason: '',
+  }
+  try {
+    const [rolesData, state] = await Promise.all([
+      grantRoles.value.length ? Promise.resolve(grantRoles.value) : residentAdminApi.roles(),
+      residentAdminApi.account(row.id),
+    ])
+    grantRoles.value = rolesData || []
+    grantState.value = state
+    const current = (state?.account?.roles || []).map((role: any) => Number(role.id))
+    if (current.length) grantForm.value.roleIds = current.filter((id: number) => Number.isFinite(id))
+    else if (!grantForm.value.roleIds.length) {
+      const defaultRole = (grantRoles.value || []).find((role: any) => role.code === 'community_admin')
+      if (defaultRole) grantForm.value.roleIds = [Number(defaultRole.id)]
+    }
+    grantForm.value.username = state?.account?.username || grantForm.value.username
+  } catch (exc: any) {
+    app.showToast(exc?.message || '后台身份加载失败')
+    grantOpen.value = false
+  } finally {
+    grantLoading.value = false
+  }
+}
+
+function closeGrant() {
+  if (grantSubmitting.value) return
+  grantOpen.value = false
+  grantTarget.value = null
+  grantState.value = { eligible: false, eligibleReason: '', account: null }
+}
+
+function setGrantRole(event: Event) {
+  const value = Number((event.target as HTMLSelectElement).value)
+  grantForm.value.roleIds = Number.isFinite(value) && value ? [value] : []
+}
+
+async function submitGrant() {
+  if (!grantTarget.value || grantSubmitting.value) return
+  if (!grantForm.value.roleIds.length) {
+    app.showToast('请选择要授予的角色')
+    return
+  }
+  grantSubmitting.value = true
+  try {
+    const data = await residentAdminApi.grant(grantTarget.value.id, {
+      roleIds: grantForm.value.roleIds.map(Number),
+      username: grantForm.value.username.trim() || undefined,
+      reason: grantForm.value.reason.trim() || undefined,
+    })
+    grantOpen.value = false
+    if (data?.initialPassword) {
+      grantResult.value = { ...data, residentName: grantTarget.value.name }
+    } else {
+      app.showToast(data?.adjusted ? '后台角色已调整' : '后台权限已开通')
+    }
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '授权失败')
+  } finally {
+    grantSubmitting.value = false
+  }
+}
+
+async function revokeGrant(row: any) {
+  const ok = await confirm({
+    title: '解除后台授权',
+    message: `确定解除“${row.name}”的后台权限吗？`,
+    details: ['解除后该住户将无法登录管理端，移动端账号与住户档案不受影响。'],
+    confirmText: '确认解除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await residentAdminApi.revoke(row.id)
+    app.showToast('后台权限已解除')
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '解除失败')
+  }
+}
+
+async function resetGrantPassword(row: any) {
+  if (resetting.value) return
+  resetting.value = row.id
+  try {
+    const data = await residentAdminApi.resetPassword(row.id)
+    grantResult.value = { admin: data, initialPassword: data?.initialPassword, residentName: row.name }
+  } catch (exc: any) {
+    app.showToast(exc?.message || '重置失败')
+  } finally {
+    resetting.value = ''
+  }
+}
+
+async function copyText(value: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(value)
+    app.showToast(`${label}已复制`)
+  } catch {
+    app.showToast('复制失败，请手动选择文本')
+  }
+}
+
 onMounted(load)
 watch(() => app.currentCommunityId, () => {
   // 与社区运维一致：切换社区后重置身份页签与列表搜索。
@@ -331,7 +469,7 @@ watch(() => app.currentCommunityId, () => {
               />
             </th>
             <th class="avatar-cell">头像</th><th>姓名</th><th>昵称</th><th>身份类型</th><th>房屋 / 商铺</th><th>信用</th>
-            <th>身份认证</th><th>业主认证</th><th>手机号</th><th>邮箱</th><th>个人描述</th><th>账号状态</th><th>加入时间</th><th>操作</th>
+            <th>身份认证</th><th>业主认证</th><th>手机号</th><th>邮箱</th><th>个人描述</th><th>账号状态</th><th>后台身份</th><th>加入时间</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -378,9 +516,42 @@ watch(() => app.currentCommunityId, () => {
             <td><span class="cell-ellipsis md" :title="row.email || '—'">{{ row.email || '—' }}</span></td>
             <td><span class="cell-ellipsis lg" :title="row.bio || '—'">{{ row.bio || '—' }}</span></td>
             <td><StatusBadge :value="row.status" /></td>
+            <td>
+              <span
+                :class="['resident-admin-badge', {
+                  active: row.adminAccount && row.adminAccount.status === 'ACTIVE',
+                  disabled: row.adminAccount && row.adminAccount.status !== 'ACTIVE',
+                }]"
+                :title="row.adminAccount?.username ? `账号：${row.adminAccount.username}` : '尚未开通后台身份'"
+              >
+                {{ adminLabel(row) }}
+              </span>
+            </td>
             <td>{{ row.joinedAt }}</td>
             <td>
               <div class="row-actions">
+                <button
+                  v-if="canGrantAdmin"
+                  class="row-icon-button"
+                  aria-label="授予后台角色"
+                  data-tip="授予后台角色"
+                  @click="openGrant(row)"
+                ><ShieldCheck :size="15" /></button>
+                <button
+                  v-if="canGrantAdmin && row.adminAccount?.status === 'ACTIVE'"
+                  class="row-icon-button"
+                  aria-label="重置初始密码"
+                  data-tip="重置初始密码"
+                  :disabled="resetting === row.id"
+                  @click="resetGrantPassword(row)"
+                ><KeyRound :size="15" /></button>
+                <button
+                  v-if="canRevokeAdmin && row.adminAccount?.status === 'ACTIVE'"
+                  class="row-icon-button danger"
+                  aria-label="解除后台授权"
+                  data-tip="解除后台授权"
+                  @click="revokeGrant(row)"
+                ><ShieldOff :size="15" /></button>
                 <button
                   v-if="auth.hasPermission('community:resident:update')"
                   class="row-icon-button"
@@ -559,4 +730,116 @@ watch(() => app.currentCommunityId, () => {
     </div>
     <template #footer><button @click="drawerOpen = false">取消</button><button class="primary-button" @click="save">保存档案</button></template>
   </NiDrawer>
+
+  <NiDrawer :open="grantOpen" :title="grantState.account ? '调整后台角色' : '授予后台角色'" eyebrow="后台身份" @close="closeGrant">
+    <div v-if="grantLoading" class="cert-photo-hint">正在加载后台身份…</div>
+    <template v-else>
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 18px">
+        <Building2 :size="17" style="color: #6852c5" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">授权住户</span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ grantTarget?.name }}</strong>
+        </div>
+        <em style="color: #988da2; font-size: var(--font-size-caption)">{{ grantTarget?.communityName }}</em>
+      </div>
+
+      <div v-if="grantState.account?.source === 'MANUAL'" class="grant-warning">
+        该住户的移动端账号已绑定手工后台账号「{{ grantState.account.username }}」，请到「用户管理」调整。
+      </div>
+      <div v-else-if="!grantState.eligible && !grantState.account" class="grant-warning">
+        {{ grantState.eligibleReason || '该住户暂不满足授权条件' }}
+      </div>
+
+      <div class="form-grid">
+        <label class="full">
+          <span>授予角色 *</span>
+          <select
+            :value="grantForm.roleIds[0] || ''"
+            :disabled="grantState.account?.source === 'MANUAL' || (!grantState.eligible && !grantState.account)"
+            @change="setGrantRole"
+          >
+            <option value="" disabled>请选择可授予住户的角色</option>
+            <option v-for="role in grantRoles" :key="role.id" :value="role.id">{{ role.name }}（{{ role.code }}）</option>
+          </select>
+        </label>
+        <label class="full">
+          <span>登录账号{{ grantState.account ? '' : '（选填，默认自动生成）' }}</span>
+          <input
+            v-model="grantForm.username"
+            maxlength="64"
+            :disabled="Boolean(grantState.account) || grantState.account?.source === 'MANUAL'"
+            placeholder="默认 u 开头，可自定义"
+          />
+        </label>
+        <label class="full">
+          <span>授权原因</span>
+          <textarea v-model="grantForm.reason" maxlength="200" placeholder="例如：业主委员会推荐，负责本社区内容运营" />
+        </label>
+      </div>
+
+      <p class="form-hint">
+        授权后该住户同时拥有移动端账号与后台账号，仅能查看/操作本社区数据。
+        初始密码由系统生成并仅展示一次，首次登录必须修改。
+      </p>
+      <p v-if="grantState.account" class="form-hint">
+        当前账号：{{ grantState.account.username }} · 状态 {{ grantState.account.status }}
+        <template v-if="grantState.account.mustChangePassword"> · 待首次改密</template>
+      </p>
+    </template>
+    <template #footer>
+      <button @click="closeGrant">取消</button>
+      <button
+        class="primary-button"
+        :disabled="grantSubmitting || grantLoading || (!grantState.eligible && !grantState.account) || grantState.account?.source === 'MANUAL'"
+        @click="submitGrant"
+      >
+        {{ grantSubmitting ? '正在保存…' : grantState.account ? '保存角色调整' : '确认授权' }}
+      </button>
+    </template>
+  </NiDrawer>
+
+  <div v-if="grantResult" class="modal-backdrop" @click.self="grantResult = null">
+    <div class="modal-card grant-result-modal">
+      <header class="cert-photo-head">
+        <div>
+          <strong>后台账号已就绪</strong>
+          <span>{{ grantResult.residentName }} · 初始密码仅展示一次，关闭后只能重置</span>
+        </div>
+        <button class="cert-photo-close" aria-label="关闭" @click="grantResult = null"><X :size="17" /></button>
+      </header>
+      <div class="modal-body">
+        <div class="grant-result-row">
+          <span>登录账号</span>
+          <strong>{{ grantResult.admin?.username }}</strong>
+          <button class="link-button" @click="copyText(grantResult.admin?.username, '登录账号')"><Copy :size="13" />复制</button>
+        </div>
+        <div class="grant-result-row">
+          <span>初始密码</span>
+          <strong class="grant-result-password">{{ grantResult.initialPassword }}</strong>
+          <button class="link-button" @click="copyText(grantResult.initialPassword, '初始密码')"><Copy :size="13" />复制</button>
+        </div>
+        <div class="grant-result-row">
+          <span>登录地址</span>
+          <strong>{{ loginUrl }}</strong>
+          <button class="link-button" @click="copyText(loginUrl, '登录地址')"><Copy :size="13" />复制</button>
+        </div>
+        <p class="form-hint">首次登录会强制修改初始密码；请通过线下可信渠道告知住户，不要通过公开群聊发送。</p>
+      </div>
+      <footer><button class="primary-button" @click="grantResult = null">我已记录，关闭</button></footer>
+    </div>
+  </div>
 </template>
+
+<style scoped>
+.resident-admin-badge { display: inline-block; max-width: 150px; padding: 2px 8px; border-radius: 7px; overflow: hidden; color: #9a95a1; background: #f5f4f7; font-size: var(--font-size-caption); white-space: nowrap; text-overflow: ellipsis; }
+.resident-admin-badge.active { color: #5f4bb5; background: #f1edfc; }
+.resident-admin-badge.disabled { color: #b06a6a; background: #fdf0f0; }
+.grant-warning { margin-bottom: 14px; padding: 10px 12px; border-radius: 9px; color: #a3525b; background: #fff5f6; font-size: var(--font-size-body); line-height: 1.6; }
+.grant-result-modal { width: min(520px, 100%); }
+.grant-result-row { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 9px; background: #faf9fb; }
+.grant-result-row + .grant-result-row { margin-top: 9px; }
+.grant-result-row > span { width: 72px; color: #958b9f; font-size: var(--font-size-caption); }
+.grant-result-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; color: #3d3945; font-size: var(--font-size-body); }
+.grant-result-password { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .4px; }
+.link-button { display: inline-flex; align-items: center; gap: 4px; border: 0; color: #6f59d4; background: transparent; font-size: var(--font-size-caption); cursor: pointer; }
+</style>

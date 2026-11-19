@@ -51,6 +51,10 @@ http.interceptors.response.use(
     if (error.response?.status === 401 && !window.location.pathname.startsWith('/login')) {
       window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`
     }
+    // 40306：首次登录/重置后必须先修改初始密码，统一跳到改密页。
+    if (body?.code === 40306 && !window.location.pathname.startsWith('/change-password')) {
+      window.location.href = '/change-password'
+    }
     return Promise.reject(new ApiError(body?.code ?? 50000, message, body?.traceId))
   },
 )

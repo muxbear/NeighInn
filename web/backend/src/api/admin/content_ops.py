@@ -7,7 +7,12 @@ from sqlalchemy import delete, func, or_, select
 from src.api.utils import epoch_ms, paginate
 from src.core.audit import write_audit, write_outbox
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_any_permission, require_permission
+from src.core.permissions import (
+    community_scope_conditions,
+    require_any_permission,
+    require_permission,
+    resolve_community_scope,
+)
 from src.core.responses import (
     ERR_NOT_FOUND,
     ERR_PARAM,
@@ -123,9 +128,9 @@ async def list_broadcasts(admin: CurrentAdmin, db: DbSession,
                           status: str | None = Query(default=None),
                           keyword: str | None = Query(default=None),
                           page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(Broadcast)
-    if communityId:
-        stmt = stmt.where(Broadcast.community_id == communityId)
+    resolved = await resolve_community_scope(db, admin, communityId)
+    stmt = select(Broadcast).where(
+        *community_scope_conditions(resolved, Broadcast.community_id))
     if status:
         stmt = stmt.where(Broadcast.status == status)
     if keyword:
@@ -142,6 +147,7 @@ async def create_broadcast(payload: BroadcastIn, request: Request,
     community = await db.get(Community, payload.communityId)
     if not community:
         raise ApiError(ERR_PARAM, "社区不存在", 400)
+    await resolve_community_scope(db, admin, community.id)
     if len(payload.title.strip()) < 2:
         raise ApiError(ERR_PARAM, "标题必填", 400)
     try:
@@ -185,6 +191,7 @@ async def broadcast_detail(broadcast_id: int, admin: CurrentAdmin, db: DbSession
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
+    await resolve_community_scope(db, admin, broadcast.community_id)
     return ok(await _broadcast_row(db, broadcast))
 
 
@@ -196,6 +203,7 @@ async def update_broadcast(broadcast_id: int, payload: BroadcastIn,
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
+    await resolve_community_scope(db, admin, broadcast.community_id)
     if len(payload.title.strip()) < 2:
         raise ApiError(ERR_PARAM, "标题必填", 400)
     before = {"title": broadcast.title, "status": broadcast.status}
@@ -251,6 +259,7 @@ async def delete_broadcast(broadcast_id: int, request: Request,
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
+    await resolve_community_scope(db, admin, broadcast.community_id)
     await _delete_broadcast_row(db, request, admin, broadcast)
     await db.commit()
     return ok({"id": str(broadcast_id)}, "喇叭已删除")
@@ -270,6 +279,11 @@ async def batch_delete_broadcasts(payload: BroadcastBatchIn, request: Request,
         if not broadcast:
             failed.append({"id": str(broadcast_id), "reason": "喇叭不存在"})
             continue
+        try:
+            await resolve_community_scope(db, admin, broadcast.community_id)
+        except ApiError as exc:
+            failed.append({"id": str(broadcast_id), "reason": exc.message})
+            continue
         await _delete_broadcast_row(db, request, admin, broadcast)
         deleted.append(str(broadcast_id))
     await db.commit()
@@ -285,6 +299,7 @@ async def review_broadcast(broadcast_id: int, payload: ReviewIn,
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
+    await resolve_community_scope(db, admin, broadcast.community_id)
     before = {"status": broadcast.status}
     if payload.decision == "APPROVE":
         if broadcast.status != E.ContentStatus.PUBLISHED:
@@ -312,6 +327,7 @@ async def offline_broadcast(broadcast_id: int, request: Request,
     broadcast = await db.get(Broadcast, broadcast_id)
     if not broadcast:
         raise ApiError(ERR_NOT_FOUND, "喇叭不存在", 404)
+    await resolve_community_scope(db, admin, broadcast.community_id)
     before = {"status": broadcast.status}
     broadcast.status = content_sm.fire(broadcast.status, E.ContentStatus.OFFLINE)
     await write_audit(db, request, actor=admin, action="broadcast.offline",
@@ -363,9 +379,9 @@ async def list_help_requests(admin: CurrentAdmin, db: DbSession,
                              status: str | None = Query(default=None),
                              keyword: str | None = Query(default=None),
                              page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(HelpRequest)
-    if communityId:
-        stmt = stmt.where(HelpRequest.community_id == communityId)
+    resolved = await resolve_community_scope(db, admin, communityId)
+    stmt = select(HelpRequest).where(
+        *community_scope_conditions(resolved, HelpRequest.community_id))
     if kind:
         code = {"求助": "HELP", "提供": "OFFER", "服务": "OFFER"}.get(kind, kind.upper())
         stmt = stmt.where(HelpRequest.kind == code)
@@ -383,6 +399,7 @@ async def help_detail(help_id: int, admin: CurrentAdmin, db: DbSession):
     row = await db.get(HelpRequest, help_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, row.community_id)
     return ok(await _help_row(db, row))
 
 
@@ -414,6 +431,7 @@ async def update_help(help_id: int, payload: HelpUpdateIn, request: Request,
     row = await db.get(HelpRequest, help_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, row.community_id)
 
     kind = payload.kind.upper() if payload.kind is not None else row.kind
     if kind not in ("HELP", "OFFER"):
@@ -509,6 +527,7 @@ async def review_help(help_id: int, payload: ReviewIn, request: Request,
     row = await db.get(HelpRequest, help_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, row.community_id)
     if row.kind != "OFFER":
         raise ApiError(ERR_PARAM, "邻里求助默认直接发布，无需审核", 400)
     before = {"status": row.status}
@@ -559,6 +578,7 @@ async def delete_help(help_id: int, request: Request,
     row = await db.get(HelpRequest, help_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, row.community_id)
     await _delete_help_row(db, request, admin, row)
     await db.commit()
     return ok({"id": str(help_id)}, "互助信息已删除")
@@ -582,6 +602,11 @@ async def batch_delete_help(payload: BatchIdsIn, request: Request,
         if not row:
             failed.append({"id": str(help_id), "reason": "互助不存在"})
             continue
+        try:
+            await resolve_community_scope(db, admin, row.community_id)
+        except ApiError as exc:
+            failed.append({"id": str(help_id), "reason": exc.message})
+            continue
         await _delete_help_row(db, request, admin, row)
         deleted.append(str(help_id))
     await db.commit()
@@ -591,6 +616,10 @@ async def batch_delete_help(payload: BatchIdsIn, request: Request,
 
 @router.get("/help-requests/{help_id}/responses")
 async def help_responses(help_id: int, admin: CurrentAdmin, db: DbSession):
+    request_row = await db.get(HelpRequest, help_id)
+    if not request_row:
+        raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, request_row.community_id)
     rows = list((await db.execute(
         select(HelpResponse).where(HelpResponse.request_id == help_id)
         .order_by(HelpResponse.id))).scalars().all())
@@ -612,6 +641,7 @@ async def match_help(help_id: int, payload: dict, request: Request,
     row = await db.get(HelpRequest, help_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, row.community_id)
     responder_id = int(payload.get("responderId", 0))
     response = await db.scalar(
         select(HelpResponse).where(HelpResponse.request_id == help_id,
@@ -647,6 +677,7 @@ async def close_help(help_id: int, payload: dict, request: Request,
     row = await db.get(HelpRequest, help_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "互助不存在", 404)
+    await resolve_community_scope(db, admin, row.community_id)
     reason = str(payload.get("reason", "")).strip()
     target = E.HelpStatus.COMPLETED if payload.get("completed") else E.HelpStatus.CLOSED
     row.status = help_sm.fire(row.status, target)
@@ -703,9 +734,9 @@ async def list_life_posts(admin: CurrentAdmin, db: DbSession,
                           status: str | None = Query(default=None),
                           keyword: str | None = Query(default=None),
                           page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(LifePost)
-    if communityId:
-        stmt = stmt.where(LifePost.community_id == communityId)
+    resolved = await resolve_community_scope(db, admin, communityId)
+    stmt = select(LifePost).where(
+        *community_scope_conditions(resolved, LifePost.community_id))
     if status:
         stmt = stmt.where(LifePost.status == status)
     if keyword:
@@ -719,6 +750,7 @@ async def life_post_detail(post_id: int, admin: CurrentAdmin, db: DbSession):
     post = await db.get(LifePost, post_id)
     if not post:
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+    await resolve_community_scope(db, admin, post.community_id)
     return ok(await _life_row(db, post))
 
 
@@ -730,6 +762,7 @@ async def update_life_post(post_id: int, payload: LifePostUpdateIn, request: Req
     post = await db.get(LifePost, post_id)
     if not post:
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+    await resolve_community_scope(db, admin, post.community_id)
 
     title = payload.title.strip() if payload.title is not None else post.title
     if not (2 <= len(title) <= 30):
@@ -799,6 +832,7 @@ async def review_life_post(post_id: int, payload: ReviewIn,
     post = await db.get(LifePost, post_id)
     if not post:
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+    await resolve_community_scope(db, admin, post.community_id)
     before = {"status": post.status}
     if payload.decision == "APPROVE":
         post.status = content_sm.fire(post.status, E.ContentStatus.PUBLISHED)
@@ -827,6 +861,7 @@ async def offline_life_post(post_id: int, payload: dict, request: Request,
     post = await db.get(LifePost, post_id)
     if not post:
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+    await resolve_community_scope(db, admin, post.community_id)
     before = {"status": post.status}
     post.status = content_sm.fire(post.status, E.ContentStatus.OFFLINE)
     reason = str(payload.get("reason", "")).strip()
@@ -848,6 +883,7 @@ async def delete_life_post(post_id: int, request: Request,
     post = await db.get(LifePost, post_id)
     if not post:
         raise ApiError(ERR_NOT_FOUND, "内容不存在", 404)
+    await resolve_community_scope(db, admin, post.community_id)
     before = await _life_row(db, post)
     author_id, title = post.author_id, post.title
     await db.execute(delete(LifeComment).where(LifeComment.post_id == post.id))
@@ -870,7 +906,12 @@ async def list_comments(admin: CurrentAdmin, db: DbSession,
                         status: str | None = Query(default=None),
                         keyword: str | None = Query(default=None),
                         page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(ItemComment)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = (
+        select(ItemComment)
+        .join(Item, Item.id == ItemComment.item_id)
+        .where(*community_scope_conditions(resolved, Item.community_id))
+    )
     if status:
         stmt = stmt.where(ItemComment.status == status)
     if keyword:
@@ -894,6 +935,9 @@ async def hide_comment(comment_id: int, payload: dict, request: Request,
     comment = await db.get(ItemComment, comment_id)
     if not comment:
         raise ApiError(ERR_NOT_FOUND, "留言不存在", 404)
+    item = await db.get(Item, comment.item_id)
+    if item:
+        await resolve_community_scope(db, admin, item.community_id)
     before = {"status": comment.status}
     comment.status = "HIDDEN"
     await write_audit(db, request, actor=admin, action="comment.hide",

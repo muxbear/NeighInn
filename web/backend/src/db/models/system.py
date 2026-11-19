@@ -22,7 +22,7 @@ admin_user_roles = Table(
     "admin_user_roles",
     Base.metadata,
     Column("admin_user_id", BigInteger, ForeignKey("admin_users.id"), primary_key=True),
-    Column("role_id", BigInteger, ForeignKey("roles.id"), primary_key=True),
+    Column("role_id", BigInteger, ForeignKey("roles.id"), primary_key=True, index=True),
 )
 
 role_permissions = Table(
@@ -36,7 +36,7 @@ admin_user_communities = Table(
     "admin_user_communities",
     Base.metadata,
     Column("admin_user_id", BigInteger, ForeignKey("admin_users.id"), primary_key=True),
-    Column("community_id", BigInteger, ForeignKey("communities.id"), primary_key=True),
+    Column("community_id", BigInteger, ForeignKey("communities.id"), primary_key=True, index=True),
 )
 
 
@@ -47,6 +47,16 @@ class AdminUser(TimestampMixin, Base):
     __tablename__ = "admin_users"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    # 关联平台 C 端账号（platform_users.id，移动端身份）。一个平台账号最多一个后台身份。
+    platform_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("platform_users.id"), unique=True, index=True
+    )
+    # 关联住户档案：住户授权来源或用户管理手工绑定。
+    resident_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("residents.id"), index=True
+    )
+    # MANUAL（用户管理创建）/ RESIDENT（社区业主授权）
+    source: Mapped[str] = mapped_column(String(16), default="MANUAL", index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text)
     real_name: Mapped[str] = mapped_column(String(64))
@@ -63,6 +73,9 @@ class AdminUser(TimestampMixin, Base):
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, default=0)
+    # 首登/重置后强制改密；改密、撤销、停用、重置密码时自增会话版本使旧会话立即失效。
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    session_version: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Role(TimestampMixin, Base):
@@ -77,6 +90,8 @@ class Role(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     data_scope: Mapped[str] = mapped_column(String(24), default="OWN_COMMUNITY")
+    # 是否允许在「社区业主」页授予住户；仅 OWN_COMMUNITY 角色可开启。
+    assignable_to_resident: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE")
     version: Mapped[int] = mapped_column(Integer, default=0)
 

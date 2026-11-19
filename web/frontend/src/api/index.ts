@@ -30,6 +30,8 @@ export const authApi = {
   login: (payload: { username: string; password: string; otp?: string }) => http.post<any, any>('/auth/login', payload),
   me: () => http.get<any, any>('/auth/me'),
   logout: () => http.post<any, any>('/auth/logout'),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    http.post<any, any>('/auth/password/change', { oldPassword, newPassword }),
 }
 
 export const dashboardApi = {
@@ -244,6 +246,20 @@ export const tasksApi = {
   cancel: (id: number | string) => http.post<any, any>(`/notification-tasks/${id}/cancel`),
 }
 
+/** 社区住户后台身份授权（社区业主页）。 */
+export const residentAdminApi = {
+  roles: () => http.get<any, any>('/resident-admin-roles'),
+  account: (residentId: number | string) =>
+    http.get<any, any>(`/residents/${residentId}/admin-account`),
+  grant: (residentId: number | string,
+          payload: { roleIds: number[]; username?: string; reason?: string }) =>
+    http.post<any, any>(`/residents/${residentId}/admin-account`, payload),
+  revoke: (residentId: number | string) =>
+    http.post<any, any>(`/residents/${residentId}/admin-account/revoke`, {}),
+  resetPassword: (residentId: number | string) =>
+    http.post<any, any>(`/residents/${residentId}/admin-account/reset-password`, {}),
+}
+
 export const usersApi = {
   list: async (params: Dict = {}) => mapItems(await http.get<any, any>('/users', { params }), normalizePlatformUser),
   create: (payload: Dict) => http.post<any, any>('/users', payload),
@@ -264,6 +280,7 @@ export const adminUsersApi = {
   resetPassword: (id: number | string, password: string) =>
     http.post<any, any>(`/admin-users/${id}/reset-password`, { password }),
   unlock: (id: number | string) => http.post<any, any>(`/admin-users/${id}/unlock`),
+  residentOptions: (params: Dict = {}) => http.get<any, any>('/resident-options', { params }),
 }
 
 export const repairApi = {

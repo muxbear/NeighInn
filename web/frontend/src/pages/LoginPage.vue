@@ -76,8 +76,12 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
-    await auth.login(username.value, password.value)
-    router.replace((route.query.redirect as string) || '/dashboard')
+    const data = await auth.login(username.value, password.value)
+    if (data?.admin?.mustChangePassword) {
+      router.replace('/change-password')
+    } else {
+      router.replace((route.query.redirect as string) || '/dashboard')
+    }
   } catch (exc: any) {
     fail(exc?.code === 40102 ? '账号或密码不正确，请检查后重试' : (exc?.message || '账号或密码不正确，请检查后重试'))
   } finally {

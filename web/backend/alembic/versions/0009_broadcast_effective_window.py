@@ -25,9 +25,16 @@ PERMISSIONS = (
 ROLE_CODES = ("community_operator", "content_reviewer")
 
 
+def _fresh_schema(bind) -> bool:
+    """0001 按当前 metadata 建表时，账号表已直接是 platform_users。"""
+    tables = set(sa.inspect(bind).get_table_names())
+    return "platform_users" in tables and "users" not in tables
+
+
 def upgrade() -> None:
-    op.add_column("broadcasts", sa.Column("expires_at", sa.DateTime(timezone=True),
-                                          nullable=True))
+    if not _fresh_schema(op.get_bind()):
+        op.add_column("broadcasts", sa.Column("expires_at", sa.DateTime(timezone=True),
+                                              nullable=True))
 
     for code, name in PERMISSIONS:
         op.execute(
@@ -68,4 +75,5 @@ def downgrade() -> None:
         "DELETE FROM permissions WHERE code IN "
         "('community:broadcast:update', 'community:broadcast:delete')"
     )
-    op.drop_column("broadcasts", "expires_at")
+    if not _fresh_schema(op.get_bind()):
+        op.drop_column("broadcasts", "expires_at")

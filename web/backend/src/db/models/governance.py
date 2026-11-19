@@ -19,8 +19,8 @@ class Dispute(Entity):
     dispute_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
     community_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
-    initiator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    respondent_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    initiator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
+    respondent_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     amount_cents: Mapped[int] = mapped_column(BigInteger, default=0)
     # OPEN → MEDIATING → PENDING_REVIEW → RESOLVED / CLOSED
     status: Mapped[str] = mapped_column(String(20), default="OPEN", index=True)

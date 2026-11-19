@@ -32,7 +32,7 @@ class Item(Entity):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     community_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
-    seller_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    seller_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     category_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("item_categories.id"), index=True)
     title: Mapped[str] = mapped_column(String(120), index=True)
     description: Mapped[str] = mapped_column(Text, default="")

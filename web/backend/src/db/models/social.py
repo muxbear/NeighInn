@@ -26,8 +26,8 @@ class Friend(Base):
     __table_args__ = (UniqueConstraint("user_id", "friend_id", name="uq_friends_pair"),)
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    friend_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
+    friend_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # ACTIVE / DELETED / BLOCKED
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
     remark: Mapped[str] = mapped_column(String(64), default="")
@@ -40,8 +40,8 @@ class FriendRequest(Base):
     __tablename__ = "friend_requests"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    from_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    to_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    from_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
+    to_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     message: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -60,8 +60,8 @@ class FriendBlock(Base):
     )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    blocker_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    blocked_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    blocker_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
+    blocked_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     community_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("communities.id"))
     reason: Mapped[str] = mapped_column(String(200), default="")
     # CHAT / LIST / PROFILE / REPORT
@@ -81,8 +81,8 @@ class FriendRemark(Base):
     )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    peer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
+    peer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     remark: Mapped[str] = mapped_column(String(64), default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -120,8 +120,8 @@ class Conversation(Entity):
     # ITEM / FRIEND
     type: Mapped[str] = mapped_column(String(16), index=True)
     item_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
-    user_a_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    user_b_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_a_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
+    user_b_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     pair_low_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     pair_high_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     last_message: Mapped[str] = mapped_column(String(500), default="")
@@ -155,7 +155,7 @@ class Message(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     conversation_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("conversations.id"), index=True)
-    sender_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    sender_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     client_msg_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     # TEXT / EMOJI / IMAGE / VIDEO / VOICE / ITEM / SYSTEM
     type: Mapped[str] = mapped_column(String(16), default="TEXT")

@@ -7,6 +7,11 @@ type Admin = {
   realName: string
   avatarText: string
   isSuperAdmin: boolean
+  source?: string
+  dataScope?: string
+  communities?: { id: string; name: string }[]
+  residentId?: string
+  mustChangePassword?: boolean
   roles: { code: string; name: string }[]
   permissions: string[]
 }
@@ -21,6 +26,10 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: (state) => Boolean(state.admin),
     isSuperAdmin: (state) => Boolean(state.admin?.isSuperAdmin),
     permissions: (state) => state.admin?.permissions ?? [],
+    mustChangePassword: (state) => Boolean(state.admin?.mustChangePassword),
+    /** 数据范围：OWN_COMMUNITY 等受限范围只应展示 /auth/me 返回的社区。 */
+    dataScope: (state) => state.admin?.dataScope ?? 'ALL',
+    allowedCommunities: (state) => state.admin?.communities ?? [],
   },
   actions: {
     hasPermission(code: string) {
@@ -51,6 +60,10 @@ export const useAuthStore = defineStore('auth', {
       } finally {
         this.loading = false
       }
+    },
+    async changePassword(oldPassword: string, newPassword: string) {
+      await authApi.changePassword(oldPassword, newPassword)
+      if (this.admin) this.admin.mustChangePassword = false
     },
     async logout() {
       try {

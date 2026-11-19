@@ -16,7 +16,7 @@ class Favorite(Base):
     __table_args__ = (UniqueConstraint("user_id", "target_type", "target_id", name="uq_favorite"),)
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # ITEM / SERVICE / LIFE / BROADCAST
     target_type: Mapped[str] = mapped_column(String(16), index=True)
     target_id: Mapped[int] = mapped_column(BigInteger)
@@ -30,7 +30,7 @@ class ViewHistory(Base):
     __table_args__ = (UniqueConstraint("user_id", "item_id", name="uq_view_history"),)
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), index=True)
     viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -39,7 +39,7 @@ class SearchHistory(Base):
     __tablename__ = "search_histories"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     keyword: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

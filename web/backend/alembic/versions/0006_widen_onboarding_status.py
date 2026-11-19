@@ -19,8 +19,16 @@ branch_labels = None
 depends_on = None
 
 
+def _fresh_schema(bind) -> bool:
+    """0001 按当前 metadata 建表时，账号表已直接是 platform_users。"""
+    tables = set(sa.inspect(bind).get_table_names())
+    return "platform_users" in tables and "users" not in tables
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+    if _fresh_schema(bind):
+        return
     if bind.dialect.name != "postgresql":
         return
     op.alter_column(
@@ -35,6 +43,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    if _fresh_schema(bind):
+        return
     if bind.dialect.name != "postgresql":
         return
     # 若库中已存在 PROFILE_COMPLETED（17 字符），回退会因超长失败；

@@ -11,7 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
+from src.core.permissions import (
+    community_scope_conditions,
+    require_permission,
+    resolve_community_scope,
+)
 from src.core.responses import ERR_NOT_FOUND, ERR_PARAM, ApiError, ok, paginated
 from src.core.security import encrypt_field
 from src.db.models import (
@@ -250,7 +254,9 @@ async def list_communities(admin: CurrentAdmin, db: DbSession,
                            regionId: int | None = Query(default=None),
                            status: str | None = Query(default=None),
                            page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(Community)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = select(Community).where(
+        *community_scope_conditions(resolved, Community.id))
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(or_(Community.name.ilike(like), Community.code.ilike(like),
@@ -271,7 +277,9 @@ async def list_communities(admin: CurrentAdmin, db: DbSession,
 
 @router.get("/communities/search")
 async def search_communities(admin: CurrentAdmin, db: DbSession, q: str = Query(default="")):
-    stmt = select(Community)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = select(Community).where(
+        *community_scope_conditions(resolved, Community.id))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(Community.name.ilike(like), Community.code.ilike(like),
@@ -327,6 +335,7 @@ async def community_detail(community_id: int, admin: CurrentAdmin, db: DbSession
     community = await db.get(Community, community_id)
     if not community:
         raise ApiError(ERR_NOT_FOUND, "社区不存在", 404)
+    await resolve_community_scope(db, admin, community.id)
     return ok(_row(community))
 
 
@@ -337,6 +346,7 @@ async def update_community(community_id: int, payload: CommunityIn,
     community = await db.get(Community, community_id)
     if not community:
         raise ApiError(ERR_NOT_FOUND, "社区不存在", 404)
+    await resolve_community_scope(db, admin, community.id)
     before = _row(community)
     name = payload.name.strip()
     if not name:
@@ -386,6 +396,7 @@ async def delete_community(community_id: int, request: Request,
     community = await db.get(Community, community_id)
     if not community:
         raise ApiError(ERR_NOT_FOUND, "社区不存在", 404)
+    await resolve_community_scope(db, admin, community.id)
     references = await _community_references(db, community_id)
     if references:
         raise ApiError(
@@ -518,6 +529,7 @@ async def update_community_status(community_id: int, payload: dict,
     community = await db.get(Community, community_id)
     if not community:
         raise ApiError(ERR_NOT_FOUND, "社区不存在", 404)
+    await resolve_community_scope(db, admin, community.id)
     status = payload.get("status", "")
     if status not in ("OPERATING", "PREPARING", "SUSPENDED"):
         raise ApiError(ERR_PARAM, "状态不合法（OPERATING / PREPARING / SUSPENDED）", 400)

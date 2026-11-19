@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import timedelta
 
@@ -9,7 +10,7 @@ from sqlalchemy import select
 
 from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import get_permission_codes
+from src.core.permissions import get_data_scope, get_permission_codes
 from src.core.responses import (
     ERR_2FA_INVALID,
     ERR_BAD_CREDENTIALS,
@@ -28,7 +29,15 @@ from src.core.security import (
     verify_totp,
 )
 from src.core.sessions import session_store
-from src.db.models import AdminUser, Role, admin_user_roles
+from src.db.models import (
+    AdminUser,
+    Community,
+    PlatformUser,
+    Resident,
+    Role,
+    admin_user_communities,
+    admin_user_roles,
+)
 from src.db.models.common import ensure_utc, utcnow
 
 router = APIRouter(tags=["admin:auth"])
@@ -60,12 +69,51 @@ def _cookie_secure(request: Request) -> bool:
     return (forwarded or request.url.scheme) == "https"
 
 
+def validate_admin_password(password: str) -> None:
+    """后台账号统一密码策略：至少 12 位，且大小写字母/数字/符号至少三类。"""
+    if len(password) < 12:
+        raise ApiError(ERR_PARAM, "密码最短 12 位，需包含大小写/数字/符号中的三类", 400)
+    kinds = sum(
+        bool(re.search(pattern, password))
+        for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]")
+    )
+    if kinds < 3:
+        raise ApiError(ERR_PARAM, "密码需包含大小写字母、数字、符号中的至少三类", 400)
+
+
+async def _assert_resident_account_active(db: DbSession, admin: AdminUser) -> None:
+    """住户授权的后台账号：关联 C 端账号与住户资格必须仍有效。"""
+    if not admin.platform_user_id:
+        return
+    user = await db.get(PlatformUser, admin.platform_user_id)
+    if not user or user.status != "ACTIVE":
+        raise ApiError(ERR_FORBIDDEN, "关联的移动端账号不可用，请联系管理员", 403)
+    if admin.resident_id:
+        resident = await db.get(Resident, admin.resident_id)
+        if not resident or resident.status != "ACTIVE":
+            raise ApiError(ERR_FORBIDDEN, "住户资格已失效，请联系管理员", 403)
+        if resident.certification_status in ("FROZEN", "REVOKED"):
+            raise ApiError(ERR_FORBIDDEN, "住户认证已失效，请联系管理员", 403)
+
+
 async def admin_payload(db: DbSession, admin: AdminUser) -> dict:
     role_rows = await db.execute(
         select(Role.code, Role.name)
         .join(admin_user_roles, admin_user_roles.c.role_id == Role.id)
         .where(admin_user_roles.c.admin_user_id == admin.id)
     )
+    data_scope = await get_data_scope(db, admin)
+    if admin.is_super_admin or data_scope == "ALL":
+        community_rows = (await db.execute(
+            select(Community.id, Community.name).order_by(Community.id)
+        )).all()
+    else:
+        community_rows = (await db.execute(
+            select(Community.id, Community.name)
+            .join(admin_user_communities, admin_user_communities.c.community_id == Community.id)
+            .where(admin_user_communities.c.admin_user_id == admin.id)
+            .order_by(Community.id)
+        )).all()
     return {
         "id": str(admin.id),
         "username": admin.username,
@@ -73,6 +121,11 @@ async def admin_payload(db: DbSession, admin: AdminUser) -> dict:
         "avatarText": admin.avatar_text,
         "isSuperAdmin": admin.is_super_admin,
         "twoFactorEnabled": admin.two_factor_enabled,
+        "source": admin.source or "MANUAL",
+        "dataScope": data_scope,
+        "communities": [{"id": str(cid), "name": name} for cid, name in community_rows],
+        "residentId": str(admin.resident_id) if admin.resident_id else "",
+        "mustChangePassword": bool(admin.must_change_password),
         "roles": [{"code": code, "name": name} for code, name in role_rows.all()],
         "permissions": await get_permission_codes(db, admin),
     }
@@ -118,12 +171,18 @@ async def login(payload: LoginIn, request: Request, response: Response, db: DbSe
             else:
                 raise ApiError(ERR_2FA_INVALID, "动态验证码或恢复码错误", 401)
 
+    await _assert_resident_account_active(db, admin)
     admin.last_login_at = utcnow()
     token = new_token()
     csrf = new_csrf_token()
     await session_store.set(
         token,
-        {"admin_id": admin.id, "csrf": csrf, "ip": request.client.host if request.client else ""},
+        {
+            "admin_id": admin.id,
+            "csrf": csrf,
+            "ip": request.client.host if request.client else "",
+            "session_version": int(admin.session_version or 0),
+        },
         settings.session_ttl_minutes * 60,
     )
     cookie_kwargs = {
@@ -207,14 +266,30 @@ async def logout(request: Request, response: Response):
 
 
 @router.post("/auth/password/change")
-async def change_password(payload: PasswordChangeIn, admin: CurrentAdmin, db: DbSession):
-    from src.core.responses import ERR_PARAM
+async def change_password(payload: PasswordChangeIn, request: Request,
+                          admin: CurrentAdmin, db: DbSession):
     from src.core.security import hash_password
 
     if not verify_password(payload.oldPassword, admin.password_hash):
         raise ApiError(ERR_BAD_CREDENTIALS, "原密码错误", 401)
-    if len(payload.newPassword) < 12:
-        raise ApiError(ERR_PARAM, "密码最短 12 位，需包含大小写/数字/符号中的三类", 400)
+    validate_admin_password(payload.newPassword)
+    if payload.oldPassword == payload.newPassword:
+        raise ApiError(ERR_PARAM, "新密码不能与原密码相同", 400)
     admin.password_hash = hash_password(payload.newPassword)
+    admin.must_change_password = False
+    admin.session_version = int(admin.session_version or 0) + 1
     await db.commit()
-    return ok(None, "密码已更新，请重新登录")
+    # 当前会话同步到新版本，其他旧会话因版本不一致立即失效。
+    token = getattr(request.state, "session_token", None)
+    if token:
+        await session_store.set(
+            token,
+            {
+                "admin_id": admin.id,
+                "csrf": getattr(request.state, "csrf_token", None),
+                "ip": request.client.host if request.client else "",
+                "session_version": int(admin.session_version),
+            },
+            settings.session_ttl_minutes * 60,
+        )
+    return ok({"mustChangePassword": False}, "密码已更新")

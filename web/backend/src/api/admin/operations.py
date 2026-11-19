@@ -11,7 +11,11 @@ from src.core.audit import write_audit, write_outbox
 from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.idempotency import complete_idempotency, guard_idempotency
-from src.core.permissions import require_permission
+from src.core.permissions import (
+    community_scope_conditions,
+    require_permission,
+    resolve_community_scope,
+)
 from src.core.responses import (
     ERR_BIZ_RULE,
     ERR_CONFLICT,
@@ -151,18 +155,25 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
                               module: str = Query(default="items"),
                               communityId: int | None = Query(default=None)):
     """运营页指标卡与 Tab 计数：全部来自实时聚合，禁止前端硬编码。"""
+    resolved = await resolve_community_scope(db, admin, communityId)
     if module == "help":
-        return await _help_overview(db, communityId)
+        return await _help_overview(
+            db,
+            community_scope_conditions(resolved, HelpRequest.community_id),
+            community_scope_conditions(resolved, Resident.community_id),
+        )
     if module == "life":
-        return await _life_overview(db, communityId)
+        return await _life_overview(
+            db, community_scope_conditions(resolved, LifePost.community_id))
     if module == "broadcast":
-        return await _broadcast_overview(db, communityId)
+        return await _broadcast_overview(
+            db, community_scope_conditions(resolved, Broadcast.community_id))
     if module != "items":
         raise ApiError(ERR_PARAM, "暂不支持该模块概览", 400)
     now = utcnow()
     week_start = (now - timedelta(days=now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0)
-    scope = [Item.community_id == communityId] if communityId else []
+    scope = community_scope_conditions(resolved, Item.community_id)
 
     status_rows = (await db.execute(
         select(Item.status, func.count()).where(*scope).group_by(Item.status))).all()
@@ -188,7 +199,7 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
         select(func.count()).select_from(Item).where(
             *scope, Item.recommended.is_(True), Item.status == E.ItemStatus.ON_SALE))) or 0)
 
-    order_scope = [Order.community_id == communityId] if communityId else []
+    order_scope = community_scope_conditions(resolved, Order.community_id)
     week_deals = int((await db.scalar(
         select(func.count()).select_from(Order).where(
             *order_scope,
@@ -220,13 +231,12 @@ async def operations_overview(admin: CurrentAdmin, db: DbSession,
     })
 
 
-async def _help_overview(db: DbSession, community_id: int | None) -> dict:
+async def _help_overview(db: DbSession, scope: list, resident_scope: list) -> dict:
     """邻里互助指标：今日求助、待响应、本周完成与社区信用分实时聚合。
 
     自然日/自然周按中国标准时间（UTC+8）划分；待响应平均等待时长按当前
     仍未响应的请求创建时间计算；本周完成率 = 本周完成 /（本周完成 + 本周关闭）。
     """
-    scope = [HelpRequest.community_id == community_id] if community_id else []
     status_rows = (await db.execute(
         select(HelpRequest.status, func.count()).where(*scope).group_by(HelpRequest.status))).all()
     status_counts = {str(status): int(count) for status, count in status_rows}
@@ -272,11 +282,11 @@ async def _help_overview(db: DbSession, community_id: int | None) -> dict:
         if completed_denominator else 0.0
     )
 
-    if community_id:
+    if resident_scope:
         credit_stmt = (
             select(func.avg(User.credit_score))
             .join(Resident, Resident.user_id == User.id)
-            .where(Resident.community_id == community_id, Resident.status == "ACTIVE")
+            .where(*resident_scope, Resident.status == "ACTIVE")
         )
     else:
         credit_stmt = select(func.avg(User.credit_score))
@@ -299,13 +309,12 @@ async def _help_overview(db: DbSession, community_id: int | None) -> dict:
     })
 
 
-async def _life_overview(db: DbSession, community_id: int | None) -> dict:
+async def _life_overview(db: DbSession, scope: list) -> dict:
     """社区生活指标：内容量、待审核、今日阅读与收藏率全部实时聚合。
 
     「今日阅读」来自详情页按日累计的 stats.viewsByDay；
     「内容收藏率」= 累计点赞（Favorite LIFE）/ 累计阅读，阅读为 0 时展示 0。
     """
-    scope = [LifePost.community_id == community_id] if community_id else []
     status_rows = (await db.execute(
         select(LifePost.status, func.count()).where(*scope).group_by(LifePost.status))).all()
     status_counts = {str(status): int(count) for status, count in status_rows}
@@ -359,9 +368,8 @@ async def _life_overview(db: DbSession, community_id: int | None) -> dict:
     })
 
 
-async def _broadcast_overview(db: DbSession, community_id: int | None) -> dict:
+async def _broadcast_overview(db: DbSession, scope: list) -> dict:
     """社区喇叭指标：生效中、定时待发、今日发布与累计互动实时聚合。"""
-    scope = [Broadcast.community_id == community_id] if community_id else []
     status_rows = (await db.execute(
         select(Broadcast.status, func.count()).where(*scope).group_by(Broadcast.status))).all()
     status_counts = {str(status): int(count) for status, count in status_rows}
@@ -407,9 +415,8 @@ async def list_items(
     keyword: str | None = Query(default=None),
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
-    stmt = select(Item)
-    if communityId:
-        stmt = stmt.where(Item.community_id == communityId)
+    resolved = await resolve_community_scope(db, admin, communityId)
+    stmt = select(Item).where(*community_scope_conditions(resolved, Item.community_id))
     if status:
         stmt = stmt.where(Item.status == status)
     if keyword:
@@ -425,6 +432,7 @@ async def item_detail(item_id: int, admin: CurrentAdmin, db: DbSession):
     item = await db.get(Item, item_id)
     if not item:
         raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     row = await _row(db, item)
     media = list((await db.execute(
         select(ItemMedia).where(ItemMedia.item_id == item.id)
@@ -450,6 +458,7 @@ async def update_item(item_id: int, payload: ItemUpdateIn, request: Request,
     item = await db.get(Item, item_id)
     if not item:
         raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     if item.status in (E.ItemStatus.RESERVED, E.ItemStatus.SOLD, E.ItemStatus.GIFTED):
         raise ApiError(ERR_BIZ_RULE, "交易中或已成交的物品不可编辑", 422)
 
@@ -524,6 +533,7 @@ async def delete_item(item_id: int, request: Request,
     item = await db.get(Item, item_id)
     if not item:
         raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     if item.status in (E.ItemStatus.RESERVED, E.ItemStatus.SOLD, E.ItemStatus.GIFTED):
         raise ApiError(ERR_BIZ_RULE, "交易中或已成交的物品不能删除，请使用下架", 422)
     order_count = int((await db.scalar(
@@ -551,6 +561,10 @@ async def delete_item(item_id: int, request: Request,
 @router.get("/items/{item_id}/ai-audit")
 async def item_ai_audit(item_id: int, admin: CurrentAdmin, db: DbSession):
     """AI 报告（W03-01/A-05）：总体结论、置信度、四维得分、问题与建议、traceId。"""
+    item = await db.get(Item, item_id)
+    if not item:
+        raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     audit = await db.scalar(
         select(ItemAudit).where(ItemAudit.item_id == item_id)
         .order_by(ItemAudit.id.desc()).limit(1))
@@ -567,6 +581,7 @@ async def review_item(item_id: int, payload: ReviewIn, request: Request,
     item = await db.get(Item, item_id)
     if not item:
         raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     if payload.decision not in ("APPROVE", "REJECT", "DOWNGRADE"):
         raise ApiError(ERR_PARAM, "decision 必须为 APPROVE / REJECT / DOWNGRADE", 400)
     if payload.decision == "REJECT" and len(payload.reason.strip()) < 5:
@@ -631,6 +646,7 @@ async def recommend_item(item_id: int, payload: RecommendIn, request: Request,
     item = await db.get(Item, item_id)
     if not item:
         raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     before = {"recommended": item.recommended}
     item.recommended = payload.enabled
     await write_audit(db, request, actor=admin, action="item.recommend",
@@ -648,6 +664,7 @@ async def offline_item(item_id: int, payload: OfflineIn, request: Request,
     item = await db.get(Item, item_id)
     if not item:
         raise ApiError(ERR_NOT_FOUND, "物品不存在", 404)
+    await resolve_community_scope(db, admin, item.community_id)
     reason = payload.reason.strip()
     if len(reason) < 2:
         raise ApiError(ERR_PARAM, "下架原因必填（将通知卖家）", 400)
@@ -679,6 +696,7 @@ async def batch_offline_items(payload: BatchOfflineIn, request: Request,
             failures.append({"id": str(item_id), "reason": "物品不存在"})
             continue
         try:
+            await resolve_community_scope(db, admin, item.community_id)
             item.status = item_sm.fire(item.status, E.ItemStatus.OFF_SHELF)
             item.reject_reason = payload.reason.strip()
             await notify_user(db, item.seller_id, category="TRADE",

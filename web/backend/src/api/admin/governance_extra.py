@@ -9,8 +9,21 @@ from sqlalchemy import or_, select
 from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
-from src.core.responses import ERR_NOT_FOUND, ERR_PARAM, ApiError, not_implemented, ok, paginated
+from src.core.permissions import (
+    allowed_community_ids,
+    community_scope_conditions,
+    require_permission,
+    resolve_community_scope,
+)
+from src.core.responses import (
+    ERR_DATA_SCOPE,
+    ERR_NOT_FOUND,
+    ERR_PARAM,
+    ApiError,
+    not_implemented,
+    ok,
+    paginated,
+)
 from src.db.models import Community, Feedback, Item, ItemComment, LifePost, Report, User
 from src.db.models.common import utcnow
 from src.domain import enums as E
@@ -20,6 +33,16 @@ from src.services.notify_service import notify_user
 router = APIRouter(tags=["admin:governance:extra"])
 
 HandlePerm = Depends(require_permission("governance:report:handle"))
+
+
+async def _assert_community_field_scope(db: DbSession, admin: CurrentAdmin,
+                                        community_id: int | None) -> None:
+    if community_id is None:
+        allowed = await allowed_community_ids(db, admin)
+        if allowed is not None:
+            raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+        return
+    await resolve_community_scope(db, admin, community_id)
 
 
 # ---------------------------------------------------------------- 投诉建议
@@ -44,7 +67,9 @@ async def list_feedbacks(admin: CurrentAdmin, db: DbSession,
                          status: str | None = Query(default=None),
                          keyword: str | None = Query(default=None),
                          page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(Feedback)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = select(Feedback).where(
+        *community_scope_conditions(resolved, Feedback.community_id))
     if status:
         stmt = stmt.where(Feedback.status == status)
     if keyword:
@@ -66,6 +91,7 @@ async def reply_feedback(feedback_id: int, payload: ReplyIn, request: Request,
     row = await db.get(Feedback, feedback_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "反馈不存在", 404)
+    await _assert_community_field_scope(db, admin, row.community_id)
     reply = payload.reply.strip()
     if len(reply) < 2:
         raise ApiError(ERR_PARAM, "回复内容不能为空", 400)
@@ -96,6 +122,7 @@ async def assign_feedback(feedback_id: int, payload: dict, request: Request,
     row = await db.get(Feedback, feedback_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "反馈不存在", 404)
+    await _assert_community_field_scope(db, admin, row.community_id)
     row.assignee_id = int(payload.get("assigneeId", admin.id))
     row.status = "PROCESSING"
     await write_audit(db, request, actor=admin, action="feedback.assign",
@@ -112,6 +139,7 @@ async def close_feedback(feedback_id: int, request: Request,
     row = await db.get(Feedback, feedback_id)
     if not row:
         raise ApiError(ERR_NOT_FOUND, "反馈不存在", 404)
+    await _assert_community_field_scope(db, admin, row.community_id)
     row.status = "CLOSED"
     await write_audit(db, request, actor=admin, action="feedback.close",
                       resource_type="feedback", resource_id=row.id,
@@ -156,7 +184,9 @@ async def list_reports(admin: CurrentAdmin, db: DbSession,
                        targetType: str | None = Query(default=None),
                        keyword: str | None = Query(default=None),
                        page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(Report)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = select(Report).where(
+        *community_scope_conditions(resolved, Report.community_id))
     if status:
         stmt = stmt.where(Report.status == status)
     if targetType:
@@ -173,6 +203,7 @@ async def report_detail(report_id: int, admin: CurrentAdmin, db: DbSession):
     report = await db.get(Report, report_id)
     if not report:
         raise ApiError(ERR_NOT_FOUND, "举报不存在", 404)
+    await _assert_community_field_scope(db, admin, report.community_id)
     return ok(await _report_row(db, report))
 
 
@@ -188,6 +219,7 @@ async def handle_report(report_id: int, payload: HandleReportIn,
     report = await db.get(Report, report_id)
     if not report:
         raise ApiError(ERR_NOT_FOUND, "举报不存在", 404)
+    await _assert_community_field_scope(db, admin, report.community_id)
     if report.status in (E.ReportStatus.RESOLVED, E.ReportStatus.DISMISSED):
         raise ApiError(ERR_PARAM, "举报已处理", 400)
     before = {"status": report.status}

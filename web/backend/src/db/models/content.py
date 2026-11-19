@@ -44,7 +44,7 @@ class LifePost(Entity):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     community_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
-    author_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    author_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     title: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(32), default="邻里日常", index=True)
@@ -62,7 +62,7 @@ class LifeComment(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     post_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("life_posts.id"), index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     content: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="PUBLISHED", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -76,7 +76,7 @@ class ItemComment(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     parent_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     content: Mapped[str] = mapped_column(String(500), nullable=False)
     # PUBLISHED / HIDDEN / DELETED（内容安全审核联动）
@@ -92,7 +92,7 @@ class HelpRequest(Entity):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     community_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
-    requester_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    requester_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # HELP（求助）/ OFFER（提供）
     kind: Mapped[str] = mapped_column(String(16), default="HELP", index=True)
     category: Mapped[str] = mapped_column(String(32), default="邻里帮忙")
@@ -119,7 +119,7 @@ class HelpResponse(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     request_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("help_requests.id"), index=True)
-    responder_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    responder_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     message: Mapped[str] = mapped_column(String(500), default="")
     # PENDING / ACCEPTED / REJECTED / CANCELLED
     status: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
@@ -134,7 +134,7 @@ class Report(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     community_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
-    reporter_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    reporter_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # ITEM / USER / CONVERSATION / COMMENT / MESSAGE / LIFE_POST
     target_type: Mapped[str] = mapped_column(String(24), index=True)
     target_id: Mapped[int] = mapped_column(BigInteger)

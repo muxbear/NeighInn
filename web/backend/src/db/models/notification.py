@@ -16,7 +16,7 @@ class AppNotification(Base):
     __tablename__ = "app_notifications"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # TRADE / INTERACTION / COMMUNITY
     category: Mapped[str] = mapped_column(String(16), index=True)
     title: Mapped[str] = mapped_column(String(120))
@@ -55,7 +55,7 @@ class NoticeRead(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     notice_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("notices.id"), index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -101,7 +101,7 @@ class NotificationRecord(Base):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     task_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("notification_tasks.id"), index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # IN_APP / SMS / PUSH / SERVICE
     channel: Mapped[str] = mapped_column(String(16), index=True)
     title: Mapped[str] = mapped_column(String(120), default="")

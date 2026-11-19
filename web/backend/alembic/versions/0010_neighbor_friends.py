@@ -22,6 +22,37 @@ branch_labels = None
 depends_on = None
 
 
+def _fresh_schema(bind) -> bool:
+    """0001 按当前 metadata 建表时，账号表已直接是 platform_users。"""
+    tables = set(sa.inspect(bind).get_table_names())
+    return "platform_users" in tables and "users" not in tables
+
+
+def _drop_precreated_empty_tables(bind) -> None:
+    """开发库 create_all 可能已建出 0010 的两张空表但未记录迁移版本。
+
+    只有两张表都为空且无外键引用时才允许删除，由本迁移按旧表名重建；
+    任一表有数据则中止，避免静默丢数据。
+    """
+    names = ("friend_blocks", "friend_remarks")
+    existing = {name for name in names if name in sa.inspect(bind).get_table_names()}
+    for name in existing:
+        count = bind.execute(sa.text(f'SELECT count(*) FROM "{name}"')).scalar()
+        if count:
+            raise RuntimeError(
+                f"{name} 已有 {count} 行数据，不能自动重建；"
+                "请人工确认数据来源后再执行迁移。"
+            )
+        refs = bind.execute(sa.text(
+            "SELECT conrelid::regclass::text FROM pg_constraint "
+            f"WHERE confrelid = '{name}'::regclass AND contype = 'f'"
+        )).scalars().all()
+        if refs:
+            raise RuntimeError(f"{name} 被其他表引用：{refs}；请人工处理。")
+    for name in existing:
+        op.drop_table(name)
+
+
 def _dedupe_friend_conversations(bind) -> None:
     """合并同一对用户的重复 FRIEND 会话，保留 id 最小的一条。"""
     rows = bind.execute(sa.text(
@@ -132,6 +163,10 @@ def _dedupe_item_conversations(bind) -> None:
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if _fresh_schema(bind):
+        return
+    _drop_precreated_empty_tables(bind)
     op.create_table(
         "friend_blocks",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
@@ -280,6 +315,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if _fresh_schema(op.get_bind()):
+        return
     op.drop_index("uq_messages_client_msg", table_name="messages")
     op.drop_index("ix_messages_conversation_created", table_name="messages")
     op.drop_index("ix_messages_conversation_seq", table_name="messages")

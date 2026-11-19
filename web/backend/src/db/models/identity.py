@@ -9,11 +9,11 @@ from src.db.base import Base
 from src.db.models.common import BigIntPk, Entity, JsonDict, utcnow
 
 
-class User(Entity):
-    """C 端业主账号（全平台用户主键，SRS 9.1 User）。
+class PlatformUser(Entity):
+    """平台级 C 端账号（表 platform_users，SRS 9.1 User）。
     手机号 SM4/AES-256 加密存储 + HMAC 哈希查重；全链路脱敏展示（SRS 9.2）。"""
 
-    __tablename__ = "users"
+    __tablename__ = "platform_users"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     phone_enc: Mapped[str] = mapped_column(Text, default="")
@@ -50,6 +50,11 @@ class User(Entity):
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# 兼容性别名：业务层仍有大量 ``User`` 引用，先保留别名避免一次性大范围改名；
+# 新代码请优先使用 ``PlatformUser``。后续可单独提交清理该别名。
+User = PlatformUser
+
+
 class Certification(Entity):
     """实名/业主证明审核单（SRS W02、M01-03）。每次提交生成一张审核单进入后台队列；
     驳回必须给出原因（M01-04），累计驳回 3 次转人工专线（M01-05）。"""
@@ -67,7 +72,7 @@ class Certification(Entity):
     )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     resident_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("residents.id"), index=True)
     community_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
     # REALNAME / OWNER_PROOF（业主/租户/家属）
@@ -92,9 +97,23 @@ class Resident(Entity):
     业主证明通过后账号与小区强绑定（BR-02、W02-02）。"""
 
     __tablename__ = "residents"
+    # 同一社区同一平台账号仅一条有效档案；NULL 用户可有多条（物业代建档）。
+    # 组合索引覆盖后台住户列表的常用过滤条件。
+    __table_args__ = (
+        Index(
+            "uq_residents_community_user",
+            "community_id", "user_id",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+        Index("ix_residents_community_identity", "community_id", "identity_type"),
+        Index("ix_residents_community_cert", "community_id", "certification_status"),
+        Index("ix_residents_community_status", "community_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     community_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("communities.id"), index=True)
     name: Mapped[str] = mapped_column(String(64), index=True)
     gender: Mapped[str] = mapped_column(String(8), default="")
@@ -119,7 +138,7 @@ class UserPenalty(Entity):
     __tablename__ = "user_penalties"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     type: Mapped[str] = mapped_column(String(24), index=True)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -134,7 +153,7 @@ class CreditLog(Base):
     __tablename__ = "credit_logs"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     delta: Mapped[int] = mapped_column()
     # TRADE_FULFILL / ON_TIME_INSPECT / REVIEW / VIOLATION / DISPUTE_PENALTY
     event_type: Mapped[str] = mapped_column(String(32), index=True)

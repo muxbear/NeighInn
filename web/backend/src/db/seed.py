@@ -135,6 +135,8 @@ PERMISSIONS: list[tuple[str, str, str, str | None]] = [
     ("community:resident:audit", "认证审核", "按钮", None),
     ("community:resident:freeze", "冻结/解冻", "按钮", None),
     ("community:resident:revoke", "撤销认证", "按钮", None),
+    ("community:resident:admin-grant", "授予住户后台角色", "按钮", None),
+    ("community:resident:admin-revoke", "解除住户后台授权", "按钮", None),
     ("governance:repair:view", "查看工单", "页面", "/governance/repair-orders"),
     ("governance:repair:assign", "派发工单", "按钮", None),
     ("governance:repair:process", "处理工单", "按钮", None),
@@ -187,6 +189,13 @@ PERMISSIONS: list[tuple[str, str, str, str | None]] = [
 ROLE_BLUEPRINTS: dict[str, dict] = {
     "super_admin": {"name": "超级管理员", "description": "拥有系统全部权限", "data_scope": "ALL", "builtin": True},
     "community_operator": {"name": "社区运营", "description": "负责社区内容、活动和用户运营", "data_scope": "OWN_COMMUNITY"},
+    "community_admin": {
+        "name": "社区管理员",
+        "description": "负责本社区内容运营、住户服务与认证审核",
+        "data_scope": "OWN_COMMUNITY",
+        "builtin": True,
+        "assignable_to_resident": True,
+    },
     "property_service": {"name": "物业客服", "description": "处理报修、投诉及住户认证", "data_scope": "COMMUNITY_SET"},
     "content_reviewer": {"name": "内容审核员", "description": "负责动态、评论及商品内容审核", "data_scope": "OWN_COMMUNITY"},
     "finance_admin": {"name": "资金管理员", "description": "负责托管资金、提现复核、对账与资金处置", "data_scope": "ALL"},
@@ -197,7 +206,24 @@ ROLE_PERMISSION_PREFIXES: dict[str, tuple[str, ...]] = {
     "community_operator": (
         "dashboard:", "community:broadcast", "community:item", "community:help",
         "community:life", "communication:", "community:maintenance", "community:resident:view",
-        "governance:report:", "reporting:",
+        "community:resident:admin-", "governance:report:", "reporting:",
+    ),
+    "community_admin": (
+        "dashboard:view",
+        "community:broadcast:view", "community:broadcast:create",
+        "community:broadcast:update", "community:broadcast:delete",
+        "community:broadcast:review", "community:broadcast:offline",
+        "community:item:view", "community:item:create", "community:item:update",
+        "community:item:delete", "community:item:review", "community:item:recommend",
+        "community:item:offline",
+        "community:help:", "community:life:",
+        "community:maintenance:view",
+        "community:resident:view", "community:resident:audit",
+        "communication:notice:view", "communication:notice:create",
+        "communication:notice:publish",
+        "communication:task:view", "communication:task:create", "communication:task:send",
+        "governance:report:view", "governance:report:handle",
+        "reporting:export:view",
     ),
     "property_service": (
         "dashboard:", "governance:repair", "governance:feedback", "community:resident:",
@@ -397,7 +423,8 @@ async def seed_if_empty(session: AsyncSession) -> dict[str, int] | None:
     roles: dict[str, Role] = {}
     for code, blueprint in ROLE_BLUEPRINTS.items():
         role = Role(name=blueprint["name"], code=code, description=blueprint["description"],
-                    data_scope=blueprint["data_scope"], is_builtin=blueprint.get("builtin", False))
+                    data_scope=blueprint["data_scope"], is_builtin=blueprint.get("builtin", False),
+                    assignable_to_resident=blueprint.get("assignable_to_resident", False))
         session.add(role)
         roles[code] = role
     await session.flush()

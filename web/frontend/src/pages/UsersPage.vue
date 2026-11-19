@@ -42,6 +42,7 @@ type AccountForm = {
   status: string
   roleIds: number[]
   communityIds: number[]
+  residentId: number | null
 }
 
 const app = useAppStore()
@@ -56,6 +57,8 @@ const page = ref(1)
 const pageSize = 20
 const query = ref('')
 const statusFilter = ref('')
+const sourceFilter = ref('')
+const residentOptions = ref<any[]>([])
 const loading = ref(false)
 const selected = ref<Set<string>>(new Set())
 const stats = ref({ total: 0, active: 0, disabled: 0, locked: 0 })
@@ -79,16 +82,12 @@ const passwordValid = computed(() => newPassword.value.length > 0 && !passwordEr
 function emptyForm(): AccountForm {
   return {
     username: '', password: '', realName: '', phone: '', email: '',
-    status: 'ACTIVE', roleIds: [], communityIds: [],
+    status: 'ACTIVE', roleIds: [], communityIds: [], residentId: null,
   }
 }
 
 function isSelf(row: any): boolean {
   return Boolean(auth.admin?.id) && String(auth.admin?.id) === String(row.id)
-}
-
-function canSelect(row: any): boolean {
-  return !row.isSuperAdmin && !isSelf(row)
 }
 
 function avatarText(row: any): string {
@@ -106,6 +105,7 @@ async function load() {
     const data = await adminUsersApi.list({
       keyword: query.value.trim() || undefined,
       status: statusFilter.value || undefined,
+      source: sourceFilter.value || undefined,
       page: page.value,
       pageSize,
     })
@@ -162,10 +162,22 @@ function clearSelection() {
   selected.value = new Set()
 }
 
+async function loadResidentOptions() {
+  try {
+    const rows = await adminUsersApi.residentOptions({
+      communityId: app.currentCommunityId, limit: 50,
+    })
+    residentOptions.value = rows || []
+  } catch {
+    residentOptions.value = []
+  }
+}
+
 function openCreate() {
   editing.value = null
   form.value = emptyForm()
   drawerOpen.value = true
+  loadResidentOptions()
 }
 
 function openEdit(row: any) {
@@ -179,12 +191,27 @@ function openEdit(row: any) {
     status: row.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
     roleIds: (row.roleIds || []).map((id: string) => Number(id)),
     communityIds: (row.communityIds || []).map((id: string) => Number(id)),
+    residentId: row.residentId ? Number(row.residentId) : null,
   }
   drawerOpen.value = true
+  loadResidentOptions()
+}
+
+function isResidentAccount(row: any): boolean {
+  return row?.source === 'RESIDENT'
+}
+
+function sourceLabel(row: any): string {
+  return row.source === 'RESIDENT' ? '住户授权' : '后台创建'
+}
+
+function mobileLabel(row: any): string {
+  if (!row.mobileBound) return '未绑定'
+  return row.mobileStatus === 'ACTIVE' ? '已绑定' : '账号异常'
 }
 
 function passwordError(value: string): string {
-  if (value.length < 6) return '密码最短 6 位'
+  if (value.length < 12) return '密码最短 12 位'
   const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((rule) => rule.test(value)).length
   if (kinds < 3) return '需包含大小写字母、数字、符号中的至少三类'
   return ''
@@ -212,8 +239,12 @@ async function save() {
     phone: form.value.phone.trim(),
     email: form.value.email.trim(),
     status: form.value.status,
-    roleIds: form.value.roleIds.map(Number),
-    communityIds: form.value.communityIds.map(Number),
+  }
+  // 住户授权账号的绑定与角色由「社区业主」页统一管理，编辑时只提交基础资料。
+  if (!isResidentAccount(editing.value)) {
+    payload.roleIds = form.value.roleIds.map(Number)
+    payload.communityIds = form.value.communityIds.map(Number)
+    payload.residentId = form.value.residentId ? Number(form.value.residentId) : null
   }
   if (!editing.value) payload.password = form.value.password
   try {
@@ -372,9 +403,13 @@ function rowActions(row: any): ActionMenuItem[] {
       label: '删除',
       icon: Trash2,
       danger: true,
-      disabled: row.isSuperAdmin || isSelf(row),
+      disabled: row.isSuperAdmin || isSelf(row) || isResidentAccount(row),
     },
   ]
+}
+
+function canSelect(row: any): boolean {
+  return !row.isSuperAdmin && !isSelf(row) && !isResidentAccount(row)
 }
 
 function onAction(key: string, row: any) {
@@ -410,6 +445,11 @@ onMounted(async () => {
           <option value="ACTIVE">启用</option>
           <option value="DISABLED">停用</option>
         </select>
+        <select v-model="sourceFilter" class="status-filter" aria-label="账号来源筛选" @change="search">
+          <option value="">全部来源</option>
+          <option value="MANUAL">后台创建</option>
+          <option value="RESIDENT">住户授权</option>
+        </select>
         <button class="primary-button" @click="openCreate"><Plus :size="16" />新增用户</button>
       </div>
     </div>
@@ -435,6 +475,9 @@ onMounted(async () => {
             </th>
             <th>用户</th>
             <th>用户名</th>
+            <th>来源</th>
+            <th>关联住户 / 小区</th>
+            <th>移动端账号</th>
             <th>手机号</th>
             <th>角色</th>
             <th>可访问社区</th>
@@ -466,6 +509,21 @@ onMounted(async () => {
               </div>
             </td>
             <td><span class="medium-cell">{{ row.username }}</span></td>
+            <td>
+              <span :class="['source-tag', { resident: row.source === 'RESIDENT' }]">{{ sourceLabel(row) }}</span>
+            </td>
+            <td>
+              <div v-if="row.residentId" class="resident-link-cell">
+                <strong>{{ row.residentName || '住户' }}</strong>
+                <span>{{ row.communityName || '—' }}</span>
+              </div>
+              <span v-else class="muted-text">未关联</span>
+            </td>
+            <td>
+              <span :class="['mobile-tag', { bound: row.mobileBound && row.mobileStatus === 'ACTIVE', warn: row.mobileBound && row.mobileStatus !== 'ACTIVE' }]">
+                {{ mobileLabel(row) }}
+              </span>
+            </td>
             <td>{{ row.phone || '—' }}</td>
             <td>
               <div class="tag-row">
@@ -492,7 +550,7 @@ onMounted(async () => {
             </td>
           </tr>
           <tr v-if="loading">
-            <td colspan="9" class="table-loading">正在加载账号…</td>
+            <td colspan="12" class="table-loading">正在加载账号…</td>
           </tr>
         </tbody>
       </table>
@@ -546,25 +604,47 @@ onMounted(async () => {
     </div>
     <p v-if="!editing" class="form-hint">密码需至少 12 位，且包含大小写字母、数字、符号中的至少三类；创建后可通过“重置密码”修改。</p>
 
-    <h4 class="section-title" style="margin-top: 22px">角色</h4>
-    <div class="choice-grid">
-      <label v-for="role in roles" :key="role.id" class="choice-item">
-        <input v-model="form.roleIds" type="checkbox" :value="Number(role.id)" />
-        <div><strong>{{ role.name }}</strong><em>{{ role.code }}</em></div>
-      </label>
-      <p v-if="!roles.length" class="muted-text">暂无可分配角色</p>
+    <h4 class="section-title" style="margin-top: 22px">关联社区住户<em class="optional-tag">选填</em></h4>
+    <div v-if="isResidentAccount(editing)" class="resident-binding-readonly">
+      <span>住户授权账号</span>
+      <strong>{{ editing?.residentName || '—' }} · {{ editing?.communityName || '—' }}</strong>
+      <em>绑定关系与角色请到「社区业主」页调整</em>
     </div>
-    <p class="form-hint">多角色权限取并集；未分配角色时账号仅能登录，无业务权限。</p>
+    <template v-else>
+      <label class="resident-select-field">
+        <span>选择住户</span>
+        <select v-model="form.residentId">
+          <option :value="null">不关联住户（纯后台账号）</option>
+          <option v-for="item in residentOptions" :key="item.id" :value="Number(item.id)">
+            {{ item.name }} · {{ item.communityName }} · {{ item.phone || '无手机号' }}{{ item.adminUserId && String(item.adminUserId) !== String(editing?.id) ? '（已绑其他账号）' : '' }}
+          </option>
+        </select>
+      </label>
+      <p class="form-hint">关联住户后，系统会确保该住户拥有移动端账号，可用手机号登录 App；不关联时账号仅用于后台。</p>
+    </template>
 
-    <h4 class="section-title" style="margin-top: 22px">可访问社区<em class="optional-tag">选填</em></h4>
-    <div class="choice-grid community-choices">
-      <label v-for="community in communities" :key="community.id" class="choice-item">
-        <input v-model="form.communityIds" type="checkbox" :value="Number(community.id)" />
-        <div><strong>{{ community.name }}</strong><em>{{ community.code }}</em></div>
-      </label>
-      <p v-if="!communities.length" class="muted-text">暂无社区数据</p>
-    </div>
-    <p class="form-hint">创建用户时可不选择可访问社区；角色数据范围为“全部数据”时不受社区限制，其他角色可在创建后编辑补充。</p>
+    <h4 class="section-title" style="margin-top: 22px">角色</h4>
+    <div v-if="isResidentAccount(editing)" class="muted-text">住户授权账号的角色由「社区业主」页统一配置。</div>
+    <template v-else>
+      <div class="choice-grid">
+        <label v-for="role in roles" :key="role.id" class="choice-item">
+          <input v-model="form.roleIds" type="checkbox" :value="Number(role.id)" />
+          <div><strong>{{ role.name }}</strong><em>{{ role.code }}</em></div>
+        </label>
+        <p v-if="!roles.length" class="muted-text">暂无可分配角色</p>
+      </div>
+      <p class="form-hint">多角色权限取并集；未分配角色时账号仅能登录，无业务权限。</p>
+
+      <h4 class="section-title" style="margin-top: 22px">可访问社区<em class="optional-tag">选填</em></h4>
+      <div class="choice-grid community-choices">
+        <label v-for="community in communities" :key="community.id" class="choice-item">
+          <input v-model="form.communityIds" type="checkbox" :value="Number(community.id)" />
+          <div><strong>{{ community.name }}</strong><em>{{ community.code }}</em></div>
+        </label>
+        <p v-if="!communities.length" class="muted-text">暂无社区数据</p>
+      </div>
+      <p class="form-hint">创建用户时可不选择可访问社区；角色数据范围为“全部数据”时不受社区限制，其他角色可在创建后编辑补充。</p>
+    </template>
 
     <template #footer>
       <button @click="drawerOpen = false">取消</button>
@@ -707,4 +787,19 @@ onMounted(async () => {
 }
 .password-actions button:disabled { color: #b1adb8; cursor: not-allowed; }
 .modal-card footer .primary-button:disabled { opacity: .5; cursor: not-allowed; }
+.source-tag { display: inline-block; padding: 2px 7px; border-radius: 6px; color: #7d7790; background: #f3f2f6; font-size: var(--font-size-caption); white-space: nowrap; }
+.source-tag.resident { color: #5f4bb5; background: #f1edfc; }
+.resident-link-cell { display: flex; flex-direction: column; line-height: 1.35; }
+.resident-link-cell strong { color: #4a4552; font-size: var(--font-size-body); font-weight: 500; }
+.resident-link-cell span { color: #9a95a1; font-size: var(--font-size-caption); }
+.mobile-tag { color: #9a95a1; font-size: var(--font-size-caption); white-space: nowrap; }
+.mobile-tag.bound { color: #4f8a68; }
+.mobile-tag.warn { color: #b06a6a; }
+.resident-binding-readonly { display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; border: 1px solid #e6e1ef; border-radius: 9px; background: #faf8ff; }
+.resident-binding-readonly > span { color: #8f8799; font-size: var(--font-size-caption); }
+.resident-binding-readonly > strong { color: #4a4552; font-size: var(--font-size-body); font-weight: 500; }
+.resident-binding-readonly > em { color: #9a95a1; font-size: var(--font-size-caption); font-style: normal; }
+.resident-select-field { display: block; }
+.resident-select-field > span { display: block; margin-bottom: 5px; color: #65616d; font-size: var(--font-size-body); font-weight: 500; }
+.resident-select-field select { width: 100%; height: 36px; padding: 0 9px; border: 1px solid #e1dee5; border-radius: 8px; color: #514d58; background: #fff; font-size: var(--font-size-body); }
 </style>

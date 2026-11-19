@@ -7,8 +7,15 @@ from sqlalchemy import func, or_, select
 from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
-from src.core.responses import ERR_NOT_FOUND, ERR_PARAM, ApiError, ok, paginated
+from src.core.permissions import allowed_community_ids, require_permission
+from src.core.responses import (
+    ERR_DATA_SCOPE,
+    ERR_NOT_FOUND,
+    ERR_PARAM,
+    ApiError,
+    ok,
+    paginated,
+)
 from src.core.security import decrypt_field, hmac_index, mask_phone
 from src.db.models import (
     Certification,
@@ -27,6 +34,22 @@ router = APIRouter(tags=["admin:users"])
 
 # W07 用户管理（C 端业主账号）。红线：禁止在此修改实名信息/认证状态，
 # 认证必须走「住户认证」流程以保证审计链（详设 4.7.6）。
+
+
+async def _assert_user_scope(db: DbSession, admin: CurrentAdmin, user_id: int) -> None:
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is None:
+        return
+    if not allowed:
+        raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+    linked = await db.scalar(
+        select(Resident.id).where(
+            Resident.user_id == user_id,
+            Resident.community_id.in_(allowed),
+        ).limit(1)
+    )
+    if not linked:
+        raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
 
 
 async def _row(db: DbSession, user: User) -> dict:
@@ -61,6 +84,14 @@ async def list_users(admin: CurrentAdmin, db: DbSession,
                      page: int = Query(default=1), pageSize: int = Query(default=20)):
     """用户检索：昵称模糊 + 手机号精确（哈希匹配，不明文索引）。"""
     stmt = select(User)
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is not None:
+        stmt = stmt.where(User.id.in_(
+            select(Resident.user_id).where(
+                Resident.community_id.in_(allowed),
+                Resident.user_id.is_not(None),
+            )
+        ))
     if status:
         stmt = stmt.where(User.status == status)
     if keyword:
@@ -80,6 +111,7 @@ async def user_detail(user_id: int, admin: CurrentAdmin, db: DbSession):
     user = await db.get(User, user_id)
     if not user:
         raise ApiError(ERR_NOT_FOUND, "用户不存在", 404)
+    await _assert_user_scope(db, admin, user_id)
     row = await _row(db, user)
     row["publishCount"] = int((await db.scalar(
         select(func.count()).select_from(Item).where(Item.seller_id == user.id))) or 0)
@@ -112,6 +144,7 @@ async def toggle_user_status(user_id: int, payload: dict, request: Request,
     user = await db.get(User, user_id)
     if not user:
         raise ApiError(ERR_NOT_FOUND, "用户不存在", 404)
+    await _assert_user_scope(db, admin, user_id)
     status = payload.get("status", "")
     if status not in ("ACTIVE", "FROZEN"):
         raise ApiError(ERR_PARAM, "状态不合法", 400)
@@ -154,6 +187,7 @@ async def create_penalty(user_id: int, payload: PenaltyIn, request: Request,
     user = await db.get(User, user_id)
     if not user:
         raise ApiError(ERR_NOT_FOUND, "用户不存在", 404)
+    await _assert_user_scope(db, admin, user_id)
     if payload.type not in (E.PenaltyType.WARNING, E.PenaltyType.MUTE,
                             E.PenaltyType.PUBLISH_LIMIT, E.PenaltyType.TRADE_LIMIT,
                             E.PenaltyType.BAN):
@@ -198,6 +232,7 @@ async def create_penalty(user_id: int, payload: PenaltyIn, request: Request,
 @router.get("/users/{user_id}/penalties",
             dependencies=[Depends(require_permission("system:user:view"))])
 async def list_penalties(user_id: int, admin: CurrentAdmin, db: DbSession):
+    await _assert_user_scope(db, admin, user_id)
     rows = list((await db.execute(
         select(UserPenalty).where(UserPenalty.user_id == user_id)
         .order_by(UserPenalty.id.desc()))).scalars().all())
@@ -208,6 +243,7 @@ async def list_penalties(user_id: int, admin: CurrentAdmin, db: DbSession):
              dependencies=[Depends(require_permission("system:user:penalty"))])
 async def revoke_penalty(user_id: int, penalty_id: int, request: Request,
                          admin: CurrentAdmin, db: DbSession):
+    await _assert_user_scope(db, admin, user_id)
     penalty = await db.get(UserPenalty, penalty_id)
     if not penalty or penalty.user_id != user_id:
         raise ApiError(ERR_NOT_FOUND, "处置记录不存在", 404)

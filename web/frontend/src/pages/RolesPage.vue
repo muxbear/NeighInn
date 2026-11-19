@@ -21,7 +21,10 @@ const expanded = ref<Set<string>>(new Set())
 const roleModalOpen = ref(false)
 const editingId = ref('')
 const savingRole = ref(false)
-const roleForm = ref({ name: '', code: '', description: '', dataScope: 'OWN_COMMUNITY' })
+const roleForm = ref({
+  name: '', code: '', description: '', dataScope: 'OWN_COMMUNITY',
+  assignableToResident: false,
+})
 const roleNameInput = ref<HTMLInputElement | null>(null)
 const roleListEl = ref<HTMLElement | null>(null)
 const draggingId = ref('')
@@ -176,7 +179,10 @@ async function loadRoles() {
 
 function openCreateRole() {
   editingId.value = ''
-  roleForm.value = { name: '', code: '', description: '', dataScope: 'OWN_COMMUNITY' }
+  roleForm.value = {
+    name: '', code: '', description: '', dataScope: 'OWN_COMMUNITY',
+    assignableToResident: false,
+  }
   roleModalOpen.value = true
 }
 
@@ -187,6 +193,7 @@ function openEditRole(role: any) {
     code: role.code || '',
     description: role.description || '',
     dataScope: role.dataScope || 'OWN_COMMUNITY',
+    assignableToResident: Boolean(role.assignableToResident),
   }
   roleModalOpen.value = true
 }
@@ -205,6 +212,8 @@ async function submitRole() {
       name,
       description: roleForm.value.description.trim(),
       dataScope: roleForm.value.dataScope,
+      assignableToResident: roleForm.value.assignableToResident
+        && roleForm.value.dataScope === 'OWN_COMMUNITY',
     }
     if (editingId.value) {
       await rolesApi.update(editingId.value, payload)
@@ -373,7 +382,11 @@ onUnmounted(() => {
         >
           <div :class="['role-card-icon', { super: role.builtin }]"><ShieldCheck :size="17" /></div>
           <div class="role-card-content">
-            <div class="role-card-title"><strong>{{ role.name }}</strong><em v-if="role.builtin">内置</em></div>
+            <div class="role-card-title">
+              <strong>{{ role.name }}</strong>
+              <em v-if="role.builtin">内置</em>
+              <em v-if="role.assignableToResident" class="role-assignable-tag">可授予住户</em>
+            </div>
             <p>{{ role.description }}</p><span>{{ role.members }} 名成员 · {{ role.code }}</span>
           </div>
           <div class="role-card-actions">
@@ -453,8 +466,20 @@ onUnmounted(() => {
                 <option v-for="option in dataScopeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
             </label>
+            <div class="full role-assignable-row">
+              <span>可授予社区住户</span>
+              <label class="role-assignable-toggle">
+                <input
+                  v-model="roleForm.assignableToResident"
+                  type="checkbox"
+                  :disabled="roleForm.dataScope !== 'OWN_COMMUNITY'"
+                />
+                <span>允许在「社区业主」页将该角色授予本社区住户，使其登录后台</span>
+              </label>
+            </div>
           </div>
           <p v-if="editingSuper" class="form-hint">超级管理员的数据范围固定为“全部数据”，不可修改。</p>
+          <p v-else-if="roleForm.dataScope !== 'OWN_COMMUNITY'" class="form-hint">仅“本社区”数据范围的角色可授予社区住户。</p>
           <p v-else class="form-hint">数据范围决定该角色成员可查看的业务数据边界，保存角色后可继续在右侧配置菜单与资源权限。</p>
         </div>
         <footer>
@@ -472,6 +497,10 @@ onUnmounted(() => {
 .role-dialog { width: min(560px, 100%); }
 .role-dialog header { color: #3d3945; }
 .role-dialog .form-grid label > span em { color: #d05a64; font-style: normal; }
+.role-assignable-row > span { display: block; margin-bottom: 5px; color: #65616d; font-size: var(--font-size-body); font-weight: 500; }
+.role-assignable-toggle { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid #e6e1ef; border-radius: 10px; background: #faf8ff; color: #5b5366; font-size: var(--font-size-body); line-height: 1.5; }
+.role-assignable-toggle input { width: auto; height: auto; margin-top: 2px; }
+.role-assignable-tag { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: #efeaff; color: #6f59d4; font-size: var(--font-size-caption); font-style: normal; }
 .role-sort-hint { margin-left: auto; overflow: hidden; color: #b0abb8; font-size: var(--font-size-caption); white-space: nowrap; text-overflow: ellipsis; }
 .role-card.dragging { z-index: 2; cursor: grabbing; border-color: #b3a0e8; background: #f6f2ff; box-shadow: 0 10px 24px rgba(82, 61, 153, .2); }
 .role-list.is-dragging,

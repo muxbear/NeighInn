@@ -6,7 +6,12 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.core.responses import ERR_FORBIDDEN, ERR_UNAUTHORIZED, ApiError
+from src.core.responses import (
+    ERR_FORBIDDEN,
+    ERR_MUST_CHANGE_PASSWORD,
+    ERR_UNAUTHORIZED,
+    ApiError,
+)
 from src.core.security import decode_token
 from src.core.sessions import session_store
 from src.db.base import get_db
@@ -54,6 +59,15 @@ OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 
 
 # ---- 管理端：HttpOnly Cookie 会话 + CSRF（SRS 8.3、后台详设 5.9.1） ----
+# 首次登录强制改密期间只放行自助接口，避免绕过改密直接访问业务数据。
+MUST_CHANGE_PASSWORD_ALLOWED = (
+    "/auth/me",
+    "/auth/password/change",
+    "/auth/logout",
+    "/auth/csrf",
+)
+
+
 async def get_current_admin(request: Request, db: DbSession) -> AdminUser:
     token = request.cookies.get(settings.session_cookie_name)
     data = await session_store.get(token)
@@ -62,6 +76,17 @@ async def get_current_admin(request: Request, db: DbSession) -> AdminUser:
     admin = await db.get(AdminUser, int(data["admin_id"]))
     if not admin or admin.status != "ACTIVE":
         raise ApiError(ERR_UNAUTHORIZED, "账号不可用", 401)
+    # 撤销授权、停用、重置密码会自增版本，旧 Cookie 会话立即失效。
+    if int(data.get("session_version", 0)) != int(admin.session_version or 0):
+        raise ApiError(ERR_UNAUTHORIZED, "会话已失效，请重新登录", 401)
+    if admin.must_change_password and not any(
+        request.url.path.endswith(path) for path in MUST_CHANGE_PASSWORD_ALLOWED
+    ):
+        raise ApiError(
+            ERR_MUST_CHANGE_PASSWORD,
+            "首次登录需先修改初始密码",
+            403,
+        )
     request.state.session_token = token
     request.state.csrf_token = data.get("csrf")
     request.state.admin = admin

@@ -9,7 +9,11 @@ from sqlalchemy import or_, select
 from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
+from src.core.permissions import (
+    community_scope_conditions,
+    require_permission,
+    resolve_community_scope,
+)
 from src.core.responses import (
     ERR_BIZ_RULE,
     ERR_NOT_FOUND,
@@ -39,6 +43,12 @@ ResolvePerm = Depends(require_permission("governance:dispute:resolve"))
 FreezePerm = Depends(require_permission("governance:dispute:freeze"))
 
 
+async def _assert_dispute_scope(db: DbSession, admin: CurrentAdmin, dispute: Dispute) -> None:
+    order = await db.get(Order, dispute.order_id)
+    if order:
+        await resolve_community_scope(db, admin, order.community_id)
+
+
 async def _row(db: DbSession, dispute: Dispute) -> dict:
     initiator = await db.get(User, dispute.initiator_id)
     respondent = await db.get(User, dispute.respondent_id)
@@ -66,7 +76,12 @@ async def list_disputes(
     keyword: str | None = Query(default=None),
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
-    stmt = select(Dispute)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = (
+        select(Dispute)
+        .join(Order, Order.id == Dispute.order_id)
+        .where(*community_scope_conditions(resolved, Order.community_id))
+    )
     if status:
         stmt = stmt.where(Dispute.status == status)
     if keyword:
@@ -82,6 +97,7 @@ async def dispute_detail(dispute_id: int, admin: CurrentAdmin, db: DbSession):
     dispute = await db.get(Dispute, dispute_id)
     if not dispute:
         raise ApiError(ERR_NOT_FOUND, "纠纷不存在", 404)
+    await _assert_dispute_scope(db, admin, dispute)
     row = await _row(db, dispute)
     order = await db.get(Order, dispute.order_id)
     if order:
@@ -103,6 +119,10 @@ async def dispute_detail(dispute_id: int, admin: CurrentAdmin, db: DbSession):
 @router.get("/disputes/{dispute_id}/evidences")
 async def dispute_evidences(dispute_id: int, admin: CurrentAdmin, db: DbSession):
     """证据缩略图（私有桶签名 URL 10 分钟）；查看原图写审计。"""
+    dispute = await db.get(Dispute, dispute_id)
+    if not dispute:
+        raise ApiError(ERR_NOT_FOUND, "纠纷不存在", 404)
+    await _assert_dispute_scope(db, admin, dispute)
     rows = list((await db.execute(
         select(DisputeEvidence).where(DisputeEvidence.dispute_id == dispute_id)
         .order_by(DisputeEvidence.id))).scalars().all())
@@ -124,6 +144,7 @@ async def mediate_dispute(dispute_id: int, payload: MediateIn,
     dispute = await db.get(Dispute, dispute_id)
     if not dispute:
         raise ApiError(ERR_NOT_FOUND, "纠纷不存在", 404)
+    await _assert_dispute_scope(db, admin, dispute)
     if len(payload.note.strip()) < 2:
         raise ApiError(ERR_PARAM, "调解记录不能为空", 400)
     if dispute.status == E.DisputeStatus.OPEN:
@@ -149,6 +170,7 @@ async def freeze_dispute_funds(dispute_id: int, payload: FreezeIn,
     dispute = await db.get(Dispute, dispute_id)
     if not dispute:
         raise ApiError(ERR_NOT_FOUND, "纠纷不存在", 404)
+    await _assert_dispute_scope(db, admin, dispute)
     if len(payload.reason.strip()) < 2:
         raise ApiError(ERR_PARAM, "冻结原因必填", 400)
     order = await db.get(Order, dispute.order_id)
@@ -183,6 +205,7 @@ async def resolve_dispute(dispute_id: int, payload: ResolveIn,
     dispute = await db.get(Dispute, dispute_id)
     if not dispute:
         raise ApiError(ERR_NOT_FOUND, "纠纷不存在", 404)
+    await _assert_dispute_scope(db, admin, dispute)
     if dispute.status in (E.DisputeStatus.RESOLVED, E.DisputeStatus.CLOSED):
         raise ApiError(ERR_BIZ_RULE, "纠纷已结案，重复争议请新建纠纷", 422)
     if payload.conclusionType not in E.ConclusionType.FUND_TYPES + (

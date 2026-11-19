@@ -29,7 +29,14 @@ from src.db.models.governance import (
     Feedback,
     RepairOrder,
 )
-from src.db.models.identity import Certification, CreditLog, Resident, User, UserPenalty
+from src.db.models.identity import (
+    Certification,
+    CreditLog,
+    PlatformUser,
+    Resident,
+    User,
+    UserPenalty,
+)
 from src.db.models.marketplace import Item, ItemAudit, ItemCategory, ItemMedia
 from src.db.models.notification import (
     AppNotification,

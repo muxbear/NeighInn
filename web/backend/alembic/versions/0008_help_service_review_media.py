@@ -26,17 +26,24 @@ PERMISSIONS = (
 ROLE_CODES = ("community_operator", "content_reviewer")
 
 
+def _fresh_schema(bind) -> bool:
+    """0001 按当前 metadata 建表时，账号表已直接是 platform_users。"""
+    tables = set(sa.inspect(bind).get_table_names())
+    return "platform_users" in tables and "users" not in tables
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
     media_type = postgresql.JSONB() if is_pg else sa.JSON()
     default = sa.text("'[]'::jsonb") if is_pg else sa.text("'[]'")
-    op.add_column("help_requests", sa.Column("media", media_type, nullable=False,
-                                             server_default=default))
-    op.add_column("help_requests", sa.Column("cover_key", sa.String(255), nullable=False,
-                                             server_default=""))
-    op.add_column("help_requests", sa.Column("media_type", sa.String(16), nullable=False,
-                                             server_default="GALLERY"))
+    if not _fresh_schema(bind):
+        op.add_column("help_requests", sa.Column("media", media_type, nullable=False,
+                                                 server_default=default))
+        op.add_column("help_requests", sa.Column("cover_key", sa.String(255), nullable=False,
+                                                 server_default=""))
+        op.add_column("help_requests", sa.Column("media_type", sa.String(16), nullable=False,
+                                                 server_default="GALLERY"))
 
     for code, name in PERMISSIONS:
         op.execute(
@@ -78,6 +85,7 @@ def downgrade() -> None:
         "DELETE FROM permissions WHERE code IN "
         "('community:help:update', 'community:help:delete', 'community:help:review')"
     )
-    op.drop_column("help_requests", "media_type")
-    op.drop_column("help_requests", "cover_key")
-    op.drop_column("help_requests", "media")
+    if not _fresh_schema(op.get_bind()):
+        op.drop_column("help_requests", "media_type")
+        op.drop_column("help_requests", "cover_key")
+        op.drop_column("help_requests", "media")

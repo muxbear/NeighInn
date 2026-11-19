@@ -32,6 +32,12 @@ AGREEMENT_PARAMS = [
 ]
 
 
+def _fresh_schema(bind) -> bool:
+    """0001 按当前 metadata 建表时，账号表已直接是 platform_users。"""
+    tables = set(sa.inspect(bind).get_table_names())
+    return "platform_users" in tables and "users" not in tables
+
+
 def _column_names(bind) -> set[str]:
     return {column["name"] for column in sa.inspect(bind).get_columns("users")}
 
@@ -91,6 +97,10 @@ def _ensure_agreement_parameters(bind) -> None:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    if _fresh_schema(bind):
+        # 新库的注册引导字段已由 0001 按当前模型创建，只需补齐协议参数。
+        _ensure_agreement_parameters(bind)
+        return
 
     columns = _column_names(bind)
     if "onboarding_status" not in columns:
@@ -138,6 +148,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    if _fresh_schema(bind):
+        return
 
     metadata = sa.MetaData()
     keys = sa.Table("parameter_keys", metadata, autoload_with=bind)

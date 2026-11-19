@@ -7,8 +7,20 @@ from sqlalchemy import func, or_, select
 from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import require_permission
-from src.core.responses import ERR_NOT_FOUND, ERR_PARAM, ApiError, ok, paginated
+from src.core.permissions import (
+    allowed_community_ids,
+    community_scope_conditions,
+    require_permission,
+    resolve_community_scope,
+)
+from src.core.responses import (
+    ERR_DATA_SCOPE,
+    ERR_NOT_FOUND,
+    ERR_PARAM,
+    ApiError,
+    ok,
+    paginated,
+)
 from src.db.models import (
     AppNotification,
     Notice,
@@ -25,6 +37,27 @@ router = APIRouter(tags=["admin:communication"])
 
 
 # ---------------------------------------------------------------- 公告（W04-04）
+
+async def _assert_notice_scope(db: DbSession, admin: CurrentAdmin, notice: Notice) -> None:
+    if notice.community_id is None:
+        allowed = await allowed_community_ids(db, admin)
+        if allowed is not None:
+            raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+        return
+    await resolve_community_scope(db, admin, notice.community_id)
+
+
+async def _assert_task_scope(db: DbSession, admin: CurrentAdmin,
+                             task: NotificationTask) -> None:
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is None:
+        return
+    community_ids = set((task.target_filter or {}).get("communityIds") or [])
+    if task.target_type != "COMMUNITY" or not community_ids:
+        raise ApiError(ERR_DATA_SCOPE, "无权向全部社区发送通知", 403)
+    if not community_ids.issubset(allowed):
+        raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+
 
 class NoticeIn(BaseModel):
     title: str
@@ -59,7 +92,9 @@ async def list_notices(admin: CurrentAdmin, db: DbSession,
                        keyword: str | None = Query(default=None),
                        status: str | None = Query(default=None),
                        page: int = Query(default=1), pageSize: int = Query(default=20)):
-    stmt = select(Notice)
+    resolved = await resolve_community_scope(db, admin, None)
+    stmt = select(Notice).where(
+        *community_scope_conditions(resolved, Notice.community_id))
     if keyword:
         stmt = stmt.where(or_(Notice.title.ilike(f"%{keyword}%"),
                               Notice.scope.ilike(f"%{keyword}%")))
@@ -75,6 +110,9 @@ async def create_notice(payload: NoticeIn, request: Request,
                         admin: CurrentAdmin, db: DbSession):
     if len(payload.title.strip()) < 2:
         raise ApiError(ERR_PARAM, "公告标题必填", 400)
+    resolved = await resolve_community_scope(db, admin, payload.communityId)
+    if isinstance(resolved, set) and payload.communityId is None:
+        raise ApiError(ERR_DATA_SCOPE, "无权发布全平台公告", 403)
     notice = Notice(
         community_id=payload.communityId, title=payload.title.strip()[:120],
         content=payload.content, scope=payload.scope, pinned=payload.pinned,
@@ -94,6 +132,7 @@ async def notice_detail(notice_id: int, admin: CurrentAdmin, db: DbSession):
     notice = await db.get(Notice, notice_id)
     if not notice:
         raise ApiError(ERR_NOT_FOUND, "公告不存在", 404)
+    await _assert_notice_scope(db, admin, notice)
     return ok(await _notice_row(db, notice))
 
 
@@ -104,6 +143,10 @@ async def update_notice(notice_id: int, payload: NoticeIn, request: Request,
     notice = await db.get(Notice, notice_id)
     if not notice:
         raise ApiError(ERR_NOT_FOUND, "公告不存在", 404)
+    await _assert_notice_scope(db, admin, notice)
+    resolved = await resolve_community_scope(db, admin, payload.communityId)
+    if isinstance(resolved, set) and payload.communityId is None:
+        raise ApiError(ERR_DATA_SCOPE, "无权发布全平台公告", 403)
     if notice.status == "PUBLISHED":
         raise ApiError(ERR_PARAM, "已发布公告请先撤回再编辑", 400)
     before = {"title": notice.title}
@@ -127,6 +170,7 @@ async def publish_notice(notice_id: int, request: Request,
     notice = await db.get(Notice, notice_id)
     if not notice:
         raise ApiError(ERR_NOT_FOUND, "公告不存在", 404)
+    await _assert_notice_scope(db, admin, notice)
     if notice.status == "PUBLISHED":
         raise ApiError(ERR_PARAM, "公告已发布", 400)
     notice.status = "PUBLISHED"
@@ -158,6 +202,7 @@ async def withdraw_notice(notice_id: int, request: Request,
     notice = await db.get(Notice, notice_id)
     if not notice:
         raise ApiError(ERR_NOT_FOUND, "公告不存在", 404)
+    await _assert_notice_scope(db, admin, notice)
     before = {"status": notice.status}
     notice.status = "WITHDRAWN"
     await write_audit(db, request, actor=admin, action="notice.withdraw",
@@ -169,6 +214,10 @@ async def withdraw_notice(notice_id: int, request: Request,
 
 @router.get("/notices/{notice_id}/reads")
 async def notice_reads(notice_id: int, admin: CurrentAdmin, db: DbSession):
+    notice = await db.get(Notice, notice_id)
+    if not notice:
+        raise ApiError(ERR_NOT_FOUND, "公告不存在", 404)
+    await _assert_notice_scope(db, admin, notice)
     rows = list((await db.execute(
         select(NoticeRead).where(NoticeRead.notice_id == notice_id)
         .order_by(NoticeRead.read_at.desc()).limit(200))).scalars().all())
@@ -233,7 +282,23 @@ async def list_tasks(admin: CurrentAdmin, db: DbSession,
         stmt = stmt.where(NotificationTask.name.ilike(f"%{keyword}%"))
     if status:
         stmt = stmt.where(NotificationTask.status == status)
-    rows, total = await paginate(db, stmt.order_by(NotificationTask.id.desc()), page, pageSize)
+    resolved = await resolve_community_scope(db, admin, None)
+    if isinstance(resolved, set):
+        all_rows = list((await db.execute(
+            stmt.order_by(NotificationTask.id.desc()))).scalars().all())
+        allowed_ids = resolved
+
+        def _visible(task: NotificationTask) -> bool:
+            ids = set((task.target_filter or {}).get("communityIds") or [])
+            return task.target_type == "COMMUNITY" and bool(ids) and ids.issubset(allowed_ids)
+
+        filtered = [row for row in all_rows if _visible(row)]
+        total = len(filtered)
+        start = (page - 1) * pageSize
+        rows = filtered[start:start + pageSize]
+    else:
+        rows, total = await paginate(
+            db, stmt.order_by(NotificationTask.id.desc()), page, pageSize)
     return paginated([await _task_row(db, row) for row in rows], page, pageSize, total)
 
 
@@ -243,6 +308,12 @@ async def create_task(payload: TaskIn, request: Request,
                       admin: CurrentAdmin, db: DbSession):
     if len(payload.name.strip()) < 2:
         raise ApiError(ERR_PARAM, "任务名称必填", 400)
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is not None:
+        if payload.targetType != "COMMUNITY" or not payload.communityIds:
+            raise ApiError(ERR_DATA_SCOPE, "无权向全部社区发送通知", 403)
+        if not set(payload.communityIds).issubset(allowed):
+            raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
     task = NotificationTask(
         name=payload.name.strip()[:120], channels=payload.channels,
         target_type=payload.targetType,
@@ -263,6 +334,7 @@ async def task_detail(task_id: int, admin: CurrentAdmin, db: DbSession):
     task = await db.get(NotificationTask, task_id)
     if not task:
         raise ApiError(ERR_NOT_FOUND, "任务不存在", 404)
+    await _assert_task_scope(db, admin, task)
     return ok(await _task_row(db, task))
 
 
@@ -272,6 +344,7 @@ async def estimate_task(task_id: int, admin: CurrentAdmin, db: DbSession):
     task = await db.get(NotificationTask, task_id)
     if not task:
         raise ApiError(ERR_NOT_FOUND, "任务不存在", 404)
+    await _assert_task_scope(db, admin, task)
     count = await _estimate_targets(db, task)
     return ok({"estimated": count})
 
@@ -306,6 +379,7 @@ async def send_task(task_id: int, request: Request, admin: CurrentAdmin, db: DbS
     task = await db.get(NotificationTask, task_id)
     if not task:
         raise ApiError(ERR_NOT_FOUND, "任务不存在", 404)
+    await _assert_task_scope(db, admin, task)
     if task.status not in ("DRAFT", "SCHEDULED"):
         raise ApiError(ERR_PARAM, f"当前状态（{task.status}）不可发送", 400)
     template = await db.get(NotificationTemplate, task.template_id) if task.template_id else None
@@ -338,6 +412,7 @@ async def cancel_task(task_id: int, request: Request, admin: CurrentAdmin, db: D
     task = await db.get(NotificationTask, task_id)
     if not task:
         raise ApiError(ERR_NOT_FOUND, "任务不存在", 404)
+    await _assert_task_scope(db, admin, task)
     if task.status in ("COMPLETED", "CANCELLED"):
         raise ApiError(ERR_PARAM, "任务已结束", 400)
     before = {"status": task.status}
@@ -355,6 +430,7 @@ async def test_task(task_id: int, admin: CurrentAdmin, db: DbSession):
     task = await db.get(NotificationTask, task_id)
     if not task:
         raise ApiError(ERR_NOT_FOUND, "任务不存在", 404)
+    await _assert_task_scope(db, admin, task)
     db.add(NotificationRecord(task_id=task.id, user_id=admin.id, channel="IN_APP",
                               title=f"[测试] {task.name}", status="SENT", sent_at=utcnow()))
     await db.commit()
@@ -365,6 +441,10 @@ async def test_task(task_id: int, admin: CurrentAdmin, db: DbSession):
 async def task_records(task_id: int, admin: CurrentAdmin, db: DbSession,
                        page: int = Query(default=1), pageSize: int = Query(default=20)):
     """送达/阅读明细。"""
+    task = await db.get(NotificationTask, task_id)
+    if not task:
+        raise ApiError(ERR_NOT_FOUND, "任务不存在", 404)
+    await _assert_task_scope(db, admin, task)
     stmt = select(NotificationRecord).where(NotificationRecord.task_id == task_id)
     rows, total = await paginate(db, stmt.order_by(NotificationRecord.id.desc()), page, pageSize)
     result = []

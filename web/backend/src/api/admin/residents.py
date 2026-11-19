@@ -17,10 +17,16 @@ from src.core.audit import write_audit, write_outbox
 from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.idempotency import complete_idempotency, guard_idempotency
-from src.core.permissions import require_permission
+from src.core.permissions import (
+    allowed_community_ids,
+    require_any_permission,
+    require_permission,
+    resolve_community_scope,
+)
 from src.core.responses import (
     ERR_BIZ_RULE,
     ERR_CONFLICT,
+    ERR_DATA_SCOPE,
     ERR_DEPENDENCY,
     ERR_FILE_TOO_LARGE,
     ERR_NOT_FOUND,
@@ -29,12 +35,34 @@ from src.core.responses import (
     ok,
     paginated,
 )
-from src.core.security import decrypt_field, encrypt_field, hmac_index, mask_phone
+from src.core.security import (
+    decrypt_field,
+    encrypt_field,
+    hash_password,
+    hmac_index,
+    mask_phone,
+)
 from src.core.storage import get_minio, presign_download
-from src.db.models import Certification, Community, Item, Resident, User
+from src.db.models import (
+    AdminUser,
+    Certification,
+    Community,
+    Item,
+    PlatformUser,
+    Resident,
+    Role,
+    User,
+    admin_user_communities,
+    admin_user_roles,
+)
 from src.db.models.common import utcnow
 from src.domain import enums as E
 from src.domain.state import certification_sm, item_sm
+from src.services.admin_account_service import (
+    ensure_platform_user_for_resident,
+    generate_initial_password,
+    next_admin_username,
+)
 from src.services.notify_service import notify_user
 
 router = APIRouter(tags=["admin:residents"])
@@ -277,7 +305,72 @@ async def _sync_latest_cert_status(db: DbSession, user_id: int | None,
         cert.status = status
 
 
-async def _resident_row(db: DbSession, resident: Resident) -> dict:
+async def _admin_accounts_map(db: DbSession, residents: list[Resident]) -> dict[int, dict]:
+    """批量装配住户的后台身份，避免列表逐行查询。key 为 resident.id。"""
+    if not residents:
+        return {}
+    resident_ids = [row.id for row in residents]
+    user_ids = [row.user_id for row in residents if row.user_id]
+    conditions = [AdminUser.resident_id.in_(resident_ids)]
+    if user_ids:
+        conditions.append(AdminUser.platform_user_id.in_(user_ids))
+    admins = list((await db.execute(
+        select(AdminUser).where(or_(*conditions)))).scalars().all())
+    if not admins:
+        return {}
+    admin_ids = [row.id for row in admins]
+    role_rows = (await db.execute(
+        select(admin_user_roles.c.admin_user_id, Role.code, Role.name)
+        .join(Role, Role.id == admin_user_roles.c.role_id)
+        .where(admin_user_roles.c.admin_user_id.in_(admin_ids))
+    )).all()
+    roles_by_admin: dict[int, list[dict]] = {}
+    for admin_id, code, name in role_rows:
+        roles_by_admin.setdefault(admin_id, []).append({"code": code, "name": name})
+    by_resident: dict[int, AdminUser] = {}
+    by_user: dict[int, AdminUser] = {}
+    for row in admins:
+        if row.resident_id:
+            by_resident.setdefault(row.resident_id, row)
+        if row.platform_user_id:
+            by_user.setdefault(row.platform_user_id, row)
+    result: dict[int, dict] = {}
+    for resident in residents:
+        admin = by_resident.get(resident.id)
+        if admin is None and resident.user_id:
+            admin = by_user.get(resident.user_id)
+        if admin is None:
+            continue
+        result[resident.id] = {
+            "id": str(admin.id),
+            "username": admin.username,
+            "status": admin.status,
+            "source": admin.source or "MANUAL",
+            "mustChangePassword": bool(admin.must_change_password),
+            "roles": roles_by_admin.get(admin.id, []),
+        }
+    return result
+
+
+async def _linked_admin(db: DbSession, resident: Resident) -> AdminUser | None:
+    conditions = [AdminUser.resident_id == resident.id]
+    if resident.user_id:
+        conditions.append(AdminUser.platform_user_id == resident.user_id)
+    return await db.scalar(select(AdminUser).where(or_(*conditions)).limit(1))
+
+
+async def _disable_linked_admin(db: DbSession, resident: Resident) -> bool:
+    """住户资格失效时停用关联后台账号并使旧会话失效。"""
+    admin = await _linked_admin(db, resident)
+    if not admin or admin.status == "DISABLED":
+        return False
+    admin.status = "DISABLED"
+    admin.session_version = int(admin.session_version or 0) + 1
+    return True
+
+
+async def _resident_row(db: DbSession, resident: Resident,
+                        admin_account: dict | None = None) -> dict:
     community = await db.get(Community, resident.community_id)
     user = await db.get(User, resident.user_id) if resident.user_id else None
     latest_certs = await _latest_certifications(db, resident.user_id) if resident.user_id else {}
@@ -313,12 +406,14 @@ async def _resident_row(db: DbSession, resident: Resident) -> dict:
         "level": resident.level,
         "status": resident.status,
         "joinedAt": resident.joined_at.strftime("%Y-%m-%d") if resident.joined_at else "",
+        "adminAccount": admin_account,
     }
 
 
 # ---------------------------------------------------------------- 业主档案（查询）
 
-@router.get("/residents")
+@router.get("/residents",
+            dependencies=[Depends(require_permission("community:resident:view"))])
 async def list_residents(
     admin: CurrentAdmin, db: DbSession,
     communityId: int | None = Query(default=None),
@@ -327,9 +422,14 @@ async def list_residents(
     keyword: str | None = Query(default=None),
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
+    scope = await resolve_community_scope(db, admin, communityId)
     stmt = select(Resident)
-    if communityId:
-        stmt = stmt.where(Resident.community_id == communityId)
+    if isinstance(scope, int):
+        stmt = stmt.where(Resident.community_id == scope)
+    elif isinstance(scope, set):
+        if not scope:
+            return paginated([], page, pageSize, 0)
+        stmt = stmt.where(Resident.community_id.in_(scope))
     if identity and identity != "全部人员":
         stmt = stmt.where(Resident.identity_type == identity)
     if certification:
@@ -342,33 +442,49 @@ async def list_residents(
             Resident.certification_no.ilike(f"%{keyword}%"),
         ))
     rows, total = await paginate(db, stmt.order_by(Resident.id.desc()), page, pageSize)
-    return paginated([await _resident_row(db, row) for row in rows], page, pageSize, total)
+    admin_accounts = await _admin_accounts_map(db, rows)
+    return paginated(
+        [await _resident_row(db, row, admin_accounts.get(row.id)) for row in rows],
+        page, pageSize, total,
+    )
 
 
-@router.get("/residents/summary")
+@router.get("/residents/summary",
+            dependencies=[Depends(require_permission("community:resident:view"))])
 async def resident_summary(admin: CurrentAdmin, db: DbSession,
-                           communityId: int = Query(default=1)):
+                           communityId: int | None = Query(default=None)):
+    scope = await resolve_community_scope(db, admin, communityId)
+    scope_conditions = []
+    if isinstance(scope, int):
+        scope_conditions.append(Resident.community_id == scope)
+    elif isinstance(scope, set):
+        if not scope:
+            return ok({"total": 0, "owner": 0, "family": 0, "pending": 0})
+        scope_conditions.append(Resident.community_id.in_(scope))
+
     async def _count(*conditions) -> int:
         return int((await db.scalar(
-            select(func.count()).select_from(Resident).where(*conditions))) or 0)
+            select(func.count()).select_from(Resident).where(
+                *scope_conditions, *conditions))) or 0)
 
     return ok({
-        "total": await _count(Resident.community_id == communityId),
-        "owner": await _count(Resident.community_id == communityId,
-                              Resident.identity_type == "业主"),
-        "family": await _count(Resident.community_id == communityId,
-                               Resident.identity_type.in_(["家属", "租户"])),
-        "pending": await _count(Resident.community_id == communityId,
-                                Resident.certification_status.in_(["PENDING", "UNVERIFIED"])),
+        "total": await _count(),
+        "owner": await _count(Resident.identity_type == "业主"),
+        "family": await _count(Resident.identity_type.in_(["家属", "租户"])),
+        "pending": await _count(
+            Resident.certification_status.in_(["PENDING", "UNVERIFIED"])),
     })
 
 
-@router.get("/residents/{resident_id}")
+@router.get("/residents/{resident_id}",
+            dependencies=[Depends(require_permission("community:resident:view"))])
 async def resident_detail(resident_id: int, admin: CurrentAdmin, db: DbSession):
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
-    return ok(await _resident_row(db, resident))
+    await resolve_community_scope(db, admin, resident.community_id)
+    admin_accounts = await _admin_accounts_map(db, [resident])
+    return ok(await _resident_row(db, resident, admin_accounts.get(resident.id)))
 
 
 # ---------------------------------------------------------------- 业主档案（新增 / 编辑 / 删除）
@@ -406,6 +522,7 @@ async def create_resident(payload: ResidentIn, request: Request,
     community = await db.get(Community, payload.communityId)
     if not community:
         raise ApiError(ERR_PARAM, "所属社区不存在", 400)
+    await resolve_community_scope(db, admin, community.id)
 
     gender = payload.gender.strip()
     if gender not in GENDERS:
@@ -452,6 +569,7 @@ async def update_resident(resident_id: int, payload: ResidentIn, request: Reques
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
     fields = payload.model_fields_set
     before = await _resident_row(db, resident)
 
@@ -515,6 +633,8 @@ async def update_resident(resident_id: int, payload: ResidentIn, request: Reques
     await _apply_user_status_fields(db, resident, payload)
     if resident.certification_status == "VERIFIED" and not resident.certification_no:
         resident.certification_no = f"YZ{resident.id:08d}"
+    if resident.status != "ACTIVE" or resident.certification_status in ("FROZEN", "REVOKED"):
+        await _disable_linked_admin(db, resident)
     await write_audit(db, request, actor=admin, action="resident.update",
                       resource_type="resident", resource_id=resident.id,
                       before=before, after=await _resident_row(db, resident))
@@ -530,6 +650,13 @@ async def delete_resident(resident_id: int, request: Request,
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
+    if await _linked_admin(db, resident):
+        raise ApiError(
+            ERR_BIZ_RULE,
+            "该住户已开通后台身份，请先在「社区业主」页解除授权后再删除档案",
+            422,
+        )
     before = await _resident_row(db, resident)
     certs = (await db.execute(
         select(Certification).where(Certification.resident_id == resident.id)
@@ -560,6 +687,15 @@ async def batch_delete_residents(payload: ResidentBatchDeleteIn, request: Reques
         select(Resident).where(Resident.id.in_(ids)))).scalars().all())
     if not residents:
         raise ApiError(ERR_NOT_FOUND, "人员档案不存在", 404)
+    for resident in residents:
+        await resolve_community_scope(db, admin, resident.community_id)
+    linked = [resident.name for resident in residents if await _linked_admin(db, resident)]
+    if linked:
+        raise ApiError(
+            ERR_BIZ_RULE,
+            f"以下住户已开通后台身份，请先解除授权：{', '.join(linked)}",
+            422,
+        )
     before = [await _resident_row(db, resident) for resident in residents]
     for resident in residents:
         certs = (await db.execute(
@@ -653,6 +789,7 @@ async def _get_or_create_resident_cert(db: DbSession, resident: Resident,
 async def resident_cert_materials(resident_id: int, cert_type: str,
                                   admin: CurrentAdmin, db: DbSession):
     resident = await _get_resident_or_404(db, resident_id)
+    await resolve_community_scope(db, admin, resident.community_id)
     cert_type = _normalize_cert_type(cert_type)
     cert = await _latest_cert(db, resident.user_id, cert_type) if resident.user_id else None
     if cert is None:
@@ -670,6 +807,7 @@ async def upload_resident_cert_material(resident_id: int, cert_type: str, reques
                                         file: Annotated[UploadFile, File()]):
     """后台直传认证照片/证件（私有桶）；自动补建认证单并记审计。"""
     resident = await _get_resident_or_404(db, resident_id)
+    await resolve_community_scope(db, admin, resident.community_id)
     cert_type = _normalize_cert_type(cert_type)
     cert = await _get_or_create_resident_cert(db, resident, cert_type)
 
@@ -719,6 +857,7 @@ async def delete_resident_cert_material(resident_id: int, cert_type: str, reques
                                         objectKey: str = Query(...)):
     """从认证单移除材料引用（对象保留在私有桶供审计追溯）。"""
     resident = await _get_resident_or_404(db, resident_id)
+    await resolve_community_scope(db, admin, resident.community_id)
     cert_type = _normalize_cert_type(cert_type)
     cert = await _latest_cert(db, resident.user_id, cert_type) if resident.user_id else None
     if cert is None:
@@ -745,13 +884,18 @@ async def list_certifications(
     keyword: str | None = Query(default=None),
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
+    scope = await resolve_community_scope(db, admin, communityId)
     stmt = select(Certification)
+    if isinstance(scope, int):
+        stmt = stmt.where(Certification.community_id == scope)
+    elif isinstance(scope, set):
+        if not scope:
+            return paginated([], page, pageSize, 0)
+        stmt = stmt.where(Certification.community_id.in_(scope))
     if type:
         stmt = stmt.where(Certification.type == type)
     if status:
         stmt = stmt.where(Certification.status == status)
-    if communityId:
-        stmt = stmt.where(Certification.community_id == communityId)
     keyword = (keyword or "").strip()
     if keyword:
         stmt = stmt.join(User, User.id == Certification.user_id)
@@ -775,9 +919,17 @@ async def certification_summary(
     admin: CurrentAdmin, db: DbSession,
     communityId: int | None = Query(default=None),
 ):
+    scope = await resolve_community_scope(db, admin, communityId)
     base_conditions = []
-    if communityId:
-        base_conditions.append(Certification.community_id == communityId)
+    if isinstance(scope, int):
+        base_conditions.append(Certification.community_id == scope)
+    elif isinstance(scope, set):
+        if not scope:
+            return ok({
+                "pending": 0, "pendingRealname": 0, "pendingOwner": 0,
+                "supplement": 0, "todayReviewed": 0, "oldestPendingAt": 0,
+            })
+        base_conditions.append(Certification.community_id.in_(scope))
 
     async def _count(*conditions) -> int:
         return int((await db.scalar(
@@ -811,6 +963,7 @@ async def certification_detail(certification_id: int, admin: CurrentAdmin, db: D
     cert = await db.get(Certification, certification_id)
     if not cert:
         raise ApiError(ERR_NOT_FOUND, "审核单不存在", 404)
+    await _assert_cert_scope(db, admin, cert)
     return ok(await _cert_detail(db, cert))
 
 
@@ -829,6 +982,15 @@ async def _get_cert_or_404(db: DbSession, certification_id: int) -> Certificatio
     return cert
 
 
+async def _assert_cert_scope(db: DbSession, admin: AdminUser, cert: Certification) -> None:
+    if cert.community_id is None:
+        allowed = await allowed_community_ids(db, admin)
+        if allowed is not None:
+            raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+        return
+    await resolve_community_scope(db, admin, cert.community_id)
+
+
 @router.post("/certifications/{certification_id}/approve",
              dependencies=[AuditPerm])
 async def approve_certification(
@@ -837,6 +999,7 @@ async def approve_certification(
     """W02-02 通过：业主证明通过后账号与小区强绑定（BR-02）；实名通过更新实名状态。
     审核动作写审计（W01-03），并向申请人发送站内通知（M01-04）。"""
     cert = await _get_cert_or_404(db, certification_id)
+    await _assert_cert_scope(db, admin, cert)
     idem = await guard_idempotency(db, request, {"id": certification_id, "action": "approve"})
     if idem and idem.status == "COMPLETED":
         return ok(idem.response_json["data"])
@@ -897,6 +1060,7 @@ async def reject_certification(
     if len(reason) < 10:
         raise ApiError(ERR_PARAM, "驳回原因必填，且不少于 10 个字", 400)
     cert = await _get_cert_or_404(db, certification_id)
+    await _assert_cert_scope(db, admin, cert)
     idem = await guard_idempotency(db, request, {"id": certification_id, "action": "reject",
                                                  "reason": reason})
     if idem and idem.status == "COMPLETED":
@@ -934,6 +1098,7 @@ async def request_materials(
 ):
     """要求补充材料（W02-02）：状态转 SUPPLEMENT，通知申请人补齐后重新进入队列。"""
     cert = await _get_cert_or_404(db, certification_id)
+    await _assert_cert_scope(db, admin, cert)
     before = {"status": cert.status}
     cert.status = certification_sm.fire(cert.status, E.CertificationStatus.SUPPLEMENT)
     cert.reviewer_id = admin.id
@@ -956,20 +1121,26 @@ async def request_materials(
 async def correct_community(certification_id: int, payload: dict, admin: CurrentAdmin, db: DbSession):
     """认定小区与自选不一致时人工纠正（W02-02）。"""
     cert = await _get_cert_or_404(db, certification_id)
+    await _assert_cert_scope(db, admin, cert)
     community_id = payload.get("communityId")
     community = await db.get(Community, int(community_id)) if community_id else None
     if not community:
         raise ApiError(ERR_PARAM, "目标小区不存在", 400)
+    await resolve_community_scope(db, admin, community.id)
     cert.community_id = community.id
     await db.commit()
     return ok(await _cert_row(db, cert), "认定小区已纠正")
 
 
-@router.get("/verifications")
+@router.get("/verifications", dependencies=[AuditPerm])
 async def list_verifications(admin: CurrentAdmin, db: DbSession):
-    rows, _ = await paginate(
-        db, select(Certification).where(Certification.status == "PENDING")
-        .order_by(Certification.id), 1, 50)
+    scope = await resolve_community_scope(db, admin, None)
+    stmt = select(Certification).where(Certification.status == "PENDING")
+    if isinstance(scope, set):
+        if not scope:
+            return ok([])
+        stmt = stmt.where(Certification.community_id.in_(scope))
+    rows, _ = await paginate(db, stmt.order_by(Certification.id), 1, 50)
     return ok([await _cert_row(db, row) for row in rows])
 
 
@@ -1004,6 +1175,7 @@ async def freeze_resident(resident_id: int, request: Request,
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
     if resident.certification_status == "FROZEN":
         raise ApiError(ERR_BIZ_RULE, "该人员已处于冻结状态", 422)
 
@@ -1012,6 +1184,7 @@ async def freeze_resident(resident_id: int, request: Request,
     cert = await _latest_owner_cert(db, resident)
     if cert and cert.status == "VERIFIED":
         cert.status = E.CertificationStatus.FROZEN
+    await _disable_linked_admin(db, resident)
 
     removed = await _off_shelf_user_items(db, resident.user_id) if resident.user_id else 0
     if resident.user_id:
@@ -1036,6 +1209,7 @@ async def unfreeze_resident(resident_id: int, request: Request,
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
     resident.certification_status = certification_sm.fire(
         resident.certification_status, E.CertificationStatus.VERIFIED)
     cert = await _latest_owner_cert(db, resident)
@@ -1062,12 +1236,14 @@ async def revoke_certification(resident_id: int, request: Request,
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
     resident.certification_status = certification_sm.fire(
         resident.certification_status, E.CertificationStatus.REVOKED)
     resident.certification_no = ""
     cert = await _latest_owner_cert(db, resident)
     if cert and cert.status in ("VERIFIED", "FROZEN"):
         cert.status = E.CertificationStatus.REVOKED
+    await _disable_linked_admin(db, resident)
     removed = await _off_shelf_user_items(db, resident.user_id) if resident.user_id else 0
     if resident.user_id:
         await notify_user(
@@ -1084,7 +1260,302 @@ async def revoke_certification(resident_id: int, request: Request,
               "认证已撤销，需重新提交材料认证")
 
 
-@router.get("/residents/{resident_id}/penalties")
+# ---------------------------------------------------------------- 住户后台身份授权
+
+class ResidentAdminGrantIn(BaseModel):
+    roleIds: list[int] = []
+    username: str = ""
+    reason: str = ""
+
+
+async def _admin_account_brief(db: DbSession, admin: AdminUser) -> dict:
+    roles = (await db.execute(
+        select(Role.id, Role.code, Role.name)
+        .join(admin_user_roles, admin_user_roles.c.role_id == Role.id)
+        .where(admin_user_roles.c.admin_user_id == admin.id)
+    )).all()
+    communities = (await db.execute(
+        select(Community.id, Community.name)
+        .join(admin_user_communities,
+              admin_user_communities.c.community_id == Community.id)
+        .where(admin_user_communities.c.admin_user_id == admin.id)
+    )).all()
+    return {
+        "id": str(admin.id),
+        "username": admin.username,
+        "realName": admin.real_name,
+        "status": admin.status,
+        "source": admin.source or "MANUAL",
+        "mustChangePassword": bool(admin.must_change_password),
+        "roles": [{"id": str(rid), "code": code, "name": name}
+                  for rid, code, name in roles],
+        "communities": [{"id": str(cid), "name": name} for cid, name in communities],
+        "lastLoginAt": int(admin.last_login_at.timestamp() * 1000) if admin.last_login_at else 0,
+    }
+
+
+async def _resident_grant_state(db: DbSession, resident: Resident) -> tuple[bool, str, AdminUser | None]:
+    if resident.status != "ACTIVE":
+        return False, "住户已停用或已离开，不能授予后台权限", None
+    if resident.certification_status != "VERIFIED":
+        return False, "住户认证未通过，不能授予后台权限", None
+    user = await db.get(PlatformUser, resident.user_id) if resident.user_id else None
+    if user and user.status != "ACTIVE":
+        return False, "关联的移动端账号不可用", None
+    if not user and not (resident.phone_enc or resident.phone_hash):
+        return False, "住户缺少手机号，无法创建移动端账号", None
+    admin = await _linked_admin(db, resident)
+    return True, "", admin
+
+
+@router.get("/resident-admin-roles",
+            dependencies=[Depends(require_permission("community:resident:admin-grant"))])
+async def resident_admin_roles(admin: CurrentAdmin, db: DbSession):
+    """可授予住户的角色白名单：启用 + OWN_COMMUNITY + 显式可授予。"""
+    rows = list((await db.execute(
+        select(Role).where(
+            Role.status == "ACTIVE",
+            Role.assignable_to_resident.is_(True),
+            Role.data_scope == "OWN_COMMUNITY",
+            Role.code != "super_admin",
+        ).order_by(Role.id)
+    )).scalars().all())
+    return ok([
+        {"id": str(row.id), "code": row.code, "name": row.name,
+         "description": row.description, "dataScope": row.data_scope}
+        for row in rows
+    ])
+
+
+@router.get(
+    "/residents/{resident_id}/admin-account",
+    dependencies=[Depends(require_any_permission(
+        "community:resident:view", "community:resident:admin-grant"))],
+)
+async def resident_admin_account(resident_id: int, admin: CurrentAdmin, db: DbSession):
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
+    eligible, reason, admin_row = await _resident_grant_state(db, resident)
+    return ok({
+        "residentId": str(resident.id),
+        "userId": str(resident.user_id) if resident.user_id else "",
+        "eligible": eligible,
+        "eligibleReason": reason,
+        "account": await _admin_account_brief(db, admin_row) if admin_row else None,
+    })
+
+
+@router.post(
+    "/residents/{resident_id}/admin-account",
+    dependencies=[Depends(require_permission("community:resident:admin-grant"))],
+)
+async def grant_resident_admin(resident_id: int, payload: ResidentAdminGrantIn,
+                               request: Request, admin: CurrentAdmin, db: DbSession):
+    """住户授权/调整后台角色；初始密码仅在首次授权时返回一次。"""
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
+    eligible, reason, existing = await _resident_grant_state(db, resident)
+    if not eligible:
+        raise ApiError(ERR_BIZ_RULE, reason, 422)
+    role_ids = sorted({int(item) for item in payload.roleIds})
+    if not role_ids:
+        raise ApiError(ERR_PARAM, "请选择要授予的角色", 400)
+    roles = list((await db.execute(
+        select(Role).where(Role.id.in_(role_ids)))).scalars().all())
+    if len(roles) != len(role_ids):
+        raise ApiError(ERR_PARAM, "角色不存在", 400)
+    for role in roles:
+        if (role.status != "ACTIVE" or not role.assignable_to_resident
+                or role.data_scope != "OWN_COMMUNITY" or role.code == "super_admin"):
+            raise ApiError(ERR_BIZ_RULE, f"角色「{role.name}」不允许授予社区住户", 422)
+
+    idem = await guard_idempotency(db, request, {
+        "residentId": resident_id, "roleIds": role_ids,
+        "username": payload.username.strip(),
+    })
+    if idem and idem.status == "COMPLETED":
+        cached = dict((idem.response_json or {}).get("data") or {})
+        cached["initialPassword"] = None
+        cached["replay"] = True
+        return ok(cached, "后台权限已开通")
+
+    user, user_created = await ensure_platform_user_for_resident(db, resident)
+    if not user or user.status != "ACTIVE":
+        raise ApiError(ERR_BIZ_RULE, "关联的移动端账号不可用", 422)
+    # 住户原先没有 user_id、但按手机号匹配到平台账号时，需重新检查后台身份。
+    existing = await db.scalar(
+        select(AdminUser).where(AdminUser.platform_user_id == user.id))
+
+    initial_password: str | None = None
+    if existing:
+        if existing.source != "RESIDENT":
+            raise ApiError(
+                ERR_CONFLICT,
+                "该住户的移动端账号已绑定手工后台账号，请到「用户管理」调整",
+                409,
+            )
+        admin_row = existing
+        adjusted = True
+    else:
+        username = payload.username.strip() or await next_admin_username(db, user.id)
+        if len(username) < 3:
+            raise ApiError(ERR_PARAM, "登录账号至少 3 位", 400)
+        if await db.scalar(select(AdminUser.id).where(AdminUser.username == username)):
+            raise ApiError(ERR_CONFLICT, "登录账号已存在", 409)
+        initial_password = generate_initial_password()
+        admin_row = AdminUser(
+            username=username,
+            password_hash=hash_password(initial_password),
+            real_name=resident.name,
+            phone_enc="",
+            email="",
+            avatar_text=resident.name[:1],
+            source="RESIDENT",
+            resident_id=resident.id,
+            platform_user_id=user.id,
+            status="ACTIVE",
+            must_change_password=True,
+        )
+        db.add(admin_row)
+        await db.flush()
+        adjusted = False
+
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(admin_user_roles).where(
+        admin_user_roles.c.admin_user_id == admin_row.id))
+    from sqlalchemy import insert as sa_insert
+    await db.execute(sa_insert(admin_user_roles), [
+        {"admin_user_id": admin_row.id, "role_id": role_id} for role_id in role_ids
+    ])
+    await db.execute(sa_delete(admin_user_communities).where(
+        admin_user_communities.c.admin_user_id == admin_row.id))
+    await db.execute(sa_insert(admin_user_communities), [
+        {"admin_user_id": admin_row.id, "community_id": resident.community_id}
+    ])
+    admin_row.resident_id = resident.id
+    admin_row.platform_user_id = user.id
+    admin_row.status = "ACTIVE"
+    admin_row.session_version = int(admin_row.session_version or 0) + (0 if initial_password else 1)
+
+    account = await _admin_account_brief(db, admin_row)
+    data = {
+        "admin": account,
+        "initialPassword": initial_password,
+        "replay": False,
+        "adjusted": adjusted,
+        "linkedUserCreated": user_created,
+    }
+    await write_audit(db, request, actor=admin, action="resident.admin.grant",
+                      resource_type="resident", resource_id=resident.id,
+                      before=None,
+                      after={"residentId": resident.id, "userId": user.id,
+                             "adminId": admin_row.id, "roleIds": role_ids,
+                             "communityIds": [resident.community_id],
+                             "source": "RESIDENT"})
+    await write_outbox(db, event_type="ResidentAdminGranted",
+                       aggregate_type="resident", aggregate_id=resident.id,
+                       payload={"residentId": resident.id, "userId": user.id,
+                                "adminId": admin_row.id, "roleIds": role_ids})
+    safe_data = {**data, "initialPassword": None}
+    await complete_idempotency(db, idem, safe_data)
+    await db.commit()
+    return ok(data, "后台权限已开通" if not adjusted else "后台角色已调整")
+
+
+@router.post(
+    "/residents/{resident_id}/admin-account/revoke",
+    dependencies=[Depends(require_permission("community:resident:admin-revoke"))],
+)
+async def revoke_resident_admin(resident_id: int, request: Request,
+                                admin: CurrentAdmin, db: DbSession):
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
+    admin_row = await _linked_admin(db, resident)
+    if not admin_row:
+        raise ApiError(ERR_NOT_FOUND, "该住户尚未开通后台身份", 404)
+    if admin_row.source != "RESIDENT":
+        raise ApiError(
+            ERR_BIZ_RULE,
+            "该住户关联的是手工后台账号，请到「用户管理」处理",
+            422,
+        )
+    idem = await guard_idempotency(db, request, {"residentId": resident_id})
+    if idem and idem.status == "COMPLETED":
+        cached = dict((idem.response_json or {}).get("data") or {})
+        cached["replay"] = True
+        return ok(cached, "后台权限已解除")
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(admin_user_roles).where(
+        admin_user_roles.c.admin_user_id == admin_row.id))
+    await db.execute(sa_delete(admin_user_communities).where(
+        admin_user_communities.c.admin_user_id == admin_row.id))
+    admin_row.status = "DISABLED"
+    admin_row.must_change_password = True
+    admin_row.session_version = int(admin_row.session_version or 0) + 1
+    data = {"adminId": str(admin_row.id), "status": "DISABLED", "replay": False}
+    await write_audit(db, request, actor=admin, action="resident.admin.revoke",
+                      resource_type="resident", resource_id=resident.id,
+                      before={"adminId": admin_row.id, "status": "ACTIVE"},
+                      after={"adminId": admin_row.id, "status": "DISABLED"})
+    await write_outbox(db, event_type="ResidentAdminRevoked",
+                       aggregate_type="resident", aggregate_id=resident.id,
+                       payload={"residentId": resident.id, "adminId": admin_row.id})
+    await complete_idempotency(db, idem, data)
+    await db.commit()
+    return ok(data, "后台权限已解除")
+
+
+@router.post(
+    "/residents/{resident_id}/admin-account/reset-password",
+    dependencies=[Depends(require_permission("community:resident:admin-grant"))],
+)
+async def reset_resident_admin_password(resident_id: int, request: Request,
+                                        admin: CurrentAdmin, db: DbSession):
+    resident = await db.get(Resident, resident_id)
+    if not resident:
+        raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
+    await resolve_community_scope(db, admin, resident.community_id)
+    admin_row = await _linked_admin(db, resident)
+    if not admin_row:
+        raise ApiError(ERR_NOT_FOUND, "该住户尚未开通后台身份", 404)
+    if admin_row.source != "RESIDENT":
+        raise ApiError(ERR_BIZ_RULE, "请到「用户管理」重置该账号密码", 422)
+    idem = await guard_idempotency(db, request, {"residentId": resident_id})
+    if idem and idem.status == "COMPLETED":
+        cached = dict((idem.response_json or {}).get("data") or {})
+        cached["initialPassword"] = None
+        cached["replay"] = True
+        return ok(cached, "初始密码已重置")
+    new_password = generate_initial_password()
+    admin_row.password_hash = hash_password(new_password)
+    admin_row.must_change_password = True
+    admin_row.failed_attempts = 0
+    admin_row.locked_until = None
+    admin_row.session_version = int(admin_row.session_version or 0) + 1
+    data = {
+        "adminId": str(admin_row.id),
+        "username": admin_row.username,
+        "initialPassword": new_password,
+        "replay": False,
+    }
+    await write_audit(db, request, actor=admin, action="resident.admin.reset-password",
+                      resource_type="resident", resource_id=resident.id,
+                      before=None, after={"adminId": admin_row.id, "reset": True})
+    await complete_idempotency(db, idem, {**data, "initialPassword": None})
+    await db.commit()
+    return ok(data, "初始密码已重置，请一次性告知住户")
+
+
+@router.get("/residents/{resident_id}/penalties",
+            dependencies=[Depends(require_permission("community:resident:view"))])
 async def resident_penalties(resident_id: int, admin: CurrentAdmin, db: DbSession):
     from src.core.responses import not_implemented
 

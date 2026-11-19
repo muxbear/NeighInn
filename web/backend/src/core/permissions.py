@@ -26,7 +26,12 @@ async def get_permission_codes(db: AsyncSession, admin: AdminUser) -> list[str]:
         select(Permission.code)
         .join(role_permissions, role_permissions.c.permission_id == Permission.id)
         .join(admin_user_roles, admin_user_roles.c.role_id == role_permissions.c.role_id)
-        .where(admin_user_roles.c.admin_user_id == admin.id, Permission.status == "ACTIVE")
+        .join(Role, Role.id == admin_user_roles.c.role_id)
+        .where(
+            admin_user_roles.c.admin_user_id == admin.id,
+            Permission.status == "ACTIVE",
+            Role.status == "ACTIVE",
+        )
     )
     return list(dict.fromkeys(rows.scalars().all()))
 
@@ -69,6 +74,39 @@ async def assert_community_allowed(db: AsyncSession, admin: AdminUser, community
     allowed = await allowed_community_ids(db, admin)
     if allowed is not None and community_id not in allowed:
         raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+
+
+async def resolve_community_scope(
+    db: AsyncSession, admin: AdminUser, requested: int | None
+) -> int | None | set[int]:
+    """解析列表接口的社区范围。
+
+    - ALL：返回请求值（None 表示不过滤）；
+    - 受限范围：请求值必须在允许集合内，未传则返回允许集合；
+    - 空集合由调用方渲染为空列表，不能退化成“不过滤”。
+    """
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is None:
+        return requested
+    if requested is not None:
+        if requested not in allowed:
+            raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+        return requested
+    return allowed
+
+
+def community_scope_conditions(scope: int | None | set[int], column) -> list:
+    """把 resolve_community_scope 的结果转成 SQLAlchemy 条件列表。
+
+    - None：不过滤（ALL）；
+    - int：精确匹配；
+    - set：IN 过滤；空集合生成恒假条件，返回空列表而不是泄露全量数据。
+    """
+    if isinstance(scope, int):
+        return [column == scope]
+    if isinstance(scope, set):
+        return [column.in_(scope)]
+    return []
 
 
 def require_permission(code: str):

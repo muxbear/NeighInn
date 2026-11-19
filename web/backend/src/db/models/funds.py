@@ -16,7 +16,7 @@ class WalletAccount(Entity):
     __tablename__ = "wallet_accounts"
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), unique=True, index=True)
     balance_cents: Mapped[int] = mapped_column(BigInteger, default=0)
     escrow_cents: Mapped[int] = mapped_column(BigInteger, default=0)
     withdrawable_cents: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -54,7 +54,7 @@ class PaymentTransaction(Base):
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     txn_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     # ESCROW / RELEASE / REFUND / WITHDRAW / ADJUSTMENT
     type: Mapped[str] = mapped_column(String(24), index=True)
     amount_cents: Mapped[int] = mapped_column(BigInteger)
@@ -79,7 +79,7 @@ class Withdrawal(Entity):
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     withdrawal_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_users.id"), index=True)
     amount_cents: Mapped[int] = mapped_column(BigInteger)
     fee_cents: Mapped[int] = mapped_column(BigInteger, default=0)
     account_ref_enc: Mapped[str] = mapped_column(Text, default="")

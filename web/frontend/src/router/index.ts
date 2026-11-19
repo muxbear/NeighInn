@@ -3,6 +3,12 @@ import { useAuthStore } from '@/stores/auth'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'login', component: () => import('@/pages/LoginPage.vue'), meta: { public: true, title: '登录' } },
+  {
+    path: '/change-password',
+    name: 'change-password',
+    component: () => import('@/pages/ChangePasswordPage.vue'),
+    meta: { title: '修改密码', allowMustChange: true },
+  },
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', name: 'dashboard', component: () => import('@/pages/DashboardPage.vue'), meta: { title: '工作台', permission: 'dashboard:view' } },
   {
@@ -54,6 +60,10 @@ router.beforeEach(async (to) => {
     }
   }
   if (!auth.isAuthenticated) return { name: 'login', query: { redirect: to.fullPath } }
+  // 首登强制改密：除改密页外一律拦截，前端不作为安全边界，后端同样返回 40306。
+  if (auth.mustChangePassword && !to.meta.allowMustChange) {
+    return { name: 'change-password' }
+  }
   const permission = to.meta.permission as string | undefined
   if (permission && !auth.hasPermission(permission)) return { name: 'forbidden' }
   return true
