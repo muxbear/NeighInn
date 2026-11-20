@@ -2,10 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   Ban,
+  ChevronRight,
   CircleCheck,
   Copy,
   Eye,
   EyeOff,
+  Home,
   KeyRound,
   Lock,
   LockOpen,
@@ -14,12 +16,15 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  UserPlus,
+  X,
 } from 'lucide-vue-next'
 import { adminUsersApi, communityApi, rolesApi } from '@/api'
 import { fmtDateTime } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
+import { groupProvinces, indexRegions, type RegionEntry, type RegionNode } from '@/utils/region'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
@@ -42,7 +47,6 @@ type AccountForm = {
   status: string
   roleIds: number[]
   communityIds: number[]
-  residentId: number | null
 }
 
 const app = useAppStore()
@@ -51,14 +55,12 @@ const { confirm } = useConfirm()
 
 const rows = ref<any[]>([])
 const roles = ref<any[]>([])
-const communities = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const query = ref('')
 const statusFilter = ref('')
 const sourceFilter = ref('')
-const residentOptions = ref<any[]>([])
 const loading = ref(false)
 const selected = ref<Set<string>>(new Set())
 const stats = ref({ total: 0, active: 0, disabled: 0, locked: 0 })
@@ -67,10 +69,40 @@ const drawerOpen = ref(false)
 const editing = ref<any>(null)
 const form = ref<AccountForm>(emptyForm())
 
+const rolePickerOpen = ref(false)
+const rolePickerSelected = ref<Set<number>>(new Set())
+
 const resetOpen = ref(false)
 const resetTarget = ref<any>(null)
 const newPassword = ref('')
 const showPassword = ref(false)
+
+// 关联住户弹窗：行政区划四级联动 → 小区检索 → 小区内住户选择。
+const linkOpen = ref(false)
+const linkTarget = ref<any>(null)
+const linkSaving = ref(false)
+const linkRegionLoading = ref(false)
+const linkRegionError = ref('')
+const linkRegionRoots = ref<RegionNode[]>([])
+const linkRegionIndex = ref<Record<string, RegionEntry>>({})
+const linkProvinceId = ref('')
+const linkCityId = ref('')
+const linkDistrictId = ref('')
+const linkStreetId = ref('')
+const linkCommunityKeyword = ref('')
+const linkCommunityResults = ref<any[]>([])
+const linkCommunitySearching = ref(false)
+const linkCommunity = ref<any | null>(null)
+const linkResidentKeyword = ref('')
+const linkResidents = ref<any[]>([])
+const linkResidentLoading = ref(false)
+const linkResidentId = ref('')
+const linkOriginalResidentId = ref('')
+let linkRegionPromise: Promise<void> | null = null
+let linkCommunityTimer: number | undefined
+let linkResidentTimer: number | undefined
+let linkCommunityRequestId = 0
+let linkResidentRequestId = 0
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const selectedCount = computed(() => selected.value.size)
@@ -78,11 +110,38 @@ const selectableRows = computed(() => rows.value.filter((row) => canSelect(row))
 const allSelected = computed(() =>
   selectableRows.value.length > 0 && selectableRows.value.every((row) => selected.value.has(row.id)))
 const passwordValid = computed(() => newPassword.value.length > 0 && !passwordError(newPassword.value))
+const selectedRoles = computed(() =>
+  roles.value.filter((role) => form.value.roleIds.some((id) => Number(id) === Number(role.id))))
+const allRolesSelected = computed(() =>
+  roles.value.length > 0 && roles.value.every((role) => rolePickerSelected.value.has(Number(role.id))))
+
+const linkProvinceGroups = computed(() => groupProvinces(linkRegionRoots.value))
+const linkProvinceNode = computed(() =>
+  (linkProvinceId.value ? linkRegionIndex.value[linkProvinceId.value]?.node : undefined) ?? null)
+const linkCityNodes = computed<RegionNode[]>(() => linkProvinceNode.value?.children || [])
+const linkDistrictNodes = computed<RegionNode[]>(() =>
+  (linkCityId.value ? linkRegionIndex.value[linkCityId.value]?.node.children : undefined) || [])
+const linkStreetNodes = computed<RegionNode[]>(() =>
+  (linkDistrictId.value ? linkRegionIndex.value[linkDistrictId.value]?.node.children : undefined) || [])
+const linkCommunityHint = computed(() => {
+  if (linkCommunitySearching.value) return '正在检索小区…'
+  if (linkCommunityKeyword.value.trim()) return '未找到匹配小区，请调整关键词或区划'
+  if (linkCityId.value || linkDistrictId.value || linkStreetId.value) return '所选区划下暂无小区'
+  return '请先选择省份与地市，或输入小区名称检索'
+})
+const linkCanSubmit = computed(() => Boolean(linkResidentId.value))
+
+const dataScopeLabels: Record<string, string> = {
+  ALL: '全部数据',
+  COMMUNITY_SET: '指定社区集合',
+  OWN_COMMUNITY: '本社区',
+  SELF: '仅本人',
+}
 
 function emptyForm(): AccountForm {
   return {
     username: '', password: '', realName: '', phone: '', email: '',
-    status: 'ACTIVE', roleIds: [], communityIds: [], residentId: null,
+    status: 'ACTIVE', roleIds: [], communityIds: [],
   }
 }
 
@@ -124,14 +183,9 @@ async function load() {
 
 async function loadOptions() {
   try {
-    const [roleRows, communityData] = await Promise.all([
-      rolesApi.list(),
-      communityApi.list({ page: 1, pageSize: 50 }),
-    ])
-    roles.value = roleRows || []
-    communities.value = communityData.items || []
+    roles.value = (await rolesApi.list()) || []
   } catch (exc: any) {
-    app.showToast(exc?.message || '角色或社区加载失败')
+    app.showToast(exc?.message || '角色加载失败')
   }
 }
 
@@ -162,22 +216,10 @@ function clearSelection() {
   selected.value = new Set()
 }
 
-async function loadResidentOptions() {
-  try {
-    const rows = await adminUsersApi.residentOptions({
-      communityId: app.currentCommunityId, limit: 50,
-    })
-    residentOptions.value = rows || []
-  } catch {
-    residentOptions.value = []
-  }
-}
-
 function openCreate() {
   editing.value = null
   form.value = emptyForm()
   drawerOpen.value = true
-  loadResidentOptions()
 }
 
 function openEdit(row: any) {
@@ -191,10 +233,316 @@ function openEdit(row: any) {
     status: row.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
     roleIds: (row.roleIds || []).map((id: string) => Number(id)),
     communityIds: (row.communityIds || []).map((id: string) => Number(id)),
-    residentId: row.residentId ? Number(row.residentId) : null,
   }
   drawerOpen.value = true
-  loadResidentOptions()
+}
+
+function ensureLinkRegions(): Promise<void> {
+  if (linkRegionRoots.value.length) return Promise.resolve()
+  if (linkRegionPromise) return linkRegionPromise
+  linkRegionLoading.value = true
+  linkRegionError.value = ''
+  linkRegionPromise = communityApi.regionTree()
+    .then((roots) => {
+      linkRegionRoots.value = roots as RegionNode[]
+      linkRegionIndex.value = indexRegions(roots as RegionNode[])
+    })
+    .catch((exc: any) => {
+      linkRegionError.value = exc?.message || '行政区划加载失败'
+    })
+    .finally(() => {
+      linkRegionLoading.value = false
+      linkRegionPromise = null
+    })
+  return linkRegionPromise
+}
+
+function resetLinkSelections() {
+  linkProvinceId.value = ''
+  linkCityId.value = ''
+  linkDistrictId.value = ''
+  linkStreetId.value = ''
+  linkCommunityKeyword.value = ''
+  linkCommunityResults.value = []
+  linkCommunitySearching.value = false
+  linkCommunity.value = null
+  linkResidentKeyword.value = ''
+  linkResidents.value = []
+  linkResidentLoading.value = false
+  linkResidentId.value = ''
+  linkCommunityRequestId += 1
+  linkResidentRequestId += 1
+}
+
+/** 根据社区档案的区县 / 街道反查并同步四级联动选中项。 */
+function syncLinkCascadeFromCommunity(community: any) {
+  const district = community?.regionId ? linkRegionIndex.value[String(community.regionId)] : undefined
+  if (!district) return
+  linkProvinceId.value = district.ancestors[0] ? String(district.ancestors[0].id) : ''
+  linkCityId.value = district.ancestors[1] ? String(district.ancestors[1].id) : ''
+  linkDistrictId.value = String(district.node.id)
+  const street = community?.streetId ? linkRegionIndex.value[String(community.streetId)] : undefined
+  linkStreetId.value = street && street.parentId === linkDistrictId.value ? String(street.node.id) : ''
+}
+
+async function openLinkResident(row: any) {
+  resetLinkSelections()
+  linkTarget.value = row
+  linkOriginalResidentId.value = row.residentId ? String(row.residentId) : ''
+  linkResidentId.value = linkOriginalResidentId.value
+  linkOpen.value = true
+  await ensureLinkRegions()
+  if (!linkOpen.value || linkTarget.value?.id !== row.id) return
+  if (!row.residentId || !row.communityId) return
+  const communityId = Number(row.communityId)
+  let community: any = {
+    id: String(communityId),
+    name: row.communityName || '当前关联小区',
+    code: '',
+    address: '',
+  }
+  try {
+    community = await communityApi.detail(communityId)
+  } catch {
+    // 详情不可用时仍可按小区 ID 加载住户列表
+  }
+  if (!linkOpen.value || linkTarget.value?.id !== row.id) return
+  linkCommunity.value = community
+  linkCommunityKeyword.value = community.name || ''
+  syncLinkCascadeFromCommunity(community)
+  await loadLinkResidents()
+}
+
+function closeLinkDialog() {
+  linkOpen.value = false
+  linkTarget.value = null
+  if (linkCommunityTimer) window.clearTimeout(linkCommunityTimer)
+  if (linkResidentTimer) window.clearTimeout(linkResidentTimer)
+}
+
+function onLinkProvinceChange() {
+  linkCityId.value = ''
+  linkDistrictId.value = ''
+  linkStreetId.value = ''
+  clearLinkCommunity()
+  runLinkCommunitySearch()
+}
+
+function onLinkCityChange() {
+  linkDistrictId.value = ''
+  linkStreetId.value = ''
+  clearLinkCommunity()
+  runLinkCommunitySearch()
+}
+
+function onLinkDistrictChange() {
+  linkStreetId.value = ''
+  clearLinkCommunity()
+  runLinkCommunitySearch()
+}
+
+function onLinkStreetChange() {
+  clearLinkCommunity()
+  runLinkCommunitySearch()
+}
+
+function onLinkCommunityInput() {
+  if (linkCommunityTimer) window.clearTimeout(linkCommunityTimer)
+  linkCommunityTimer = window.setTimeout(() => runLinkCommunitySearch(), 240)
+}
+
+async function runLinkCommunitySearch() {
+  const requestId = ++linkCommunityRequestId
+  const keyword = linkCommunityKeyword.value.trim()
+  const hasScope = Boolean(linkStreetId.value || linkDistrictId.value || linkCityId.value)
+  if (!keyword && !hasScope) {
+    linkCommunitySearching.value = false
+    linkCommunityResults.value = []
+    return
+  }
+  linkCommunitySearching.value = true
+  try {
+    const params: Record<string, any> = { page: 1, pageSize: 20 }
+    if (keyword) params.keyword = keyword
+    // 按最末级已选区划收窄检索范围；社区档案的 region_id 指向区县。
+    if (linkStreetId.value) params.streetId = linkStreetId.value
+    else if (linkDistrictId.value) params.regionId = linkDistrictId.value
+    else if (linkCityId.value) params.cityId = linkCityId.value
+    const data = await communityApi.list(params)
+    if (requestId !== linkCommunityRequestId) return
+    linkCommunityResults.value = data.items || []
+  } catch (exc: any) {
+    if (requestId !== linkCommunityRequestId) return
+    linkCommunityResults.value = []
+    app.showToast(exc?.message || '小区检索失败')
+  } finally {
+    if (requestId === linkCommunityRequestId) linkCommunitySearching.value = false
+  }
+}
+
+function clearLinkCommunity() {
+  linkCommunity.value = null
+  linkResidentKeyword.value = ''
+  linkResidents.value = []
+  linkResidentLoading.value = false
+  linkResidentId.value = ''
+  linkResidentRequestId += 1
+}
+
+async function selectLinkCommunity(row: any) {
+  linkCommunity.value = row
+  linkCommunityKeyword.value = row.name || ''
+  linkCommunityResults.value = []
+  linkResidentKeyword.value = ''
+  linkResidents.value = []
+  linkResidentId.value = ''
+  await loadLinkResidents()
+}
+
+function reselectLinkCommunity() {
+  clearLinkCommunity()
+  if (linkCommunityKeyword.value.trim() || linkCityId.value || linkDistrictId.value || linkStreetId.value) {
+    runLinkCommunitySearch()
+  }
+}
+
+async function loadLinkResidents() {
+  const community = linkCommunity.value
+  if (!community) {
+    linkResidents.value = []
+    return
+  }
+  const requestId = ++linkResidentRequestId
+  linkResidentLoading.value = true
+  try {
+    const rows = await adminUsersApi.residentOptions({
+      communityId: Number(community.id),
+      keyword: linkResidentKeyword.value.trim() || undefined,
+      limit: 50,
+    })
+    if (requestId !== linkResidentRequestId) return
+    const list = rows || []
+    const target = linkTarget.value
+    const isOriginalCommunity = String(community.id) === String(target?.communityId || '')
+    if (isOriginalCommunity && linkOriginalResidentId.value
+      && !list.some((item: any) => String(item.id) === linkOriginalResidentId.value)) {
+      // 当前关联住户可能不在前 50 条中，补一条占位记录保证可见且可保留选择。
+      list.unshift({
+        id: linkOriginalResidentId.value,
+        name: target?.residentName || '当前关联住户',
+        phone: '',
+        building: '',
+        communityId: String(community.id),
+        communityName: community.name || target?.communityName || '',
+        identityType: '',
+        adminUserId: String(target?.id || ''),
+      })
+    }
+    linkResidents.value = list
+  } catch (exc: any) {
+    if (requestId === linkResidentRequestId) {
+      linkResidents.value = []
+      app.showToast(exc?.message || '住户加载失败')
+    }
+  } finally {
+    if (requestId === linkResidentRequestId) linkResidentLoading.value = false
+  }
+}
+
+function onLinkResidentInput() {
+  if (linkResidentTimer) window.clearTimeout(linkResidentTimer)
+  linkResidentTimer = window.setTimeout(() => loadLinkResidents(), 240)
+}
+
+function linkResidentSelectable(item: any): boolean {
+  return !item.adminUserId || String(item.adminUserId) === String(linkTarget.value?.id)
+}
+
+function selectLinkResident(item: any) {
+  if (!linkResidentSelectable(item)) return
+  linkResidentId.value = String(item.id)
+}
+
+async function submitLinkResident() {
+  const target = linkTarget.value
+  if (!target) return
+  if (!linkResidentId.value) {
+    app.showToast('请选择要关联的住户')
+    return
+  }
+  linkSaving.value = true
+  try {
+    await adminUsersApi.linkResident(target.id, Number(linkResidentId.value))
+    app.showToast('住户关联已更新')
+    closeLinkDialog()
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '关联住户失败')
+  } finally {
+    linkSaving.value = false
+  }
+}
+
+async function unbindLinkedResident() {
+  const target = linkTarget.value
+  if (!target?.residentId) return
+  const ok = await confirm({
+    title: '解除住户关联',
+    message: `确定解除“${target.realName || target.username}”与住户“${target.residentName || '当前住户'}”的关联吗？`,
+    details: ['解除后该账号将不能再以住户身份使用后台，移动端账号本身保留。'],
+    confirmText: '解除关联',
+    danger: true,
+  })
+  if (!ok) return
+  linkSaving.value = true
+  try {
+    await adminUsersApi.linkResident(target.id, null)
+    app.showToast('已解除住户关联')
+    closeLinkDialog()
+    await load()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '解除关联失败')
+  } finally {
+    linkSaving.value = false
+  }
+}
+
+function openRolePicker() {
+  rolePickerSelected.value = new Set(form.value.roleIds.map(Number))
+  rolePickerOpen.value = true
+}
+
+function closeRolePicker() {
+  rolePickerOpen.value = false
+}
+
+function toggleRolePick(role: any) {
+  const id = Number(role.id)
+  const next = new Set(rolePickerSelected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  rolePickerSelected.value = next
+}
+
+function toggleAllRolePick() {
+  rolePickerSelected.value = allRolesSelected.value
+    ? new Set()
+    : new Set(roles.value.map((role) => Number(role.id)))
+}
+
+function confirmRolePicker() {
+  form.value.roleIds = roles.value
+    .filter((role) => rolePickerSelected.value.has(Number(role.id)))
+    .map((role) => Number(role.id))
+  rolePickerOpen.value = false
+}
+
+function removeRole(id: number) {
+  form.value.roleIds = form.value.roleIds.filter((roleId) => Number(roleId) !== Number(id))
+}
+
+function scopeLabel(scope: string): string {
+  return dataScopeLabels[scope] || scope || '—'
 }
 
 function isResidentAccount(row: any): boolean {
@@ -210,8 +558,8 @@ function mobileLabel(row: any): string {
   return row.mobileStatus === 'ACTIVE' ? '已绑定' : '账号异常'
 }
 
-function passwordError(value: string): string {
-  if (value.length < 12) return '密码最短 12 位'
+function passwordError(value: string, minLength = 12): string {
+  if (value.length < minLength) return `密码最短 ${minLength} 位`
   const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((rule) => rule.test(value)).length
   if (kinds < 3) return '需包含大小写字母、数字、符号中的至少三类'
   return ''
@@ -227,7 +575,8 @@ async function save() {
     return
   }
   if (!editing.value) {
-    const error = passwordError(form.value.password)
+    // 新建账号的初始密码最低 6 位；重置密码与修改密码仍保持 12 位策略。
+    const error = passwordError(form.value.password, 6)
     if (error) {
       app.showToast(error)
       return
@@ -243,8 +592,9 @@ async function save() {
   // 住户授权账号的绑定与角色由「社区业主」页统一管理，编辑时只提交基础资料。
   if (!isResidentAccount(editing.value)) {
     payload.roleIds = form.value.roleIds.map(Number)
+    // 表单不再提供“可访问社区”编辑，沿用账号已有社区集合，避免编辑时被清空。
     payload.communityIds = form.value.communityIds.map(Number)
-    payload.residentId = form.value.residentId ? Number(form.value.residentId) : null
+    // 住户关联由操作列的“关联住户”单独维护，编辑基础资料时不提交 residentId。
   }
   if (!editing.value) payload.password = form.value.password
   try {
@@ -389,6 +739,12 @@ function rowActions(row: any): ActionMenuItem[] {
   const active = row.status === 'ACTIVE'
   return [
     { key: 'edit', label: '编辑', icon: Pencil, disabled: row.isSuperAdmin },
+    {
+      key: 'link-resident',
+      label: '关联住户',
+      icon: UserPlus,
+      disabled: row.isSuperAdmin || isResidentAccount(row),
+    },
     { key: 'reset', label: '重置密码', icon: KeyRound },
     {
       key: 'toggle',
@@ -414,6 +770,7 @@ function canSelect(row: any): boolean {
 
 function onAction(key: string, row: any) {
   if (key === 'edit') openEdit(row)
+  else if (key === 'link-resident') openLinkResident(row)
   else if (key === 'reset') openReset(row)
   else if (key === 'toggle') toggleStatus(row)
   else if (key === 'unlock') unlock(row)
@@ -584,7 +941,7 @@ onMounted(async () => {
       </label>
       <label v-if="!editing">
         <span>初始密码 *</span>
-        <input v-model="form.password" type="password" placeholder="至少 12 位，三类字符" />
+        <input v-model="form.password" type="password" placeholder="至少 6 位，三类字符" />
       </label>
       <label>
         <span>手机号</span>
@@ -602,48 +959,24 @@ onMounted(async () => {
         </select>
       </label>
     </div>
-    <p v-if="!editing" class="form-hint">密码需至少 12 位，且包含大小写字母、数字、符号中的至少三类；创建后可通过“重置密码”修改。</p>
-
-    <h4 class="section-title" style="margin-top: 22px">关联社区住户<em class="optional-tag">选填</em></h4>
-    <div v-if="isResidentAccount(editing)" class="resident-binding-readonly">
-      <span>住户授权账号</span>
-      <strong>{{ editing?.residentName || '—' }} · {{ editing?.communityName || '—' }}</strong>
-      <em>绑定关系与角色请到「社区业主」页调整</em>
-    </div>
-    <template v-else>
-      <label class="resident-select-field">
-        <span>选择住户</span>
-        <select v-model="form.residentId">
-          <option :value="null">不关联住户（纯后台账号）</option>
-          <option v-for="item in residentOptions" :key="item.id" :value="Number(item.id)">
-            {{ item.name }} · {{ item.communityName }} · {{ item.phone || '无手机号' }}{{ item.adminUserId && String(item.adminUserId) !== String(editing?.id) ? '（已绑其他账号）' : '' }}
-          </option>
-        </select>
-      </label>
-      <p class="form-hint">关联住户后，系统会确保该住户拥有移动端账号，可用手机号登录 App；不关联时账号仅用于后台。</p>
-    </template>
+    <p v-if="!editing" class="form-hint">初始密码需至少 6 位，且包含大小写字母、数字、符号中的至少三类；创建后可通过“重置密码”修改。</p>
 
     <h4 class="section-title" style="margin-top: 22px">角色</h4>
     <div v-if="isResidentAccount(editing)" class="muted-text">住户授权账号的角色由「社区业主」页统一配置。</div>
     <template v-else>
-      <div class="choice-grid">
-        <label v-for="role in roles" :key="role.id" class="choice-item">
-          <input v-model="form.roleIds" type="checkbox" :value="Number(role.id)" />
-          <div><strong>{{ role.name }}</strong><em>{{ role.code }}</em></div>
-        </label>
-        <p v-if="!roles.length" class="muted-text">暂无可分配角色</p>
+      <div class="role-assign">
+        <div class="role-chip-list">
+          <span v-for="role in selectedRoles" :key="role.id" class="role-chip">
+            {{ role.name }}
+            <button type="button" :aria-label="`移除角色 ${role.name}`" @click="removeRole(Number(role.id))">
+              <X :size="12" />
+            </button>
+          </span>
+          <span v-if="!selectedRoles.length" class="muted-text">尚未分配角色</span>
+        </div>
+        <button type="button" class="add-role-button" @click="openRolePicker"><Plus :size="14" />添加角色</button>
       </div>
       <p class="form-hint">多角色权限取并集；未分配角色时账号仅能登录，无业务权限。</p>
-
-      <h4 class="section-title" style="margin-top: 22px">可访问社区<em class="optional-tag">选填</em></h4>
-      <div class="choice-grid community-choices">
-        <label v-for="community in communities" :key="community.id" class="choice-item">
-          <input v-model="form.communityIds" type="checkbox" :value="Number(community.id)" />
-          <div><strong>{{ community.name }}</strong><em>{{ community.code }}</em></div>
-        </label>
-        <p v-if="!communities.length" class="muted-text">暂无社区数据</p>
-      </div>
-      <p class="form-hint">创建用户时可不选择可访问社区；角色数据范围为“全部数据”时不受社区限制，其他角色可在创建后编辑补充。</p>
     </template>
 
     <template #footer>
@@ -651,6 +984,222 @@ onMounted(async () => {
       <button class="primary-button" @click="save">保存</button>
     </template>
   </NiDrawer>
+
+  <div v-if="rolePickerOpen" class="modal-backdrop role-picker-backdrop" @click.self="closeRolePicker">
+    <div class="modal-card role-picker-card" role="dialog" aria-modal="true" aria-label="选择角色">
+      <header>选择角色</header>
+      <div class="modal-body">
+        <div class="role-picker-table-wrap">
+          <table class="role-picker-table">
+            <thead>
+              <tr>
+                <th class="check-cell">
+                  <input
+                    type="checkbox"
+                    aria-label="全选角色"
+                    :checked="allRolesSelected"
+                    :disabled="!roles.length"
+                    @change="toggleAllRolePick"
+                  />
+                </th>
+                <th>角色名称</th>
+                <th>角色编码</th>
+                <th>角色描述</th>
+                <th>数据范围</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="role in roles"
+                :key="role.id"
+                :class="{ selected: rolePickerSelected.has(Number(role.id)) }"
+                @click="toggleRolePick(role)"
+              >
+                <td class="check-cell" @click.stop>
+                  <input
+                    type="checkbox"
+                    :aria-label="`选择角色 ${role.name}`"
+                    :checked="rolePickerSelected.has(Number(role.id))"
+                    @change="toggleRolePick(role)"
+                  />
+                </td>
+                <td>
+                  <div class="role-name-cell">
+                    <strong>{{ role.name }}</strong>
+                    <em v-if="role.builtin">内置</em>
+                  </div>
+                </td>
+                <td><code>{{ role.code }}</code></td>
+                <td><span class="cell-ellipsis lg" :title="role.description || ''">{{ role.description || '—' }}</span></td>
+                <td>{{ scopeLabel(role.dataScope) }}</td>
+              </tr>
+              <tr v-if="!roles.length">
+                <td colspan="5" class="role-picker-empty">暂无可分配角色</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="form-hint">可多选角色，点击“确定”后添加到当前账号；多角色权限取并集。</p>
+      </div>
+      <footer>
+        <button @click="closeRolePicker">取消</button>
+        <button class="primary-button" @click="confirmRolePicker">确定</button>
+      </footer>
+    </div>
+  </div>
+
+  <div v-if="linkOpen" class="modal-backdrop" @click.self="closeLinkDialog">
+    <div class="modal-card link-resident-card" role="dialog" aria-modal="true" aria-label="关联住户">
+      <header>关联住户 · {{ linkTarget?.realName || linkTarget?.username }}</header>
+      <div class="modal-body link-resident-body">
+        <div v-if="linkTarget?.residentId" class="link-current">
+          <span>当前关联</span>
+          <strong>{{ linkTarget.residentName || '住户' }} · {{ linkTarget.communityName || '—' }}</strong>
+          <em>可在下方重新选择住户，或点击“解除关联”。</em>
+        </div>
+
+        <section class="link-section">
+          <div class="link-section-head">
+            <span><i>1</i>选择行政区划</span>
+            <em>街道选填</em>
+          </div>
+          <div class="link-cascade">
+            <label>
+              <select v-model="linkProvinceId" aria-label="省份/直辖市" :disabled="linkRegionLoading || !linkProvinceGroups.length" @change="onLinkProvinceChange">
+                <option value="">{{ linkRegionLoading ? '加载区划…' : '省份/直辖市' }}</option>
+                <optgroup v-for="group in linkProvinceGroups" :key="group.label" :label="group.label">
+                  <option v-for="province in group.provinces" :key="province.id" :value="String(province.id)">{{ province.name }}</option>
+                </optgroup>
+              </select>
+            </label>
+            <ChevronRight :size="13" class="link-cascade-arrow" />
+            <label>
+              <select v-model="linkCityId" aria-label="地市" :disabled="!linkCityNodes.length" @change="onLinkCityChange">
+                <option value="">{{ linkCityNodes.length ? '地市' : '先选省份' }}</option>
+                <option v-for="city in linkCityNodes" :key="city.id" :value="String(city.id)">{{ city.name }}</option>
+              </select>
+            </label>
+            <ChevronRight :size="13" class="link-cascade-arrow" />
+            <label>
+              <select v-model="linkDistrictId" aria-label="区/县" :disabled="!linkDistrictNodes.length" @change="onLinkDistrictChange">
+                <option value="">{{ linkDistrictNodes.length ? '区/县' : '先选地市' }}</option>
+                <option v-for="district in linkDistrictNodes" :key="district.id" :value="String(district.id)">{{ district.name }}</option>
+              </select>
+            </label>
+            <ChevronRight :size="13" class="link-cascade-arrow" />
+            <label>
+              <select v-model="linkStreetId" aria-label="街道" :disabled="!linkStreetNodes.length" @change="onLinkStreetChange">
+                <option value="">{{ linkStreetNodes.length ? '街道（可选）' : '先选区县' }}</option>
+                <option v-for="street in linkStreetNodes" :key="street.id" :value="String(street.id)">{{ street.name }}</option>
+              </select>
+            </label>
+          </div>
+          <p v-if="linkRegionError" class="form-hint">{{ linkRegionError }}</p>
+        </section>
+
+        <section class="link-section">
+          <div class="link-section-head">
+            <span><i>2</i>选择小区</span>
+            <em v-if="linkCommunity">已选择</em>
+          </div>
+          <div v-if="linkCommunity" class="link-community-selected">
+            <span class="link-community-icon"><Home :size="15" /></span>
+            <div class="link-community-main">
+              <strong>{{ linkCommunity.name }}</strong>
+              <em>{{ [linkCommunity.code, linkCommunity.address].filter(Boolean).join(' · ') || '—' }}</em>
+            </div>
+            <button type="button" @click="reselectLinkCommunity">重新选择</button>
+          </div>
+          <template v-else>
+            <div class="link-community-search">
+              <Search :size="15" />
+              <input
+                v-model="linkCommunityKeyword"
+                aria-label="小区检索"
+                placeholder="输入小区名称、编码或地址检索…"
+                @input="onLinkCommunityInput"
+                @keyup.enter="runLinkCommunitySearch"
+              />
+            </div>
+            <div class="link-community-results">
+              <button
+                v-for="row in linkCommunityResults"
+                :key="row.id"
+                type="button"
+                class="link-community-option"
+                @click="selectLinkCommunity(row)"
+              >
+                <span class="link-community-icon"><Home :size="14" /></span>
+                <span class="link-community-main">
+                  <strong>{{ row.name }}</strong>
+                  <em>{{ row.code }}<template v-if="row.address"> · {{ row.address }}</template></em>
+                </span>
+              </button>
+              <div v-if="!linkCommunityResults.length" class="link-empty">{{ linkCommunityHint }}</div>
+            </div>
+          </template>
+        </section>
+
+        <section class="link-section">
+          <div class="link-section-head">
+            <span><i>3</i>选择住户</span>
+            <em v-if="linkCommunity">{{ linkCommunity.name }}</em>
+          </div>
+          <div v-if="!linkCommunity" class="link-empty link-empty-tall">请先选择小区</div>
+          <template v-else>
+            <div class="link-community-search">
+              <Search :size="15" />
+              <input
+                v-model="linkResidentKeyword"
+                aria-label="住户检索"
+                placeholder="搜索住户姓名、楼栋或认证编号…"
+                @input="onLinkResidentInput"
+              />
+            </div>
+            <div class="link-resident-list">
+              <button
+                v-for="item in linkResidents"
+                :key="item.id"
+                type="button"
+                :class="['link-resident-option', {
+                  selected: String(item.id) === linkResidentId,
+                  disabled: !linkResidentSelectable(item),
+                }]"
+                :disabled="!linkResidentSelectable(item)"
+                @click="selectLinkResident(item)"
+              >
+                <span :class="['link-resident-radio', { checked: String(item.id) === linkResidentId }]" />
+                <span class="link-resident-main">
+                  <strong>
+                    {{ item.name }}
+                    <em v-if="item.identityType">{{ item.identityType }}</em>
+                    <em v-if="String(item.id) === linkOriginalResidentId" class="current">当前关联</em>
+                  </strong>
+                  <span>{{ [item.building, item.phone || '无手机号'].filter(Boolean).join(' · ') }}</span>
+                </span>
+                <em v-if="!linkResidentSelectable(item)" class="link-resident-warn">已绑其他账号</em>
+              </button>
+              <div v-if="linkResidentLoading" class="link-empty">正在加载住户…</div>
+              <div v-else-if="!linkResidents.length" class="link-empty">该小区下暂无可用住户</div>
+            </div>
+          </template>
+        </section>
+      </div>
+      <footer>
+        <button
+          v-if="linkTarget?.residentId"
+          type="button"
+          class="link-unbind-button"
+          :disabled="linkSaving"
+          @click="unbindLinkedResident"
+        >解除关联</button>
+        <button type="button" :disabled="linkSaving" @click="closeLinkDialog">取消</button>
+        <button class="primary-button" type="button" :disabled="!linkCanSubmit || linkSaving" @click="submitLinkResident">
+          {{ linkSaving ? '保存中…' : '保存关联' }}
+        </button>
+      </footer>
+    </div>
+  </div>
 
   <div v-if="resetOpen" class="modal-backdrop" @click.self="closeReset">
     <div class="modal-card reset-card">
@@ -713,16 +1262,6 @@ onMounted(async () => {
   font-size: var(--font-size-caption);
 }
 .muted-text { color: #aaa6b1; font-size: var(--font-size-caption); }
-.optional-tag {
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 6px;
-  color: #8f8a97;
-  background: #f2f0f6;
-  font-size: var(--font-size-caption);
-  font-style: normal;
-  font-weight: 400;
-}
 .status-cell { display: flex; align-items: center; gap: 6px; }
 .lock-tag {
   display: inline-flex;
@@ -736,26 +1275,66 @@ onMounted(async () => {
   white-space: nowrap;
 }
 .table-loading { padding: 38px 0; color: #9a95a1; font-size: var(--font-size-body); text-align: center; }
-.choice-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.community-choices { max-height: 190px; overflow-y: auto; padding-right: 2px; }
-.choice-item {
-  min-height: 44px;
-  padding: 8px 10px;
-  display: flex;
+.role-assign { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+.role-chip-list { flex: 1 1 240px; min-height: 34px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.role-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
-  border: 1px solid #e7e3ee;
-  border-radius: 9px;
-  cursor: pointer;
+  gap: 3px;
+  padding: 4px 6px 4px 9px;
+  border-radius: 7px;
+  color: #5f4abd;
+  background: #f0edfb;
+  font-size: var(--font-size-caption);
 }
-.choice-item:hover { border-color: #cfc3f2; background: #faf8ff; }
-.choice-item input { flex: 0 0 auto; }
-.choice-item strong { display: block; color: #4d4856; font-size: var(--font-size-body); font-weight: 500; }
-.choice-item em { display: block; margin-top: 1px; color: #9c97a3; font-size: var(--font-size-caption); font-style: normal; }
+.role-chip button {
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: #8b79c7;
+}
+.role-chip button:hover { color: #fff; background: #8b79c7; }
+.add-role-button {
+  height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px dashed #b8a9e6;
+  border-radius: 8px;
+  color: #6750c4;
+  background: #fff;
+  font-size: var(--font-size-body);
+  white-space: nowrap;
+}
+.add-role-button:hover { border-color: #8f77d6; background: #faf8ff; }
+.role-picker-backdrop { z-index: 95; }
+.role-picker-card { width: min(760px, 100%); }
+.role-picker-table-wrap { max-height: 360px; overflow: auto; border: 1px solid #ece9f0; border-radius: 10px; }
+.role-picker-table { min-width: 0; }
+.role-picker-table th { position: sticky; top: 0; z-index: 1; }
+.role-picker-table th:last-child, .role-picker-table td:last-child { text-align: left; }
+.role-picker-table tbody tr { cursor: pointer; }
+.role-picker-table tbody tr:hover td { background: #faf8ff; }
+.role-picker-table tbody tr.selected td { background: #f5f1ff; }
+.role-picker-table td { height: 48px; }
+.role-picker-table .check-cell { width: 38px; padding-right: 0; }
+.role-picker-table code { padding: 2px 6px; border-radius: 5px; color: #6f59d4; background: #f4f1fb; font-size: var(--font-size-caption); }
+.role-name-cell { display: flex; align-items: center; gap: 6px; }
+.role-name-cell strong { color: #3f3b46; font-weight: 600; }
+.role-name-cell em {
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: #8f8a97;
+  background: #f2f0f6;
+  font-size: var(--font-size-caption);
+  font-style: normal;
+}
+.role-picker-table tbody tr.role-picker-empty { cursor: default; }
+.role-picker-table tbody tr.role-picker-empty:hover td { background: transparent; }
+.role-picker-table td.role-picker-empty { color: #aaa6b1; font-size: var(--font-size-body); text-align: center; }
 .reset-card { width: min(460px, 100%); }
 .reset-field { display: block; }
 .reset-field > span { display: block; margin-bottom: 6px; color: #65616d; font-size: var(--font-size-body); font-weight: 500; }
@@ -795,11 +1374,119 @@ onMounted(async () => {
 .mobile-tag { color: #9a95a1; font-size: var(--font-size-caption); white-space: nowrap; }
 .mobile-tag.bound { color: #4f8a68; }
 .mobile-tag.warn { color: #b06a6a; }
-.resident-binding-readonly { display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; border: 1px solid #e6e1ef; border-radius: 9px; background: #faf8ff; }
-.resident-binding-readonly > span { color: #8f8799; font-size: var(--font-size-caption); }
-.resident-binding-readonly > strong { color: #4a4552; font-size: var(--font-size-body); font-weight: 500; }
-.resident-binding-readonly > em { color: #9a95a1; font-size: var(--font-size-caption); font-style: normal; }
-.resident-select-field { display: block; }
-.resident-select-field > span { display: block; margin-bottom: 5px; color: #65616d; font-size: var(--font-size-body); font-weight: 500; }
-.resident-select-field select { width: 100%; height: 36px; padding: 0 9px; border: 1px solid #e1dee5; border-radius: 8px; color: #514d58; background: #fff; font-size: var(--font-size-body); }
+.link-resident-card { width: min(880px, 100%); }
+.link-resident-body { max-height: min(72vh, 680px); overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.link-current { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1px solid #e6e1ef; border-radius: 9px; background: #faf8ff; }
+.link-current > span { color: #8f8799; font-size: var(--font-size-caption); }
+.link-current > strong { color: #4a4552; font-size: var(--font-size-body); font-weight: 500; }
+.link-current > em { color: #9a95a1; font-size: var(--font-size-caption); font-style: normal; }
+.link-section { min-width: 0; }
+.link-section-head { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.link-section-head > span { display: inline-flex; align-items: center; gap: 7px; color: #4a4552; font-size: var(--font-size-body); font-weight: 600; }
+.link-section-head i {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: #fff;
+  background: #6f59d4;
+  font-size: 11px;
+  font-style: normal;
+}
+.link-section-head > em { color: #9a95a1; font-size: var(--font-size-caption); font-style: normal; }
+.link-cascade { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.link-cascade label { flex: 1 1 130px; min-width: 0; }
+.link-cascade select {
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #e1dee5;
+  border-radius: 8px;
+  color: #514d58;
+  background: #fff;
+  font-size: var(--font-size-body);
+}
+.link-cascade select:disabled { color: #b1adb8; background: #f8f7fa; }
+.link-cascade-arrow { flex: 0 0 auto; color: #b3aec0; }
+.link-community-search {
+  height: 36px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e1dee5;
+  border-radius: 8px;
+  background: #fff;
+}
+.link-community-search:focus-within { border-color: #b9a9ec; box-shadow: 0 0 0 3px #f1ecfd; }
+.link-community-search svg { flex: 0 0 auto; color: #9a95a1; }
+.link-community-search input { width: 100%; border: 0; outline: none; color: #514d58; background: transparent; font-size: var(--font-size-body); }
+.link-community-results, .link-resident-list {
+  margin-top: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid #ece9f0;
+  border-radius: 9px;
+  background: #fff;
+}
+.link-resident-list { max-height: 220px; }
+.link-community-option {
+  width: 100%;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid #f3f1f6;
+  text-align: left;
+  cursor: pointer;
+}
+.link-community-option:last-child { border-bottom: 0; }
+.link-community-option:hover { background: #faf8ff; }
+.link-community-icon { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 8px; color: #6f59d4; background: #f1edfc; }
+.link-community-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.link-community-main strong { overflow: hidden; color: #3f3b46; font-size: var(--font-size-body); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.link-community-main em { overflow: hidden; color: #9a95a1; font-size: var(--font-size-caption); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.link-community-selected { padding: 9px 11px; display: flex; align-items: center; gap: 10px; border: 1px solid #ddd5f5; border-radius: 9px; background: #faf8ff; }
+.link-community-selected button {
+  height: 28px;
+  padding: 0 9px;
+  flex: 0 0 auto;
+  border: 1px solid #d8cff2;
+  border-radius: 7px;
+  color: #6750c4;
+  background: #fff;
+  font-size: var(--font-size-caption);
+}
+.link-community-selected button:hover { border-color: #b9a9ec; background: #f6f2ff; }
+.link-empty { padding: 16px 12px; color: #aaa6b1; font-size: var(--font-size-caption); text-align: center; }
+.link-empty-tall { padding: 24px 12px; border: 1px dashed #e6e2ee; border-radius: 9px; background: #fbfafc; }
+.link-resident-option {
+  width: 100%;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid #f3f1f6;
+  text-align: left;
+  cursor: pointer;
+}
+.link-resident-option:last-child { border-bottom: 0; }
+.link-resident-option:hover { background: #faf8ff; }
+.link-resident-option.selected { background: #f5f1ff; }
+.link-resident-option.disabled { opacity: .55; cursor: not-allowed; }
+.link-resident-option.disabled:hover { background: transparent; }
+.link-resident-radio { width: 15px; height: 15px; flex: 0 0 auto; border: 1.5px solid #cfc8db; border-radius: 50%; background: #fff; }
+.link-resident-radio.checked { border-color: #6f59d4; background: radial-gradient(circle, #6f59d4 0 4px, #fff 4.5px 100%); }
+.link-resident-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.link-resident-main strong { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: #3f3b46; font-size: var(--font-size-body); font-weight: 600; }
+.link-resident-main strong em { padding: 1px 6px; border-radius: 5px; color: #7d7790; background: #f2f0f6; font-size: var(--font-size-caption); font-style: normal; font-weight: 400; }
+.link-resident-main strong em.current { color: #5f4abd; background: #ece7fb; }
+.link-resident-main > span { color: #9a95a1; font-size: var(--font-size-caption); }
+.link-resident-warn { flex: 0 0 auto; color: #b06a6a; font-size: var(--font-size-caption); font-style: normal; }
+.link-resident-card footer { display: flex; align-items: center; gap: 8px; }
+.link-unbind-button { margin-right: auto; color: #c9525e; }
+.link-unbind-button:hover { background: #fdf2f3; }
+.link-unbind-button:disabled { opacity: .5; cursor: not-allowed; }
 </style>

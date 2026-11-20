@@ -290,6 +290,58 @@ async def test_admin_user_bind_and_unbind_resident(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_admin_user_link_resident_dedicated_endpoint(client, db_session):
+    """用户管理操作列的「关联住户」走独立接口，不经过账号编辑表单。"""
+    csrf = await admin_login(client)
+    resp = await client.post(f"{ADMIN_BASE}/residents",
+                             json=_resident_payload(name="关联测试住户", phone="13700009999"),
+                             headers=csrf)
+    assert resp.status_code == 200, resp.text
+    resident_id = int(resp.json()["data"]["id"])
+
+    created = await client.post(f"{ADMIN_BASE}/admin-users", json={
+        "username": "link_only_staff",
+        "password": "Staff@2026abc",
+        "realName": "纯后台员工",
+        "phone": "",
+        "roleIds": [await _role_id(db_session)],
+        "communityIds": [1],
+    }, headers=csrf)
+    assert created.status_code == 200, created.text
+    account = created.json()["data"]
+    assert account["residentId"] == ""
+
+    linked = await client.put(f"{ADMIN_BASE}/admin-users/{account['id']}/resident",
+                              json={"residentId": resident_id}, headers=csrf)
+    assert linked.status_code == 200, linked.text
+    linked_account = linked.json()["data"]
+    assert linked_account["residentId"] == str(resident_id)
+    assert linked_account["residentName"] == "关联测试住户"
+    assert linked_account["communityName"]
+    assert linked_account["mobileBound"] is True
+    user_id = int(linked_account["userId"])
+
+    # 编辑基础资料不提交 residentId 时，绑定关系保持不变
+    updated = await client.put(f"{ADMIN_BASE}/admin-users/{account['id']}", json={
+        "username": "link_only_staff",
+        "realName": "纯后台员工（改名）",
+        "phone": "",
+        "roleIds": [await _role_id(db_session)],
+        "communityIds": [1],
+    }, headers=csrf)
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["data"]["residentId"] == str(resident_id)
+
+    unlinked = await client.put(f"{ADMIN_BASE}/admin-users/{account['id']}/resident",
+                                json={"residentId": None}, headers=csrf)
+    assert unlinked.status_code == 200, unlinked.text
+    assert unlinked.json()["data"]["residentId"] == ""
+    assert unlinked.json()["data"]["mobileBound"] is False
+    # 平台账号本身保留，不会被注销
+    assert await _fresh(db_session, PlatformUser, user_id) is not None
+
+
+@pytest.mark.asyncio
 async def test_community_admin_sees_only_own_community(client, db_session):
     csrf = await admin_login(client)
     resp = await client.post(f"{ADMIN_BASE}/residents",

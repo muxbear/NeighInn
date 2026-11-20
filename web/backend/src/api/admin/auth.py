@@ -69,16 +69,26 @@ def _cookie_secure(request: Request) -> bool:
     return (forwarded or request.url.scheme) == "https"
 
 
-def validate_admin_password(password: str) -> None:
-    """后台账号统一密码策略：至少 12 位，且大小写字母/数字/符号至少三类。"""
-    if len(password) < 12:
-        raise ApiError(ERR_PARAM, "密码最短 12 位，需包含大小写/数字/符号中的三类", 400)
+def _validate_password_strength(password: str, min_length: int) -> None:
+    if len(password) < min_length:
+        raise ApiError(
+            ERR_PARAM, f"密码最短 {min_length} 位，需包含大小写/数字/符号中的三类", 400)
     kinds = sum(
         bool(re.search(pattern, password))
         for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]")
     )
     if kinds < 3:
         raise ApiError(ERR_PARAM, "密码需包含大小写字母、数字、符号中的至少三类", 400)
+
+
+def validate_admin_password(password: str) -> None:
+    """后台账号统一密码策略：至少 12 位，且大小写字母/数字/符号至少三类。"""
+    _validate_password_strength(password, 12)
+
+
+def validate_initial_admin_password(password: str) -> None:
+    """新建后台账号的初始密码策略：至少 6 位，且大小写字母/数字/符号至少三类。"""
+    _validate_password_strength(password, 6)
 
 
 async def _assert_resident_account_active(db: DbSession, admin: AdminUser) -> None:

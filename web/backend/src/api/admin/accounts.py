@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.admin.auth import validate_admin_password
+from src.api.admin.auth import validate_admin_password, validate_initial_admin_password
 from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
@@ -367,6 +367,7 @@ async def resident_options(admin: CurrentAdmin, db: DbSession,
             "name": row.name,
             "communityId": str(row.community_id),
             "communityName": community_names.get(row.community_id, ""),
+            "building": row.building or "",
             "phone": mask_phone(phone) if phone else "",
             "identityType": row.identity_type,
             "certificationStatus": row.certification_status,
@@ -381,7 +382,7 @@ async def create_admin_user(payload: AdminUserIn, request: Request,
                             admin: CurrentAdmin, db: DbSession):
     if len(payload.username.strip()) < 3:
         raise ApiError(ERR_PARAM, "用户名至少 3 位", 400)
-    validate_admin_password(payload.password)
+    validate_initial_admin_password(payload.password)
     if await db.scalar(select(AdminUser).where(AdminUser.username == payload.username.strip())):
         raise ApiError(40901, "用户名已存在", 409)
     real_name = payload.realName.strip()
@@ -495,6 +496,45 @@ async def update_admin_user(admin_id: int, payload: AdminUserIn,
                              "status": row.status})
     await db.commit()
     return ok(await _admin_row(db, row), "管理员已更新")
+
+
+class ResidentLinkIn(BaseModel):
+    residentId: int | None = None
+
+
+@router.put("/admin-users/{admin_id}/resident", dependencies=[AdminUserManagePerm])
+async def link_admin_user_resident(admin_id: int, payload: ResidentLinkIn,
+                                   request: Request, admin: CurrentAdmin,
+                                   db: DbSession):
+    """单独维护后台账号与住户的关联，避免用户编辑表单顺带改动绑定关系。
+
+    ``residentId`` 为空表示解除关联；平台账号本身保留，不会被注销。
+    """
+    row = await db.get(AdminUser, admin_id)
+    if not row:
+        raise ApiError(ERR_NOT_FOUND, "管理员不存在", 404)
+    if row.is_super_admin:
+        raise ApiError(ERR_BIZ_RULE, "超级管理员不支持关联住户", 422)
+    if row.source == "RESIDENT":
+        raise ApiError(ERR_BIZ_RULE, "住户授权账号请在「社区业主」页调整绑定", 422)
+    before = {"residentId": row.resident_id, "userId": row.platform_user_id}
+    if payload.residentId:
+        resident = await db.get(Resident, payload.residentId)
+        if not resident:
+            raise ApiError(ERR_NOT_FOUND, "住户档案不存在", 404)
+        await bind_admin_to_resident(db, row, resident)
+        action, message = "admin-user.bind-resident", "住户已关联"
+    else:
+        row.platform_user_id = None
+        row.resident_id = None
+        action, message = "admin-user.unbind-resident", "已解除住户关联"
+    await write_audit(db, request, actor=admin, action=action,
+                      resource_type="admin_user", resource_id=row.id,
+                      before=before,
+                      after={"residentId": row.resident_id,
+                             "userId": row.platform_user_id})
+    await db.commit()
+    return ok(await _admin_row(db, row), message)
 
 
 @router.patch("/admin-users/{admin_id}/status", dependencies=[AdminUserManagePerm])

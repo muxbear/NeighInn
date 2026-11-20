@@ -281,6 +281,9 @@ export const adminUsersApi = {
     http.post<any, any>(`/admin-users/${id}/reset-password`, { password }),
   unlock: (id: number | string) => http.post<any, any>(`/admin-users/${id}/unlock`),
   residentOptions: (params: Dict = {}) => http.get<any, any>('/resident-options', { params }),
+  /** 关联 / 解除关联住户（residentId 传 null 表示解除）。 */
+  linkResident: (id: number | string, residentId: number | null) =>
+    http.put<any, any>(`/admin-users/${id}/resident`, { residentId }),
 }
 
 export const repairApi = {
