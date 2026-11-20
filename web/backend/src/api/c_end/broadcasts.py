@@ -7,7 +7,7 @@ from src.core.deps import CurrentUser, DbSession
 from src.core.responses import ERR_NOT_FOUND, ApiError, ok
 from src.db.models import Broadcast, Favorite
 from src.services import item_service as item_svc
-from src.services.auth_service import bound_resident
+from src.services.auth_service import browse_community_id
 from src.services.broadcast_service import is_visible, visibility_filters
 
 router = APIRouter(tags=["c:broadcasts"])
@@ -46,10 +46,11 @@ async def _row(db: DbSession, broadcast: Broadcast, viewer=None) -> dict:
 @router.get("/broadcasts")
 async def list_broadcasts(user: CurrentUser, db: DbSession):
     """喇叭站事件流：仅生效时间窗内的已发布内容，紧急置顶。"""
-    resident = await bound_resident(db, user.id)
-    stmt = select(Broadcast).where(*visibility_filters())
-    if resident:
-        stmt = stmt.where(Broadcast.community_id == resident.community_id)
+    community_id = await browse_community_id(db, user)
+    if not community_id:
+        return ok([])
+    stmt = select(Broadcast).where(Broadcast.community_id == community_id,
+                                   *visibility_filters())
     rows = list((await db.execute(
         stmt.order_by(Broadcast.important.desc(), Broadcast.published_at.desc().nullslast())
         .limit(50))).scalars().all())

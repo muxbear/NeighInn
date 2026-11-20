@@ -48,6 +48,14 @@ export const useCommunityStore = defineStore('community', () => {
     currentId.value = id
   }
 
+  /** 退出登录/切换账号时清空小区绑定，避免首页头部展示上一账号的小区。 */
+  function resetUserContent(): void {
+    bindings.value = []
+    nearby.value = []
+    currentId.value = ''
+    loading.value = false
+  }
+
   return {
     bindings,
     nearby,
@@ -60,5 +68,6 @@ export const useCommunityStore = defineStore('community', () => {
     search,
     apply,
     setCurrent,
+    resetUserContent,
   }
 })

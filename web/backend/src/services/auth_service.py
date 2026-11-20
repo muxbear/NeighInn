@@ -399,6 +399,38 @@ async def bound_resident(db: AsyncSession, user_id: int) -> Resident | None:
     )
 
 
+async def browse_resident(db: AsyncSession, user: User) -> Resident | None:
+    """内容浏览的小区归属：已认证住户优先，其次为注册/审核中的住户档案。
+
+    浏览（首页、四专属区、小区生活、邻里互助、喇叭站）对未认证注册用户开放，
+    但必须限定在其注册时选择的入住小区；否则取不到小区时会退化为全平台数据。
+    发布、交易等写操作仍以 ``bound_resident``（仅 VERIFIED）为准。
+    """
+    resident = await bound_resident(db, user.id)
+    if resident is not None:
+        return resident
+    return await db.scalar(
+        select(Resident)
+        .where(Resident.user_id == user.id, Resident.status == "ACTIVE")
+        .order_by(Resident.id.desc())
+        .limit(1)
+    )
+
+
+async def browse_community_id(db: AsyncSession, user: User) -> int | None:
+    """浏览范围的小区 ID；无住户档案时回退到注册意向小区。
+
+    同一请求内列表会逐条序列化物品，这里按用户缓存一次，避免 N+1 查询。
+    """
+    cache: dict = db.info.setdefault("browse_community_cache", {})
+    if user.id in cache:
+        return cache[user.id]
+    resident = await browse_resident(db, user)
+    community_id = resident.community_id if resident is not None else user.intent_community_id
+    cache[user.id] = community_id
+    return community_id
+
+
 def _cert_payload(cert: Certification | None) -> dict:
     if cert is None:
         return {

@@ -81,6 +81,11 @@ async def test_publish_review_approve_and_visibility(client, db_session):
     """AC-02 主链路：达标物品经 AI + 人工复核后上架，买家可见。"""
     seller = await verified_user(client, "13911110003")
     buyer = await register_user(client, "13911110004")
+    # 新注册用户须先选择入住小区（未认证也可浏览本小区内容）。
+    bind = await client.post(f"{C_BASE}/auth/register/complete", json={
+        "nickname": "同小区买家", "intentCommunityId": 1,
+    }, headers=bearer(buyer["token"]))
+    assert bind.status_code == 200, bind.text
 
     item_id = await create_draft(client, seller["token"])
     result = await submit_item(client, seller["token"], item_id)

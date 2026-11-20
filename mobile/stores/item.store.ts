@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import type { HomeBundle, Item, ItemComment, ZoneKey } from '../models'
 import { itemService } from '../services/item.service'
 import { STORAGE_KEYS } from '../config/constants'
-import { getStorage, setStorage } from '../utils/storage'
+import { getStorage, removeStorage, setStorage } from '../utils/storage'
 import { logger } from '../utils/logger'
 
 const HOME_CACHE_MS = 10 * 60 * 1000
@@ -208,6 +208,33 @@ export const useItemStore = defineStore('item', () => {
     favorites.value = bundle.items
   }
 
+  /**
+   * 清空与账号绑定的小区内容缓存。
+   * 首页 feed 按用户所属小区隔离，切换账号/退出登录后必须丢弃，
+   * 否则新注册用户会先看到上一个账号（可能是其它小区）的缓存内容。
+   */
+  function resetUserContent(): void {
+    homeFeed.value = null
+    homeLoadedAt.value = 0
+    homeLoading.value = false
+    homeError.value = ''
+    nearbyItems.value = []
+    nearbyPage.value = 1
+    nearbyHasMore.value = true
+    nearbyLoading.value = false
+    zoneFeeds.value = {}
+    zonePages.value = {}
+    zoneHasMore.value = {}
+    zoneLoading.value = {}
+    zoneTotals.value = {}
+    detailCache.value = {}
+    commentsCache.value = {}
+    myItems.value = []
+    myItemsLoading.value = false
+    favorites.value = []
+    removeStorage(STORAGE_KEYS.homeFeed)
+  }
+
   return {
     homeFeed,
     homeLoadedAt,
@@ -241,5 +268,6 @@ export const useItemStore = defineStore('item', () => {
     renew,
     removeItem,
     fetchFavorites,
+    resetUserContent,
   }
 })

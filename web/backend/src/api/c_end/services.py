@@ -13,7 +13,7 @@ from src.domain import enums as E
 from src.domain.state import help_sm
 from src.services import ai_audit_service as ai
 from src.services import item_service as item_svc
-from src.services.auth_service import bound_resident
+from src.services.auth_service import bound_resident, browse_community_id
 from src.services.notify_service import notify_user
 
 router = APIRouter(tags=["c:services"])
@@ -80,11 +80,13 @@ async def list_services(user: CurrentUser, db: DbSession,
                         kind: str | None = Query(default=None),
                         category: str | None = Query(default=None),
                         page: int = Query(default=1), pageSize: int = Query(default=20)):
-    resident = await bound_resident(db, user.id)
-    stmt = select(HelpRequest).where(HelpRequest.status.in_(
-        [E.HelpStatus.OPEN, E.HelpStatus.MATCHING, E.HelpStatus.IN_PROGRESS]))
-    if resident:
-        stmt = stmt.where(HelpRequest.community_id == resident.community_id)
+    community_id = await browse_community_id(db, user)
+    if not community_id:
+        return paginated([], page, pageSize, 0)
+    stmt = select(HelpRequest).where(
+        HelpRequest.community_id == community_id,
+        HelpRequest.status.in_(
+            [E.HelpStatus.OPEN, E.HelpStatus.MATCHING, E.HelpStatus.IN_PROGRESS]))
     if kind:
         code = {"求助": "HELP", "提供": "OFFER"}.get(kind, kind.upper())
         stmt = stmt.where(HelpRequest.kind == code)

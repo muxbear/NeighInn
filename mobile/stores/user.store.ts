@@ -15,6 +15,8 @@ import { env } from '../config/env'
 import { getStorage, removeStorage, secureStorage, setStorage } from '../utils/storage'
 import { logger } from '../utils/logger'
 import { maskPhone } from '../utils/desensitize'
+import { useItemStore } from './item.store'
+import { useCommunityStore } from './community.store'
 
 export const useUserStore = defineStore('user', () => {
   const accessToken = ref(secureStorage.getAccessToken())
@@ -62,6 +64,10 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function applyLogin(result: LoginResult): void {
+    // 登录后按新账号的小区重新拉取内容，清除上一会话/账号残留的首页、列表与绑定，
+    // 避免新注册用户先看到上一个账号（可能是其它小区）的数据。
+    useItemStore().resetUserContent()
+    useCommunityStore().resetUserContent()
     accessToken.value = result.accessToken
     refreshToken.value = result.refreshToken
     secureStorage.setTokens(result.accessToken, result.refreshToken)
@@ -160,6 +166,8 @@ export const useUserStore = defineStore('user', () => {
     profile.value = null
     secureStorage.clear()
     removeStorage(STORAGE_KEYS.userProfile)
+    useItemStore().resetUserContent()
+    useCommunityStore().resetUserContent()
     wsService.disconnect()
     if (typeof uni !== 'undefined') {
       uni.reLaunch({ url: '/pages/auth/login' })

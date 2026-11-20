@@ -35,7 +35,7 @@ from src.db.models import (
     UserPenalty,
 )
 from src.domain import enums as E
-from src.services.auth_service import bound_resident, latest_certification
+from src.services.auth_service import bound_resident, browse_community_id, latest_certification
 
 TRADE_LABEL = {E.TradeType.MONETARY: "出售", E.TradeType.FREE_GIFT: "免费", E.TradeType.BARTER: "互换"}
 # 公开物品图片签名 URL 有效期：覆盖列表缓存周期即可，避免端侧出现长期可直接访问的地址。
@@ -238,10 +238,11 @@ async def serialize_item(
     km = None
     same_community = None
     if viewer:
-        viewer_resident = await bound_resident(db, viewer.id)
-        if viewer_resident:
-            same_community = viewer_resident.community_id == item.community_id
-            viewer_community = await db.get(Community, viewer_resident.community_id)
+        # 未认证注册用户也按其意向小区计算距离与「同小区」标识。
+        viewer_community_id = await browse_community_id(db, viewer)
+        if viewer_community_id:
+            same_community = viewer_community_id == item.community_id
+            viewer_community = await db.get(Community, viewer_community_id)
             if viewer_community and community:
                 km = _distance_km(viewer_community.longitude, viewer_community.latitude,
                                   community.longitude, community.latitude)

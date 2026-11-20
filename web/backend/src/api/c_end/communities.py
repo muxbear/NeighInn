@@ -7,6 +7,7 @@ from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
 from src.core.responses import ok
 from src.db.models import Community, HelpRequest, Item, Region, Resident
+from src.services.auth_service import browse_resident
 
 router = APIRouter(tags=["c:communities"])
 
@@ -139,10 +140,11 @@ async def my_communities(user: CurrentUser, db: DbSession):
 @router.get("/communities/nearby")
 async def nearby_communities(user: CurrentUser, db: DbSession):
     """邻近小区（BR-03/W04-02）：以绑定小区坐标为圆心，按半径参数过滤、距离排序。"""
-    base_resident = await db.scalar(
-        select(Resident).where(Resident.user_id == user.id,
-                               Resident.certification_status == "VERIFIED").limit(1))
+    # 未认证注册用户按注册意向小区计算邻近范围，避免退化成「全部小区」。
+    base_resident = await browse_resident(db, user)
     base = await db.get(Community, base_resident.community_id) if base_resident else None
+    if base is None and user.intent_community_id:
+        base = await db.get(Community, user.intent_community_id)
     rows = list((await db.execute(
         select(Community).where(Community.status == "OPERATING").order_by(Community.id)
     )).scalars().all())

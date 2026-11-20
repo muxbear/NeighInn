@@ -14,7 +14,7 @@ from src.db.models import Favorite, LifeComment, LifePost, User
 from src.db.models.common import utcnow
 from src.services import ai_audit_service as ai
 from src.services import item_service as item_svc
-from src.services.auth_service import bound_resident
+from src.services.auth_service import bound_resident, browse_community_id
 
 router = APIRouter(tags=["c:life"])
 
@@ -83,10 +83,11 @@ async def life_posts(user: CurrentUser, db: DbSession,
                      category: str | None = Query(default=None),
                      page: int = Query(default=1), pageSize: int = Query(default=20)):
     """小区生活：仅已发布内容对本小区可见。"""
-    resident = await bound_resident(db, user.id)
-    stmt = select(LifePost).where(LifePost.status == "PUBLISHED")
-    if resident:
-        stmt = stmt.where(LifePost.community_id == resident.community_id)
+    community_id = await browse_community_id(db, user)
+    if not community_id:
+        return paginated([], page, pageSize, 0)
+    stmt = select(LifePost).where(LifePost.status == "PUBLISHED",
+                                  LifePost.community_id == community_id)
     # 移动端「全部」Tab 会原样下发中文分类名，不能当作真实分类过滤。
     if category and category != "全部":
         stmt = stmt.where(LifePost.category == category)

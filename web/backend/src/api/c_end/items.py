@@ -67,12 +67,14 @@ async def list_items(
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
     """物品信息流（M02）：本小区默认；near=true 看邻近；zone 对应四专属区。"""
-    from src.services.auth_service import bound_resident
+    from src.services.auth_service import browse_community_id
 
     viewer_community_id = None
     if user:
-        resident = await bound_resident(db, user.id)
-        viewer_community_id = resident.community_id if resident else None
+        # 未认证注册用户按其注册意向小区浏览，不能回退成全平台数据。
+        viewer_community_id = await browse_community_id(db, user)
+        if viewer_community_id is None and not near and not communityId:
+            return paginated([], page, pageSize, 0)
 
     class _Q:
         pass
@@ -406,12 +408,12 @@ async def item_distance(item_id: int, user: CurrentUser, db: DbSession):
     """距离与耗时（M04-02/SRS 8.2）：直线距离 + 步行/骑行/驾车预估（降级标注「预估」）。"""
     item = await svc.get_item_or_404(db, item_id)
     from src.db.models import Community
-    from src.services.auth_service import bound_resident
+    from src.services.auth_service import browse_community_id
 
-    resident = await bound_resident(db, user.id)
-    if not resident:
-        raise ApiError(40302, "请先完成小区认证", 403)
-    viewer_community = await db.get(Community, resident.community_id)
+    community_id = await browse_community_id(db, user)
+    if not community_id:
+        raise ApiError(40302, "请先选择入住小区", 403)
+    viewer_community = await db.get(Community, community_id)
     item_community = await db.get(Community, item.community_id)
     km = svc._distance_km(viewer_community.longitude if viewer_community else None,
                           viewer_community.latitude if viewer_community else None,
