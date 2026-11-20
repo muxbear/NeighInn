@@ -24,6 +24,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <div class="modal-body">
         <p class="ni-confirm-message">{{ confirmState.message }}</p>
         <p v-for="(detail, index) in confirmState.details" :key="index" class="ni-confirm-detail">{{ detail }}</p>
+        <label v-if="confirmState.checkboxLabel" class="ni-confirm-checkbox">
+          <input v-model="confirmState.checkboxChecked" type="checkbox" />
+          <span>{{ confirmState.checkboxLabel }}</span>
+        </label>
       </div>
       <footer>
         <button @click="resolveConfirm(false)">{{ confirmState.cancelText }}</button>

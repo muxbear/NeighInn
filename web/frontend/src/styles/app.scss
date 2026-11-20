@@ -959,6 +959,21 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #705ad2; }
 .ni-confirm-heading.danger svg { color: #c9525e; }
 .ni-confirm-message { margin: 0; color: #5f5a68; font-size: var(--font-size-body); line-height: 1.7; }
 .ni-confirm-detail { margin: 8px 0 0; color: #c85660; font-size: var(--font-size-caption); line-height: 1.6; }
+.ni-confirm-checkbox {
+  margin-top: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #e6e2f0;
+  border-radius: 9px;
+  color: #56505f;
+  background: #f8f6fc;
+  font-size: var(--font-size-caption);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.ni-confirm-checkbox input { margin: 2px 0 0; accent-color: #6f59d4; flex: 0 0 auto; }
 .notification-popover { position: absolute; }
 .tree-empty { padding: 60px 10px; display: grid; justify-items: center; gap: 8px; color: #aaa6b2; font-size: var(--font-size-body); }
 

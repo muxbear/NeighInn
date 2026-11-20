@@ -5,10 +5,10 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from src.core.security import decrypt_field
-from src.db.models import Certification, Resident
+from src.core.security import decrypt_field, hmac_index
+from src.db.models import Certification, Item, PlatformUser, Resident
 from tests.conftest import ADMIN_BASE, TEST_PHONE, admin_login, register_user
 
 
@@ -206,3 +206,168 @@ async def test_resident_batch_delete(client, db_session):
     cert = await db_session.get(Certification, cert_id)
     await db_session.refresh(cert)
     assert cert.resident_id is None
+
+
+@pytest.mark.asyncio
+async def test_delete_resident_cancel_account_frees_phone(client, db_session):
+    """勾选注销账号：匿名化 platform_users 并清空手机号，原号码可重新注册。"""
+    csrf = await admin_login(client)
+    phone = "13900005555"
+    account = await register_user(client, phone=phone)
+
+    resp = await client.post(f"{ADMIN_BASE}/residents",
+                             json=_resident_payload(phone=phone), headers=csrf)
+    assert resp.status_code == 200, resp.text
+    resident_id = int(resp.json()["data"]["id"])
+
+    resp = await client.delete(
+        f"{ADMIN_BASE}/residents/{resident_id}",
+        params={"cancelAccount": "true"}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["accountCancelled"] is True
+
+    db_session.expire_all()
+    user = await db_session.get(PlatformUser, int(account["profile"]["id"]))
+    await db_session.refresh(user)
+    assert user.status == "CANCELLED"
+    assert decrypt_field(user.phone_enc) == ""
+    assert user.phone_hash != hmac_index(phone)
+    assert user.nickname == "已注销用户"
+    assert await db_session.scalar(
+        select(Resident.id).where(Resident.id == resident_id)) is None
+
+    # 手机号已释放：同一号码可重新注册为全新账号
+    again = await register_user(client, phone=phone)
+    assert again["isNewUser"] is True
+    assert again["profile"]["id"] != account["profile"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_delete_resident_cancel_account_blocked_by_business_data(client, db_session):
+    """存在发布/交易等业务数据时禁止注销账号，且档案与账号都保持不变。"""
+    csrf = await admin_login(client)
+    phone = "13900006666"
+    account = await register_user(client, phone=phone)
+    user = await db_session.get(PlatformUser, int(account["profile"]["id"]))
+    db_session.add(Item(community_id=1, seller_id=user.id,
+                        title="测试物品", trade_type="FREE_GIFT"))
+    await db_session.commit()
+
+    resp = await client.post(f"{ADMIN_BASE}/residents",
+                             json=_resident_payload(phone=phone), headers=csrf)
+    assert resp.status_code == 200, resp.text
+    resident_id = int(resp.json()["data"]["id"])
+
+    resp = await client.delete(
+        f"{ADMIN_BASE}/residents/{resident_id}",
+        params={"cancelAccount": "true"}, headers=csrf)
+    assert resp.status_code == 422, resp.text
+    assert "存在发布物品" in resp.json()["message"]
+
+    db_session.expire_all()
+    assert await db_session.scalar(
+        select(Resident.id).where(Resident.id == resident_id)) is not None
+    user = await db_session.get(PlatformUser, int(account["profile"]["id"]))
+    await db_session.refresh(user)
+    assert user.status == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_delete_resident_cancel_account_blocked_by_other_community(client, db_session):
+    """账号在其他社区仍有档案时禁止注销，避免误伤跨社区账号。"""
+    csrf = await admin_login(client)
+    phone = "13900007777"
+    account = await register_user(client, phone=phone)
+
+    first = await client.post(f"{ADMIN_BASE}/residents",
+                              json=_resident_payload(phone=phone), headers=csrf)
+    second = await client.post(f"{ADMIN_BASE}/residents",
+                               json=_resident_payload(phone=phone, communityId=2),
+                               headers=csrf)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    first_id = int(first.json()["data"]["id"])
+
+    resp = await client.delete(
+        f"{ADMIN_BASE}/residents/{first_id}",
+        params={"cancelAccount": "true"}, headers=csrf)
+    assert resp.status_code == 422, resp.text
+    assert "其他社区仍有住户档案" in resp.json()["message"]
+
+    db_session.expire_all()
+    assert await db_session.scalar(
+        select(Resident.id).where(Resident.id == first_id)) is not None
+    user = await db_session.get(PlatformUser, int(account["profile"]["id"]))
+    await db_session.refresh(user)
+    assert user.status == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_residents_cancel_accounts(client, db_session):
+    """批量删除可同时注销关联账号；未绑定账号的档案正常删除。"""
+    csrf = await admin_login(client)
+    phones = ["13900008881", "13900008882"]
+    accounts = [await register_user(client, phone=phone) for phone in phones]
+    ids: list[int] = []
+    for phone in phones:
+        resp = await client.post(f"{ADMIN_BASE}/residents",
+                                 json=_resident_payload(phone=phone), headers=csrf)
+        assert resp.status_code == 200, resp.text
+        ids.append(int(resp.json()["data"]["id"]))
+    resp = await client.post(f"{ADMIN_BASE}/residents",
+                             json=_resident_payload(phone="13900008883"), headers=csrf)
+    assert resp.status_code == 200, resp.text
+    ids.append(int(resp.json()["data"]["id"]))
+
+    resp = await client.post(f"{ADMIN_BASE}/residents/batch-delete",
+                             json={"ids": ids, "cancelAccounts": True}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["deleted"] == 3
+    assert data["cancelledAccounts"] == 2
+
+    db_session.expire_all()
+    for account in accounts:
+        user = await db_session.get(PlatformUser, int(account["profile"]["id"]))
+        await db_session.refresh(user)
+        assert user.status == "CANCELLED"
+        assert decrypt_field(user.phone_enc) == ""
+    assert await db_session.scalar(
+        select(Resident.id).where(Resident.id.in_(ids))) is None
+
+    again = await register_user(client, phone=phones[0])
+    assert again["isNewUser"] is True
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_cancel_accounts_all_or_nothing(client, db_session):
+    """批量注销时任一账号不满足条件，整批不执行（档案与账号均保留）。"""
+    csrf = await admin_login(client)
+    ok_phone, blocked_phone = "13900009991", "13900009992"
+    ok_account = await register_user(client, phone=ok_phone)
+    blocked_account = await register_user(client, phone=blocked_phone)
+    blocked_user = await db_session.get(
+        PlatformUser, int(blocked_account["profile"]["id"]))
+    db_session.add(Item(community_id=1, seller_id=blocked_user.id,
+                        title="测试物品", trade_type="FREE_GIFT"))
+    await db_session.commit()
+
+    ids: list[int] = []
+    for phone in (ok_phone, blocked_phone):
+        resp = await client.post(f"{ADMIN_BASE}/residents",
+                                 json=_resident_payload(phone=phone), headers=csrf)
+        assert resp.status_code == 200, resp.text
+        ids.append(int(resp.json()["data"]["id"]))
+
+    resp = await client.post(f"{ADMIN_BASE}/residents/batch-delete",
+                             json={"ids": ids, "cancelAccounts": True}, headers=csrf)
+    assert resp.status_code == 422, resp.text
+    assert "存在发布物品" in resp.json()["message"]
+
+    db_session.expire_all()
+    assert await db_session.scalar(
+        select(func.count()).select_from(Resident).where(Resident.id.in_(ids))) == 2
+    for account in (ok_account, blocked_account):
+        user = await db_session.get(PlatformUser, int(account["profile"]["id"]))
+        await db_session.refresh(user)
+        assert user.status == "ACTIVE"

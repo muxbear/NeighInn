@@ -19,6 +19,7 @@ from src.core.deps import CurrentAdmin, DbSession
 from src.core.idempotency import complete_idempotency, guard_idempotency
 from src.core.permissions import (
     allowed_community_ids,
+    get_permission_codes,
     require_any_permission,
     require_permission,
     resolve_community_scope,
@@ -29,6 +30,7 @@ from src.core.responses import (
     ERR_DATA_SCOPE,
     ERR_DEPENDENCY,
     ERR_FILE_TOO_LARGE,
+    ERR_FORBIDDEN,
     ERR_NOT_FOUND,
     ERR_PARAM,
     ApiError,
@@ -47,11 +49,17 @@ from src.db.models import (
     AdminUser,
     Certification,
     Community,
+    Dispute,
     Item,
+    LedgerEntry,
+    Order,
+    PaymentTransaction,
     PlatformUser,
     Resident,
     Role,
     User,
+    WalletAccount,
+    Withdrawal,
     admin_user_communities,
     admin_user_roles,
 )
@@ -642,11 +650,136 @@ async def update_resident(resident_id: int, payload: ResidentIn, request: Reques
     return ok(await _resident_row(db, resident), "人员信息已更新")
 
 
+# ---------------------------------------------------------------- 删除档案（可选注销移动端账号）
+
+CANCELLED_NICKNAME = "已注销用户"
+
+
+async def _assert_account_cancel_permission(db: DbSession, admin: CurrentAdmin) -> None:
+    """注销移动端账号比删除档案更敏感：需额外具备「编辑用户」权限。"""
+    if admin.is_super_admin:
+        return
+    if "system:user:update" not in set(await get_permission_codes(db, admin)):
+        raise ApiError(ERR_FORBIDDEN, "无权限注销移动端账号", 403)
+
+
+async def _account_cancel_blockers(
+    db: DbSession, user_id: int, exclude_resident_ids: set[int]
+) -> list[str]:
+    """注销前置校验：无其他社区档案、无后台身份、无交易/资金/纠纷数据。
+
+    认证审核单、私信等历史记录保留并脱敏展示（BR-10：历史记录留存归档）。
+    """
+    blockers: list[str] = []
+    other_resident_stmt = select(Resident.id).where(Resident.user_id == user_id)
+    if exclude_resident_ids:
+        other_resident_stmt = other_resident_stmt.where(
+            Resident.id.notin_(exclude_resident_ids))
+    if await db.scalar(other_resident_stmt.limit(1)) is not None:
+        blockers.append("该账号在其他社区仍有住户档案")
+    if await db.scalar(
+        select(AdminUser.id).where(AdminUser.platform_user_id == user_id).limit(1)
+    ) is not None:
+        blockers.append("该账号仍关联后台身份")
+    if await db.scalar(
+        select(WalletAccount.id).where(
+            WalletAccount.user_id == user_id,
+            or_(
+                WalletAccount.balance_cents > 0,
+                WalletAccount.escrow_cents > 0,
+                WalletAccount.withdrawable_cents > 0,
+            ),
+        ).limit(1)
+    ) is not None:
+        blockers.append("钱包仍有余额或托管资金")
+
+    checks = (
+        ("存在发布物品", select(Item.id).where(Item.seller_id == user_id)),
+        ("存在交易订单", select(Order.id).where(
+            or_(Order.buyer_id == user_id, Order.seller_id == user_id))),
+        ("存在资金流水", select(PaymentTransaction.id).where(
+            PaymentTransaction.user_id == user_id)),
+        ("存在账本记录", select(LedgerEntry.id).where(
+            LedgerEntry.account == f"USER:{user_id}")),
+        ("存在提现记录", select(Withdrawal.id).where(Withdrawal.user_id == user_id)),
+        ("存在纠纷记录", select(Dispute.id).where(
+            or_(Dispute.initiator_id == user_id, Dispute.respondent_id == user_id))),
+    )
+    for label, stmt in checks:
+        if await db.scalar(stmt.limit(1)) is not None:
+            blockers.append(label)
+    return blockers
+
+
+async def _cancel_platform_account(
+    db: DbSession, request: Request, admin: CurrentAdmin, user: User,
+    *, reason: str,
+) -> None:
+    """注销并匿名化移动端账号，释放手机号供重新注册（BR-10）。
+
+    账号不做物理删除：订单、账本、审计等历史仍通过原 user_id 关联；
+    手机号密文与哈希清空后用户无法登录，原手机号可注册新账号。
+    """
+    before = {
+        "status": user.status,
+        "phone": mask_phone(decrypt_field(user.phone_enc)),
+        "nickname": user.nickname,
+    }
+    user.status = "CANCELLED"
+    user.phone_enc = ""
+    user.phone_hash = hmac_index(f"cancelled:{user.id}:{uuid4().hex}")
+    user.nickname = CANCELLED_NICKNAME
+    user.avatar_key = ""
+    user.email = ""
+    user.bio = ""
+    user.gender = ""
+    user.realname_status = "UNVERIFIED"
+    user.settings_json = {}
+    user.intent_community_id = None
+    user.onboarding_status = "COMPLETED"
+    await write_audit(
+        db, request, actor=admin, action="user.cancel",
+        resource_type="user", resource_id=user.id,
+        before=before,
+        after={"status": "CANCELLED", "phoneFreed": True, "reason": reason},
+    )
+
+
+async def _cancel_account_for_residents(
+    db: DbSession, request: Request, admin: CurrentAdmin, user_id: int,
+    *, exclude_resident_ids: set[int], resident_names: list[str],
+) -> bool:
+    """按规则注销账号；返回是否真正执行。不满足条件时抛 422，阻止整次删除。"""
+    user = await db.get(User, user_id)
+    if user is None or user.status == "CANCELLED":
+        return False
+    if user.status != "ACTIVE":
+        raise ApiError(ERR_BIZ_RULE, "移动端账号已冻结/停用，不能注销", 422)
+    blockers = await _account_cancel_blockers(db, user.id, exclude_resident_ids)
+    if blockers:
+        names = "、".join(resident_names) or "该住户"
+        raise ApiError(
+            ERR_BIZ_RULE,
+            f"无法同时注销“{names}”的移动端账号：{'；'.join(blockers)}。"
+            "请仅删除档案，或先处理上述业务数据",
+            422,
+        )
+    await _cancel_platform_account(
+        db, request, admin, user, reason="删除社区人员档案时注销")
+    return True
+
+
 @router.delete("/residents/{resident_id}",
                dependencies=[Depends(require_permission("community:resident:update"))])
 async def delete_resident(resident_id: int, request: Request,
-                          admin: CurrentAdmin, db: DbSession):
-    """删除人员档案；已关联的认证审核单保留历史，仅解除档案引用。"""
+                          admin: CurrentAdmin, db: DbSession,
+                          cancelAccount: bool = Query(default=False)):
+    """删除人员档案；默认保留移动端账号，可选同时注销该账号并释放手机号。
+
+    - 默认：仅删除 residents 档案，已关联的认证审核单保留历史，仅解除档案引用；
+    - cancelAccount=true：注销关联 platform_users 账号（匿名化、清空手机号），
+      要求该账号无其他社区档案、无后台身份、无发布/交易/资金/纠纷数据。
+    """
     resident = await db.get(Resident, resident_id)
     if not resident:
         raise ApiError(ERR_NOT_FOUND, "人员不存在", 404)
@@ -657,7 +790,19 @@ async def delete_resident(resident_id: int, request: Request,
             "该住户已开通后台身份，请先在「社区业主」页解除授权后再删除档案",
             422,
         )
+    if cancelAccount:
+        await _assert_account_cancel_permission(db, admin)
+
+    # 审计快照必须在注销/删除前生成，保留注销前的手机号、昵称等字段。
     before = await _resident_row(db, resident)
+    cancelled = False
+    if cancelAccount and resident.user_id:
+        cancelled = await _cancel_account_for_residents(
+            db, request, admin, resident.user_id,
+            exclude_resident_ids={resident.id},
+            resident_names=[resident.name],
+        )
+
     certs = (await db.execute(
         select(Certification).where(Certification.resident_id == resident.id)
     )).scalars().all()
@@ -666,20 +811,33 @@ async def delete_resident(resident_id: int, request: Request,
     await db.delete(resident)
     await write_audit(db, request, actor=admin, action="resident.delete",
                       resource_type="resident", resource_id=resident_id,
-                      before=before, after=None)
+                      before=before,
+                      after={"accountCancelled": cancelled} if cancelled else None)
     await db.commit()
-    return ok({"id": str(resident_id)}, "人员档案已删除")
+    if cancelled:
+        message = "人员档案已删除，移动端账号已注销（手机号可重新注册）"
+    elif cancelAccount and not resident.user_id:
+        message = "人员档案已删除（该档案未绑定移动端账号）"
+    elif cancelAccount:
+        message = "人员档案已删除（移动端账号此前已注销）"
+    else:
+        message = "人员档案已删除"
+    return ok({"id": str(resident_id), "accountCancelled": cancelled}, message)
 
 
 class ResidentBatchDeleteIn(BaseModel):
     ids: list[int] = []
+    cancelAccounts: bool = False
 
 
 @router.post("/residents/batch-delete",
              dependencies=[Depends(require_permission("community:resident:update"))])
 async def batch_delete_residents(payload: ResidentBatchDeleteIn, request: Request,
                                  admin: CurrentAdmin, db: DbSession):
-    """批量删除人员档案；认证审核单保留历史，仅解除档案引用。"""
+    """批量删除人员档案；默认保留移动端账号，可选同时注销关联账号。
+
+    勾选 cancelAccounts 时先校验全部关联账号，任一不满足条件则整批不执行。
+    """
     ids = sorted({int(item) for item in payload.ids})
     if not ids:
         raise ApiError(ERR_PARAM, "请选择要删除的人员档案", 400)
@@ -696,7 +854,44 @@ async def batch_delete_residents(payload: ResidentBatchDeleteIn, request: Reques
             f"以下住户已开通后台身份，请先解除授权：{', '.join(linked)}",
             422,
         )
+    if payload.cancelAccounts:
+        await _assert_account_cancel_permission(db, admin)
+
+    # 审计快照必须在注销/删除前生成，保留注销前的手机号、昵称等字段。
     before = [await _resident_row(db, resident) for resident in residents]
+    resident_ids = {resident.id for resident in residents}
+    residents_by_user: dict[int, list[Resident]] = {}
+    for resident in residents:
+        if resident.user_id:
+            residents_by_user.setdefault(resident.user_id, []).append(resident)
+
+    cancelled_user_ids: set[int] = set()
+    if payload.cancelAccounts:
+        # 先整体校验，避免批量中途失败导致部分账号被注销。
+        for user_id, group in residents_by_user.items():
+            user = await db.get(User, user_id)
+            if user is None or user.status == "CANCELLED":
+                continue
+            if user.status != "ACTIVE":
+                raise ApiError(ERR_BIZ_RULE, "移动端账号已冻结/停用，不能注销", 422)
+            blockers = await _account_cancel_blockers(db, user_id, resident_ids)
+            if blockers:
+                names = "、".join(resident.name for resident in group)
+                raise ApiError(
+                    ERR_BIZ_RULE,
+                    f"无法同时注销“{names}”的移动端账号：{'；'.join(blockers)}。"
+                    "请仅删除档案，或先处理上述业务数据",
+                    422,
+                )
+        for user_id, group in residents_by_user.items():
+            user = await db.get(User, user_id)
+            if user is None or user.status == "CANCELLED":
+                continue
+            await _cancel_platform_account(
+                db, request, admin, user,
+                reason=f"批量删除社区人员档案时注销（{group[0].name} 等）")
+            cancelled_user_ids.add(user_id)
+
     for resident in residents:
         certs = (await db.execute(
             select(Certification).where(Certification.resident_id == resident.id)
@@ -707,11 +902,18 @@ async def batch_delete_residents(payload: ResidentBatchDeleteIn, request: Reques
     audit_ids = ",".join(str(resident.id) for resident in residents)
     if len(audit_ids) > 64:
         audit_ids = f"{residents[0].id}+{len(residents) - 1}"
+    after = {"cancelledAccounts": len(cancelled_user_ids)} if cancelled_user_ids else None
     await write_audit(db, request, actor=admin, action="resident.batch-delete",
                       resource_type="resident", resource_id=audit_ids,
-                      before={"residents": before}, after=None)
+                      before={"residents": before}, after=after)
     await db.commit()
-    return ok({"deleted": len(residents)}, f"已删除 {len(residents)} 份人员档案")
+    if cancelled_user_ids:
+        message = (f"已删除 {len(residents)} 份人员档案，"
+                   f"已注销 {len(cancelled_user_ids)} 个移动端账号")
+    else:
+        message = f"已删除 {len(residents)} 份人员档案"
+    return ok({"deleted": len(residents),
+               "cancelledAccounts": len(cancelled_user_ids)}, message)
 
 
 # ---------------------------------------------------------------- 认证材料维护（后台直改）

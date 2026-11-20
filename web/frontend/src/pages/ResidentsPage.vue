@@ -13,7 +13,7 @@ import CommunityFilterBar from '@/components/CommunityFilterBar.vue'
 
 const app = useAppStore()
 const auth = useAuthStore()
-const { confirm } = useConfirm()
+const { confirm, confirmWithCheckbox } = useConfirm()
 const rows = ref<any[]>([])
 const summary = ref<any>({ total: 0, owner: 0, family: 0, pending: 0 })
 const activeTab = ref('全部人员')
@@ -53,6 +53,8 @@ const resetting = ref('')
 
 const canGrantAdmin = computed(() => auth.hasPermission('community:resident:admin-grant'))
 const canRevokeAdmin = computed(() => auth.hasPermission('community:resident:admin-revoke'))
+// 注销移动端账号比删除档案更敏感：后台需额外具备「编辑用户」权限。
+const canCancelAccount = computed(() => auth.hasPermission('system:user:update'))
 const loginUrl = computed(() => `${window.location.origin}/login`)
 
 const AVATAR_TONES = ['violet', 'blue', 'green', 'orange', 'plum', 'teal']
@@ -147,10 +149,31 @@ async function save() {
 }
 
 async function remove(row: any) {
-  if (!(await confirm({ title: '删除人员档案', message: `确定删除“${row.name}”的社区人员档案吗？`, confirmText: '确认删除', danger: true }))) return
+  const canCancel = canCancelAccount.value && Boolean(row.userId)
+  const result = await confirmWithCheckbox({
+    title: '删除人员档案',
+    message: `确定删除“${row.name}”的社区人员档案吗？`,
+    details: [
+      '删除后档案不可恢复。',
+      ...(row.userId
+        ? ['默认保留移动端账号，用户仍可用该手机号登录。']
+        : ['该档案未绑定移动端账号，不影响任何登录账号。']),
+      ...(canCancel
+        ? ['勾选注销账号后会清空该账号手机号并释放给新注册；认证与交易历史保留。']
+        : []),
+    ],
+    confirmText: '确认删除',
+    danger: true,
+    checkboxLabel: canCancel
+      ? '同时注销该住户的移动端账号（手机号可重新注册）'
+      : '',
+  })
+  if (!result.confirmed) return
   try {
-    await residentApi.remove(row.id)
-    app.showToast('人员档案已删除')
+    const data = await residentApi.remove(row.id, result.checked)
+    app.showToast(data?.accountCancelled
+      ? '人员档案已删除，移动端账号已注销'
+      : '人员档案已删除')
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '删除失败')
@@ -177,18 +200,29 @@ async function batchRemove() {
     .map((id) => Number(id))
     .filter((id) => Number.isFinite(id))
   if (!ids.length) return
-  const ok = await confirm({
+  const result = await confirmWithCheckbox({
     title: '批量删除人员档案',
     message: `确定删除已选择的 ${ids.length} 份人员档案吗？`,
-    details: ['删除后档案将从当前社区移除，已关联的认证审核单保留历史记录。'],
+    details: [
+      '删除后档案将从当前社区移除，已关联的认证审核单保留历史记录。',
+      ...(canCancelAccount.value
+        ? ['勾选注销账号时，任一关联账号存在其他社区档案或交易/资金记录，整批操作将不会执行。']
+        : []),
+    ],
     confirmText: '确认删除',
     danger: true,
+    checkboxLabel: canCancelAccount.value
+      ? '同时注销关联的移动端账号（账号需无其他社区档案及业务数据）'
+      : '',
   })
-  if (!ok) return
+  if (!result.confirmed) return
   try {
-    const result = await residentApi.batchRemove(ids)
-    const deleted = Number(result?.deleted ?? ids.length)
-    app.showToast(`已删除 ${deleted} 份人员档案`)
+    const data = await residentApi.batchRemove(ids, result.checked)
+    const deleted = Number(data?.deleted ?? ids.length)
+    const cancelled = Number(data?.cancelledAccounts ?? 0)
+    app.showToast(cancelled
+      ? `已删除 ${deleted} 份人员档案，已注销 ${cancelled} 个移动端账号`
+      : `已删除 ${deleted} 份人员档案`)
     await load()
   } catch (exc: any) {
     app.showToast(exc?.message || '批量删除失败')

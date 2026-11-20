@@ -192,8 +192,12 @@ export const residentApi = {
   summary: (communityId: number) => http.get<any, any>('/residents/summary', { params: { communityId } }),
   create: (payload: Dict) => http.post<any, any>('/residents', payload),
   update: (id: number | string, payload: Dict) => http.put<any, any>(`/residents/${id}`, payload),
-  remove: (id: number | string) => http.delete<any, any>(`/residents/${id}`),
-  batchRemove: (ids: Array<number | string>) => http.post<any, any>('/residents/batch-delete', { ids }),
+  remove: (id: number | string, cancelAccount = false) =>
+    http.delete<any, any>(`/residents/${id}`, {
+      params: cancelAccount ? { cancelAccount: true } : undefined,
+    }),
+  batchRemove: (ids: Array<number | string>, cancelAccounts = false) =>
+    http.post<any, any>('/residents/batch-delete', { ids, cancelAccounts }),
 }
 
 export const operationsApi = {
