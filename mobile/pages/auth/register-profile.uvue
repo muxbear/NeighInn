@@ -43,7 +43,7 @@
         />
         <text class="regp__hint">1–16 字，将展示给邻里；请勿填写手机号等隐私信息</text>
 
-        <text class="regp__label">入住小区（选填）</text>
+        <text class="regp__label">入住小区（必填）</text>
         <ni-cell
           icon="home"
           icon-state="green"
@@ -57,9 +57,6 @@
       <ni-button type="primary" size="xl" block :loading="submitting" @tap="completeProfile">
         完成注册
       </ni-button>
-      <view class="regp__skip" @click="skipProfile">
-        <text class="regp__skip-text">跳过，先逛逛</text>
-      </view>
 
       <view class="regp__privacy">
         <ni-icon name="lock" :size="13" state="tertiary" />
@@ -99,7 +96,7 @@
           </view>
           <view class="regp__check-copy">
             <text class="regp__check-title">住户认证</text>
-            <text class="regp__check-desc">审核不超过 24 小时，通过后绑定小区</text>
+            <text class="regp__check-desc">审核不超过 24 小时，通过后成为认证业主</text>
           </view>
         </view>
       </view>
@@ -314,9 +311,9 @@ const avatarPreview = computed(() =>
 )
 const selectedCommunityDesc = computed(() => {
   const community = selectedCommunity.value
-  if (!community) return '按省份/直辖市、地市、区/县、街道选择，认证通过后正式绑定'
+  if (!community) return '按省份/直辖市、地市、区/县选择，完成住户认证后成为认证业主'
   const region = formatCommunityRegion(community)
-  const address = community.address || '认证通过后正式绑定'
+  const address = community.address || '完成住户认证后成为认证业主'
   return region ? `${region} · ${address}` : address
 })
 
@@ -414,6 +411,10 @@ async function completeProfile(): Promise<void> {
     showToast('昵称最多 16 字', 'alert')
     return
   }
+  if (!selectedCommunity.value) {
+    showToast('请选择入住小区', 'alert')
+    return
+  }
   submitting.value = true
   try {
     await user.completeRegistration({
@@ -425,20 +426,6 @@ async function completeProfile(): Promise<void> {
     showToast('注册资料已保存')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存失败', 'alert')
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function skipProfile(): Promise<void> {
-  if (submitting.value) return
-  submitting.value = true
-  try {
-    await user.completeRegistration({ skip: true })
-    welcome.value = true
-    showToast('已跳过，认证后即可发布与交易')
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '操作失败', 'alert')
   } finally {
     submitting.value = false
   }
@@ -476,13 +463,10 @@ function goBack(): void {
     return
   }
   uni.showModal({
-    title: '暂不完善资料？',
-    content: '你可以先逛逛，完善资料后才能发布物品和参与交易。',
-    confirmText: '先逛逛',
-    cancelText: '继续完善',
-    success: (res) => {
-      if (res.confirm) goHome()
-    },
+    title: '请先完成注册',
+    content: '入住小区为必填项，请选择入住小区并完成注册后继续。',
+    showCancel: false,
+    confirmText: '继续完善',
   })
 }
 </script>

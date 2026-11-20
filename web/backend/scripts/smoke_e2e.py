@@ -92,12 +92,14 @@ def main() -> None:
     assert login["profile"]["phone"] == masked
     print("✓ 注册登录（脱敏手机号展示）")
 
-    # 新人引导：完善资料（头像/昵称）
+    # 新人引导：完善资料（头像/昵称/入住小区；入住小区必填）
     onboard = call("POST", "/api/v1/auth/register/complete", {
         "nickname": "冒烟邻居", "avatarKey": "avatar-person-1",
+        "intentCommunityId": 1,
     }, token=access)["data"]
     assert onboard["onboardingStatus"] == "PROFILE_COMPLETED"
     assert onboard["nickname"] == "冒烟邻居"
+    assert onboard["intentCommunityId"] == "1"
     print("✓ 注册新人引导（资料完善）")
 
     # 实名认证提交

@@ -261,6 +261,60 @@ def assert_phone_can_register(user: User) -> None:
     raise ApiError(ERR_CONFLICT, "账号已注销，请联系客服重新开通", 409)
 
 
+async def sync_intent_resident(
+    db: AsyncSession, user: User, community: Community
+) -> Resident:
+    """注册选定的入住小区同步为未认证住户档案。
+
+    后台「社区业主」查询 ``residents``；仅保存 ``intent_community_id`` 会导致
+    新注册用户在后台不可见。这里为首次注册建立 ``UNVERIFIED`` 档案（不授予
+    任何住户权限，发布/交易仍要求 ``VERIFIED``），住户认证通过后再由审核流程
+    升级为已认证档案。重复保存注册资料时保持幂等。
+    """
+    nickname = (user.nickname or "").strip()[:64] or "邻居"
+
+    target = await db.scalar(select(Resident).where(
+        Resident.user_id == user.id, Resident.community_id == community.id))
+    if target is not None:
+        # 已有档案（含后台代建档）不覆盖姓名，仅补齐缺失的联系方式。
+        target.phone_enc = target.phone_enc or user.phone_enc
+        target.phone_hash = target.phone_hash or user.phone_hash
+        return target
+
+    unverified = await db.scalar(
+        select(Resident)
+        .where(Resident.user_id == user.id, Resident.certification_status == "UNVERIFIED")
+        .order_by(Resident.id).limit(1))
+    if unverified is not None:
+        # 未认证档案随注册意向变更；已认证档案不迁移，避免破坏社区归属。
+        unverified.community_id = community.id
+        unverified.phone_enc = unverified.phone_enc or user.phone_enc
+        unverified.phone_hash = unverified.phone_hash or user.phone_hash
+        return unverified
+
+    existing = await db.scalar(
+        select(Resident).where(Resident.user_id == user.id).order_by(Resident.id).limit(1))
+    if existing is not None:
+        # 已有认证档案（例如在其他小区）：仅保留意向小区，不重复建档。
+        return existing
+
+    resident = Resident(
+        user_id=user.id,
+        community_id=community.id,
+        name=nickname,
+        gender="",
+        phone_enc=user.phone_enc,
+        phone_hash=user.phone_hash,
+        identity_type="业主",
+        certification_status="UNVERIFIED",
+        status="ACTIVE",
+        joined_at=utcnow(),
+    )
+    db.add(resident)
+    await db.flush()
+    return resident
+
+
 async def complete_registration(
     db: AsyncSession,
     user: User,
@@ -275,6 +329,8 @@ async def complete_registration(
 
     NEW → PROFILE_COMPLETED（保存资料或跳过）→ COMPLETED（关闭成功引导页）。
     存量用户迁移后为 COMPLETED，不会进入本流程。
+    完善资料时入住小区必填；所选小区同步建立 UNVERIFIED 住户档案，便于后台
+    「社区业主」按小区检索新注册用户。跳过（旧客户端兼容）不建档。
     """
     if finish:
         user.onboarding_status = "COMPLETED"
@@ -297,18 +353,21 @@ async def complete_registration(
         raise ApiError(ERR_PARAM, "昵称最多 16 字", 400)
     if avatar_key and avatar_key not in AVATAR_PRESET_KEYS:
         raise ApiError(ERR_PARAM, "头像不存在，请重新选择", 400)
-
-    if intent_community_id is not None:
-        community = await db.get(Community, intent_community_id)
-        if not community or community.status != "OPERATING":
-            raise ApiError(ERR_PARAM, "所选小区不存在或已停用", 400)
-        user.intent_community_id = intent_community_id
+    # 入住小区为注册必填项（产品确认）：保存资料时同步建立未认证住户档案，
+    # 后台「社区业主」按小区即可检索到刚注册的用户。
+    if intent_community_id is None:
+        raise ApiError(ERR_PARAM, "请选择入住小区", 400)
+    community = await db.get(Community, intent_community_id)
+    if not community or community.status != "OPERATING":
+        raise ApiError(ERR_PARAM, "所选小区不存在或已停用", 400)
+    user.intent_community_id = intent_community_id
 
     user.nickname = name
     if avatar_key:
         user.avatar_key = avatar_key
     if user.onboarding_status != "COMPLETED":
         user.onboarding_status = "PROFILE_COMPLETED"
+    await sync_intent_resident(db, user, community)
     await db.commit()
     return await serialize_profile(db, user)
 

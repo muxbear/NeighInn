@@ -447,15 +447,16 @@ async function route(
       const nickname = String(body.nickname ?? '').trim()
       if (!nickname) fail(40001, '请填写昵称')
       if (nickname.length > 16) fail(40001, '昵称最多 16 字')
+      if (body.intentCommunityId === undefined || body.intentCommunityId === null || body.intentCommunityId === '') {
+        fail(40001, '请选择入住小区')
+      }
       state.user.nickname = nickname
       if (body.avatarKey) state.user.avatarPreset = String(body.avatarKey)
-      if (body.intentCommunityId !== undefined && body.intentCommunityId !== null && body.intentCommunityId !== '') {
-        const communityId = String(body.intentCommunityId)
-        const community = [...state.communities, ...state.nearbyCommunities]
-          .find((item) => item.id === communityId)
-        state.user.intentCommunityId = communityId
-        state.user.intentCommunityName = community?.name ?? ''
-      }
+      const communityId = String(body.intentCommunityId)
+      const community = [...state.communities, ...state.nearbyCommunities]
+        .find((item) => item.id === communityId)
+      state.user.intentCommunityId = communityId
+      state.user.intentCommunityName = community?.name ?? ''
       state.user.onboardingStatus = 'PROFILE_COMPLETED'
     }
     return clone(state.user)

@@ -1023,6 +1023,10 @@ async def approve_certification(
             )
             db.add(resident)
             await db.flush()
+        # 注册时预建的未认证档案以认证单申报的身份为准（业主/租户/家属）。
+        resident.identity_type = IDENTITY_MAP.get(cert.identity, resident.identity_type or "业主")
+        if not resident.name and user:
+            resident.name = user.nickname
         resident.certification_status = "VERIFIED"
         resident.certification_no = f"YZ{cert.id:08d}"
         resident.joined_at = resident.joined_at or utcnow()

@@ -233,6 +233,16 @@ async function loadCommunities(): Promise<void> {
   }
 }
 
+/** 社区档案变更后刷新共享运营空间列表，保证侧边栏、筛选栏与人员抽屉同步。 */
+async function refreshSharedCommunities(saved?: any): Promise<void> {
+  try {
+    await app.loadCommunities()
+  } catch {
+    // 共享列表刷新失败不阻塞页面本地结果
+  }
+  if (saved?.id !== undefined) app.upsertCommunity(saved)
+}
+
 async function openCreate(): Promise<void> {
   if (!currentCity.value) {
     app.showToast('请先在左侧选择地市')
@@ -360,16 +370,18 @@ async function saveCommunity(): Promise<void> {
   }
   formSaving.value = true
   try {
+    let saved: any = null
     if (formMode.value === 'create') {
-      await communityApi.create(payload)
+      saved = await communityApi.create(payload)
       app.showToast('社区已创建')
     } else {
-      await communityApi.update(editingId.value, payload)
+      saved = await communityApi.update(editingId.value, payload)
       app.showToast('社区已更新')
     }
     formOpen.value = false
     selectedStreetName.value = ''
     await loadCommunities()
+    await refreshSharedCommunities(saved)
   } catch (exc: any) {
     app.showToast(exc?.message || '保存失败')
   } finally {
@@ -383,6 +395,7 @@ async function removeCommunity(row: any): Promise<void> {
     await communityApi.remove(row.id)
     app.showToast('社区已删除')
     await loadCommunities()
+    await refreshSharedCommunities()
   } catch (exc: any) {
     app.showToast(exc?.message || '删除失败')
   }
@@ -396,6 +409,7 @@ async function removeFromForm(): Promise<void> {
     app.showToast('社区已删除')
     formOpen.value = false
     await loadCommunities()
+    await refreshSharedCommunities()
   } catch (exc: any) {
     app.showToast(exc?.message || '删除失败')
   }
@@ -606,6 +620,7 @@ async function runImport(): Promise<void> {
       importRows.value = []
       importPreview.value = []
       await loadCommunities()
+      await refreshSharedCommunities()
     }
   } catch (exc: any) {
     app.showToast(exc?.message || '导入失败')

@@ -32,7 +32,8 @@ class PlatformUser(Entity):
     # 存量用户迁移时回填 COMPLETED，避免升级后被强制拉去注册。
     # 注意：PROFILE_COMPLETED 长 17，列宽必须 ≥17（PostgreSQL 会严格校验 varchar 长度）。
     onboarding_status: Mapped[str] = mapped_column(String(32), default="COMPLETED", index=True)
-    # 注册时选择的意向小区：用于内容推荐/业主认证预选，业主证明通过后才写 Resident 正式绑定。
+    # 注册时选择的入住小区（必填）：用于内容推荐/住户认证预选，并同步建立
+    # certification_status=UNVERIFIED 的 Resident 档案；认证通过后升级为已认证档案。
     intent_community_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("communities.id"), index=True
     )

@@ -87,7 +87,11 @@ async function refreshSelectedCommunityRow() {
   const requestId = ++selectedCommunityRequestId
   try {
     const detail = await communityApi.detail(id)
-    if (requestId === selectedCommunityRequestId) selectedCommunityRow.value = detail
+    if (requestId === selectedCommunityRequestId) {
+      selectedCommunityRow.value = detail
+      // 详情补取成功后登记到共享列表，供抽屉、侧边栏等使用。
+      app.upsertCommunity(detail)
+    }
   } catch {
     // 社区详情不可用时保持现有展示
   }
@@ -183,8 +187,8 @@ function selectCommunity(row: any) {
   communitySearch.value = ''
   selectedCommunityRow.value = row
   syncCascadeFromCommunity(row)
-  const id = Number(row.id)
-  if (id !== app.currentCommunityId) app.switchCommunity(id)
+  // 传入完整行：该小区即使不在共享列表（刚创建或分页之外），也能立即用于抽屉展示。
+  app.switchCommunity(Number(row.id), row)
 }
 
 function onDocumentClick(event: MouseEvent) {

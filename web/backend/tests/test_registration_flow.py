@@ -8,9 +8,11 @@ import pytest
 from sqlalchemy import select
 
 from src.core.security import hmac_index
-from src.db.models import User
+from src.db.models import Resident, User
 from tests.conftest import (
+    ADMIN_BASE,
     C_BASE,
+    admin_login,
     bearer,
     login_user,
     register_user,
@@ -132,6 +134,59 @@ async def test_complete_registration_saves_profile_and_finishes(client, db_sessi
     assert user.agreement_version == "2026-11-01"
     assert user.privacy_version == "2026-11-01"
     assert user.agreed_at is not None
+
+    # 注册完成即建立未认证住户档案，后台「社区业主」按小区可见。
+    resident = await db_session.scalar(
+        select(Resident).where(Resident.user_id == user.id))
+    assert resident is not None
+    assert resident.community_id == 1
+    assert resident.name == "小林"
+    assert resident.certification_status == "UNVERIFIED"
+    assert resident.status == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_complete_registration_requires_intent_community(client):
+    phone = "13955550008"
+    data = await _register(client, phone)
+    headers = bearer(data["accessToken"])
+
+    resp = await client.post(f"{C_BASE}/auth/register/complete", json={
+        "nickname": "未选小区",
+    }, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 40001
+    assert "入住小区" in resp.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_registered_user_visible_in_admin_residents(client):
+    phone = "13955550009"
+    data = await _register(client, phone)
+    headers = bearer(data["accessToken"])
+    resp = await client.post(f"{C_BASE}/auth/register/complete", json={
+        "nickname": "后台可见住户",
+        "intentCommunityId": 1,
+    }, headers=headers)
+    assert resp.status_code == 200, resp.text
+
+    csrf = await admin_login(client)
+    listed = await client.get(
+        f"{ADMIN_BASE}/residents",
+        params={"communityId": 1, "keyword": "后台可见住户"},
+        headers=csrf,
+    )
+    assert listed.status_code == 200, listed.text
+    items = listed.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["nickname"] == "后台可见住户"
+    assert items[0]["communityId"] == "1"
+    assert items[0]["certification"] == "UNVERIFIED"
+
+    summary = await client.get(
+        f"{ADMIN_BASE}/residents/summary", params={"communityId": 1}, headers=csrf)
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["data"]["pending"] >= 1
 
 
 @pytest.mark.asyncio

@@ -87,7 +87,15 @@ async def _to_binding(db: DbSession, community: Community, resident: Resident | 
     km = None
     if base:
         km = _distance_km(community.longitude, community.latitude, base.longitude, base.latitude)
-    status_map = {"VERIFIED": "已认证", "PENDING": "审核中", "REJECTED": "已驳回"}
+    status_map = {
+        "VERIFIED": "已认证",
+        "PENDING": "审核中",
+        "SUPPLEMENT": "待补充",
+        "UNVERIFIED": "待认证",
+        "REJECTED": "已驳回",
+        "FROZEN": "已冻结",
+        "REVOKED": "已撤销",
+    }
     role_map = {"业主": "业主", "租户": "租户", "家属": "家属"}
     region_data = _region_fields(community, regions) if regions is not None else {}
     return {

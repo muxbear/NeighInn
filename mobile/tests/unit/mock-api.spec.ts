@@ -165,7 +165,7 @@ describe('mock api', () => {
     const profile = await mockRequest<{ nickname: string; avatarPreset: string; onboardingStatus: string }>({
       url: '/auth/register/complete',
       method: 'POST',
-      data: { nickname: '新邻居', avatarKey: 'avatar-person-2' },
+      data: { nickname: '新邻居', avatarKey: 'avatar-person-2', intentCommunityId: 'c1' },
     })
     expect(profile.nickname).toBe('新邻居')
     expect(profile.avatarPreset).toBe('avatar-person-2')
