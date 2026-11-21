@@ -104,12 +104,20 @@ async def _assert_uploaded_materials(
 @router.post("/auth/sms-code")
 async def send_sms_code(payload: SmsCodeIn):
     svc.validate_phone(payload.phone)
-    if settings.app_env != "dev":
+    is_dev = settings.app_env == "dev"
+    if not is_dev and not settings.sms_mock_enabled:
         # 真实短信通道尚未接入：显式报错，避免前端收到“发送成功”却永远收不到验证码。
         raise ApiError(ERR_DEPENDENCY, "短信通道尚未接入，暂无法发送验证码", 503)
     code, cooldown = await sms_code_store.issue(payload.phone)
-    # 仅开发环境回显/记录验证码（NF-06：生产绝不返回或记录验证码本体）。
-    logger.info("开发环境短信验证码 %s -> %s", mask_phone(payload.phone), code)
+    if is_dev:
+        # 仅开发环境回显/记录验证码（NF-06：生产绝不返回或记录验证码本体）。
+        logger.info("开发环境短信验证码 %s -> %s", mask_phone(payload.phone), code)
+    else:
+        # SMS_MOCK_ENABLED 仅供内网演示/验收临时开启，验证码随响应返回，生产必须关闭。
+        logger.warning(
+            "SMS_MOCK_ENABLED 已开启：非 dev 环境回显验证码 %s（生产环境必须关闭）",
+            mask_phone(payload.phone),
+        )
     return ok({"cooldown": cooldown, "mockCode": code}, "验证码已发送")
 
 

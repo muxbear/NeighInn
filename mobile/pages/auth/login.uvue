@@ -88,7 +88,7 @@
           </view>
         </view>
         <view v-if="demoCode" class="login__demo-code">
-          <text class="login__demo-code-text">开发环境验证码：{{ demoCode }}</text>
+          <text class="login__demo-code-text">演示验证码：{{ demoCode }}</text>
         </view>
         <ni-button type="primary" size="xl" block :loading="submitting" @tap="loginSms">
           登录

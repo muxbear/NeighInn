@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     redis_url: str = ""
     # 短信验证码存储后端：memory（进程内，重启失效）| redis（重启/多副本不丢）。
     sms_code_backend: str = "memory"
+    # 临时演示开关：真实短信通道未接入时，允许在非 dev 环境生成并回显验证码
+    # （仅用于内网演示/验收，生产必须保持 false）。
+    sms_mock_enabled: bool = False
     rabbitmq_url: str = ""
 
     minio_endpoint: str = "127.0.0.1:9000"

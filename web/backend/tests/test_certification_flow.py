@@ -53,6 +53,7 @@ async def test_sms_code_requires_provider_outside_dev(client, monkeypatch):
     from src.core.config import settings
 
     monkeypatch.setattr(settings, "app_env", "prod")
+    monkeypatch.setattr(settings, "sms_mock_enabled", False)
     resp = await client.post(f"{C_BASE}/auth/sms-code", json={"phone": TEST_PHONE})
     assert resp.status_code == 503
     assert resp.json()["code"] == 50301

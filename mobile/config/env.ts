@@ -86,7 +86,7 @@ const ENVS: Record<EnvConfig['name'], EnvConfig> = {
 /** 切换环境：改这里即可；HBuilderX 发版前务必确认为 staging / prod。
  * dev = 本地 Mock（离线演示）；local = 联调 web/backend 统一服务端（http://127.0.0.1:5193）；
  * docker = H5 由 mobile/Dockerfile 的 nginx 同源托管（/api/v1 反代到 5193）。 */
-export const CURRENT_ENV: EnvConfig['name'] = 'local'
+export const CURRENT_ENV: EnvConfig['name'] = 'docker'
 
 export const env: EnvConfig = ENVS[CURRENT_ENV]
 

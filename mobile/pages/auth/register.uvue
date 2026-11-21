@@ -63,7 +63,7 @@
         </view>
 
         <view v-if="demoCode" class="reg__demo-code">
-          <text class="reg__demo-code-text">开发环境验证码：{{ demoCode }}</text>
+          <text class="reg__demo-code-text">演示验证码：{{ demoCode }}</text>
         </view>
 
         <view class="reg__agreement">

@@ -54,6 +54,29 @@ async def test_register_creates_new_user_with_onboarding_new(client):
 
 
 @pytest.mark.asyncio
+async def test_sms_mock_enabled_allows_registration_outside_dev(client, monkeypatch):
+    """内网演示：SMS_MOCK_ENABLED=true 时非 dev 环境也回显验证码并完成注册。"""
+    from src.core.config import settings
+
+    phone = "13955550009"
+    monkeypatch.setattr(settings, "app_env", "prod")
+    monkeypatch.setattr(settings, "sms_mock_enabled", True)
+
+    code = await _send_code(client, phone)
+    assert len(code) == 6
+    resp = await client.post(f"{C_BASE}/auth/login/sms", json={
+        "phone": phone,
+        "code": code,
+        "intent": "register",
+        "agreed": True,
+        "agreementVersion": "2026-11-01",
+        "privacyVersion": "2026-11-01",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["isNewUser"] is True
+
+
+@pytest.mark.asyncio
 async def test_login_rejects_unregistered_phone(client):
     phone = "13955550002"
     code = await _send_code(client, phone)

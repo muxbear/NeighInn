@@ -174,7 +174,7 @@ npm run dev
 - **技术栈**：FastAPI + SQLAlchemy 2.0 async + PostgreSQL（测试 SQLite）+ Redis + MinIO + RabbitMQ（Outbox）。
 - **端口 5193**：C 端 `/api/v1`（JWT Bearer）；管理端 `/api/v1/admin`（Cookie + CSRF 双提交）；WebSocket `/api/v1/ws`。
 - **CORS 与本地联调**：`web/backend/.env` 的 `CORS_ORIGINS` 必须包含移动端 H5（5191）与 Web 前端（5192）；开发环境 `CORS_ORIGIN_REGEX` 放行本机/私网 IP 的任意端口；真机联调把 `APP_HOST` 改为 `0.0.0.0` 并调整移动端 `LOCAL_HOST`。
-- **验证码存储**：`SMS_CODE_BACKEND=redis`（推荐，重启/多副本不丢）/ `memory`；非 dev 环境未接短信通道时 `/auth/sms-code` 返回 50301。
+- **验证码存储**：`SMS_CODE_BACKEND=redis`（推荐，重启/多副本不丢）/ `memory`；非 dev 环境未接短信通道时 `/auth/sms-code` 默认返回 50301。内网演示可临时设 `SMS_MOCK_ENABLED=true`，接口回显 `mockCode` 供注册/登录页展示；**正式上线必须关闭**。
 - **已实现**：46+ 张表与 Alembic 迁移；8 个状态机；认证（实名/业主证明/审核/冻结联动下架）；物品（发布校验/AI 质检 Mock 适配器/人工复核/快车道）；订单（三种交易方式/BR-08 一物一卖/验货双向确认）；资金（复式账本/托管/放款/退款/提现双人复核/纠纷资金处置）；内容（生活/喇叭/互助/评论审核）；社交（好友/私信 client_msg_id 幂等/内容安全）；通知（公告下发/任务投递/已读）；参数（发布即生效下发 AppConfig）；管理面（社区 CRUD/用户处置/角色权限/管理员账号/审计/导出/举报工作台）；住户后台授权（`admin_users.platform_user_id/resident_id` 关联 `platform_users`，社区业主页授予可授予角色，首登强制改密与会话版本，数据范围过滤）；WebSocket 推送。
 - **铁律**：状态变更只经 `src/domain/state.py`；金额一律整数分；余额只由 `ledger_entries` 推导；管理端路由默认 `require_permission`；写操作走幂等键；跨端一致性靠事件+缓存失效，不做双写。
 - **测试**：`cd web/backend && uv run pytest -q`（154 个测试，覆盖 AC-01/02/05/06/08 与住户后台授权）；`uv run ruff check src tests run.py scripts`。
