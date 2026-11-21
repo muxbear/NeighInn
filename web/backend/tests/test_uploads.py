@@ -24,6 +24,24 @@ class FakeMinio:
     def put_object(self, bucket, object_key, data, length, content_type=None):
         self.calls.append((bucket, object_key, length, content_type))
 
+    def get_object(self, bucket, object_key):
+        self.calls.append((bucket, object_key, 0, None))
+        return _FakeReadable(JPEG_BYTES)
+
+
+class _FakeReadable:
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def close(self) -> None:
+        return None
+
+    def release_conn(self) -> None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_upload_private_material_records_file_object(client, db_session, monkeypatch):
@@ -151,3 +169,31 @@ async def test_realname_rejects_unowned_material_keys(client, monkeypatch):
     )
     assert ok.status_code == 200, ok.text
     assert ok.json()["data"]["status"] == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_public_media_proxied_through_api(client, monkeypatch):
+    """公开图片走同源代理：客户端不必能解析 MinIO 主机地址。"""
+    from src.core.storage import public_media_url
+
+    assert public_media_url("uploads/item_image/1/a.jpg") == (
+        "/api/v1/media/uploads/item_image/1/a.jpg")
+    assert public_media_url("https://cdn.example.com/a.jpg") == (
+        "https://cdn.example.com/a.jpg")
+    assert public_media_url("") == ""
+
+    fake = FakeMinio()
+    monkeypatch.setattr("src.api.c_end.uploads.get_minio", lambda: fake)
+    resp = await client.get(f"{C_BASE}/media/uploads/item_image/1/a.jpg")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == "image/jpeg"
+    assert resp.headers["cache-control"] == "public, max-age=604800"
+    assert resp.content == JPEG_BYTES
+    assert fake.calls and fake.calls[0][0] == settings.minio_bucket_public
+
+    # 私有认证材料前缀不允许从公开通道读取
+    resp = await client.get(f"{C_BASE}/media/certifications/realname_id/1/a.jpg")
+    assert resp.status_code == 404
+    # 路径穿越同样被拒绝
+    resp = await client.get(f"{C_BASE}/media/uploads/../secret.jpg")
+    assert resp.status_code in (404, 400)

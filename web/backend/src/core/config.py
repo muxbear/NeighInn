@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     minio_bucket_public: str = "ni-public"
     minio_bucket_private: str = "ni-private"
     minio_bucket_system: str = "ni-system"
+    # 公开媒体（物品图/生活动态）对客户端暴露的地址前缀。留空表示同源相对路径
+    # /api/v1/media/...，H5 与管理端由各自 nginx 反代即可；原生 App 部署时
+    # 配成 API 对外域名（如 https://api.neighinn.com）。
+    public_media_base_url: str = ""
 
     session_cookie_name: str = "ni_admin_session"
     session_ttl_minutes: int = 480
