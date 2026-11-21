@@ -461,7 +461,7 @@ watch(() => app.currentCommunityId, () => {
 </script>
 
 <template>
-  <CommunityFilterBar owner-label="人员档案归属小区" scope-note="人员列表仅展示所选小区" />
+  <CommunityFilterBar scope-note="人员列表仅展示所选小区" />
 
   <section class="resident-summary-grid">
     <div v-for="card in summaryCards" :key="card.label">

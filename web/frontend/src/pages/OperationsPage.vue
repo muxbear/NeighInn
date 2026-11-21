@@ -65,7 +65,7 @@ type LifeMediaItem = { key: string; url: string; type: 'image' | 'video' }
 const configs: Record<string, any> = {
   broadcast: {
     api: 'broadcasts', title: '社区喇叭', tone: 'broadcast', icon: Megaphone,
-    ownerLabel: '喇叭归属小区', scopeNote: '喇叭列表仅展示所选小区',
+    scopeNote: '喇叭列表仅展示所选小区',
     description: '运营社区即时播报、邻里话题、重要提醒和互动内容', create: '发布喇叭',
     tabs: ['全部', '已发布', '定时发布', '已下架'],
     metrics: [
@@ -77,19 +77,19 @@ const configs: Record<string, any> = {
   },
   items: {
     api: 'items', title: '社区物品', tone: 'items', icon: ShoppingBag,
-    ownerLabel: '物品归属小区', scopeNote: '物品列表仅展示所选小区',
+    scopeNote: '物品列表仅展示所选小区',
     description: '管理邻里闲置物品、热门推荐、商品审核及交易状态', create: '新增物品',
     tabs: ['全部', '在售', '待审核', '已售出', '已下架'],
   },
   help: {
     api: 'help-requests', title: '邻里互助', tone: 'help', icon: HandHeart,
-    ownerLabel: '互助归属小区', scopeNote: '互助列表仅展示所选小区',
+    scopeNote: '互助列表仅展示所选小区',
     description: '管理居民求助、邻里响应、撮合履约及互助信用评价', create: '代发互助',
     tabs: ['全部', '待审核', '待响应', '匹配中', '进行中', '已完成', '已关闭', '已驳回'],
   },
   life: {
     api: 'life-posts', title: '社区生活', tone: 'life', icon: Coffee,
-    ownerLabel: '内容归属小区', scopeNote: '生活内容仅展示所选小区',
+    scopeNote: '生活内容仅展示所选小区',
     description: '运营小区生活、便民指南、探店内容和专题推荐', create: '新建内容',
     tabs: ['全部', '已发布', '草稿', '待审核', '已下线'],
     metrics: [
@@ -1524,7 +1524,7 @@ watch(() => app.currentCommunityId, () => {
 </script>
 
 <template>
-  <CommunityFilterBar :owner-label="config.ownerLabel" :scope-note="config.scopeNote" />
+  <CommunityFilterBar :scope-note="config.scopeNote" />
 
   <section class="community-operation-metrics">
     <div v-for="metric in metrics" :key="metric.label">
@@ -2261,7 +2261,7 @@ watch(() => app.currentCommunityId, () => {
         <component :is="rowOfflineIcon()" :size="18" style="color: #c9525e" />
         <div style="flex: 1">
           <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
-            {{ offlineTarget.code }} · {{ offlineTarget.communityName || config.ownerLabel }}
+            {{ offlineTarget.code }} · {{ offlineTarget.communityName || app.currentCommunity?.name || '未选择小区' }}
           </span>
           <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ offlineTarget.title }}</strong>
         </div>

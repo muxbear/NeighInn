@@ -6,12 +6,9 @@ import { useAppStore } from '@/stores/app'
 import { groupProvinces, indexRegions, type RegionEntry, type RegionNode } from '@/utils/region'
 
 withDefaults(defineProps<{
-  /** 展示在小区名称上方的说明，如“物品归属小区”。 */
-  ownerLabel?: string
-  /** 展示在右上角的状态说明，如“物品列表仅展示所选小区”。 */
+  /** 展示在小区名称右侧的状态说明，如“物品列表仅展示所选小区”。 */
   scopeNote?: string
 }>(), {
-  ownerLabel: '归属小区',
   scopeNote: '列表仅展示所选小区',
 })
 
@@ -181,6 +178,13 @@ function clearCommunitySearch() {
   runCommunitySearch('')
 }
 
+/** 查询按钮 / 回车：以当前关键词检索小区并展开结果。 */
+function submitCommunitySearch() {
+  if (communitySearchTimer) window.clearTimeout(communitySearchTimer)
+  communityOptionsOpen.value = true
+  runCommunitySearch(communitySearch.value.trim())
+}
+
 /** 选中小区：切换当前运营空间，页面列表随 app.currentCommunityId 重新加载。 */
 function selectCommunity(row: any) {
   communityOptionsOpen.value = false
@@ -230,7 +234,7 @@ watch(() => app.communities.length, async () => {
     <div class="community-filter-cascade">
       <label class="community-filter-field">
         <select v-model="provinceId" aria-label="省份/直辖市" :disabled="regionLoading || !provinceGroups.length" @change="onProvinceChange">
-          <option value="">{{ regionLoading ? '正在加载区划…' : '请选择省份/直辖市' }}</option>
+          <option value="">{{ regionLoading ? '正在加载区划…' : '省份/直辖市' }}</option>
           <optgroup v-for="group in provinceGroups" :key="group.label" :label="group.label">
             <option v-for="province in group.provinces" :key="province.id" :value="String(province.id)">{{ province.name }}</option>
           </optgroup>
@@ -257,50 +261,48 @@ watch(() => app.communities.length, async () => {
           <option v-for="street in streetNodes" :key="street.id" :value="String(street.id)">{{ street.name }}</option>
         </select>
       </label>
-      <label class="community-filter-search">
-        <div ref="communitySearchRoot" class="community-filter-search-box">
-          <Search :size="15" />
-          <input
-            v-model="communitySearch"
-            aria-label="小区检索"
-            placeholder="输入小区名称、编码或地址…"
-            @focus="onCommunitySearchFocus"
-            @input="onCommunitySearchInput"
-          />
-          <button v-if="communitySearch" class="community-filter-search-clear" aria-label="清空小区检索" @click="clearCommunitySearch"><X :size="12" /></button>
-          <div v-if="communityOptionsOpen" class="community-filter-options">
-            <div v-if="communitySearching" class="community-filter-options-empty">正在检索小区…</div>
-            <template v-else>
-              <button
-                v-for="row in communityResults"
-                :key="row.id"
-                :class="['community-filter-option', { current: Number(row.id) === app.currentCommunityId }]"
-                @click="selectCommunity(row)"
-              >
-                <span class="community-filter-option-icon"><Home :size="14" /></span>
-                <span class="community-filter-option-main">
-                  <strong>{{ row.name }}</strong>
-                  <em>{{ row.code }}<template v-if="row.address"> · {{ row.address }}</template></em>
-                </span>
-                <em v-if="Number(row.id) === app.currentCommunityId" class="community-filter-option-tag">当前小区</em>
-              </button>
-              <div v-if="!communityResults.length" class="community-filter-options-empty">{{ regionError || communitySearchHint }}</div>
-            </template>
+      <div ref="communitySearchRoot" class="community-filter-search-group">
+        <label class="community-filter-search">
+          <div class="community-filter-search-box">
+            <Search :size="15" />
+            <input
+              v-model="communitySearch"
+              aria-label="小区检索"
+              placeholder="输入小区名称、编码或地址…"
+              @focus="onCommunitySearchFocus"
+              @input="onCommunitySearchInput"
+              @keyup.enter="submitCommunitySearch"
+            />
+            <button v-if="communitySearch" class="community-filter-search-clear" aria-label="清空小区检索" @click="clearCommunitySearch"><X :size="12" /></button>
+            <div v-if="communityOptionsOpen" class="community-filter-options">
+              <div v-if="communitySearching" class="community-filter-options-empty">正在检索小区…</div>
+              <template v-else>
+                <button
+                  v-for="row in communityResults"
+                  :key="row.id"
+                  :class="['community-filter-option', { current: Number(row.id) === app.currentCommunityId }]"
+                  @click="selectCommunity(row)"
+                >
+                  <span class="community-filter-option-icon"><Home :size="14" /></span>
+                  <span class="community-filter-option-main">
+                    <strong>{{ row.name }}</strong>
+                    <em>{{ row.code }}<template v-if="row.address"> · {{ row.address }}</template></em>
+                  </span>
+                  <em v-if="Number(row.id) === app.currentCommunityId" class="community-filter-option-tag">当前小区</em>
+                </button>
+                <div v-if="!communityResults.length" class="community-filter-options-empty">{{ regionError || communitySearchHint }}</div>
+              </template>
+            </div>
           </div>
-        </div>
-      </label>
+        </label>
+        <button type="button" class="community-filter-search-submit" @click="submitCommunitySearch">查询</button>
+      </div>
     </div>
     <div class="community-filter-head">
-      <span class="community-filter-icon"><MapPin :size="20" /></span>
-      <div>
-        <em>{{ ownerLabel }}</em>
-        <strong>{{ selectedCommunityName || '未选择小区' }}</strong>
-        <p>{{ selectedCommunityPath || '通过行政区划逐级定位，或直接检索小区名称' }}</p>
-      </div>
-      <div class="community-filter-state">
-        <span><i />四级联动</span>
-        <strong>{{ scopeNote }}</strong>
-      </div>
+      <span class="community-filter-icon"><MapPin :size="13" /></span>
+      <strong class="community-filter-name">{{ selectedCommunityName || '未选择小区' }}</strong>
+      <span class="community-filter-path">{{ selectedCommunityPath || '通过行政区划逐级定位，或直接检索小区名称' }}</span>
+      <span class="community-filter-state">{{ scopeNote }}</span>
     </div>
   </section>
 </template>

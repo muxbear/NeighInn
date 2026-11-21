@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Building2, ChevronDown, ChevronRight, Download, Filter, Folder, FolderOpen, Home, Map, MapPin, Pencil, Plus, Search, Trash2, Upload } from 'lucide-vue-next'
+import { Building2, ChevronRight, Download, Filter, Folder, FolderOpen, Home, Map, MapPin, Pencil, Plus, Search, Trash2, Upload } from 'lucide-vue-next'
 import { communityApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useConfirm } from '@/composables/useConfirm'
@@ -679,8 +679,8 @@ onMounted(loadRegions)
       </div>
       <div class="community-location-filters">
         <div class="location-path"><MapPin :size="16" /><span>{{ selectedProvinceName }}</span><ChevronRight :size="13" /><strong>{{ selectedCityName }}</strong></div>
-        <label><span>所在区县</span><div style="position: relative"><select v-model="selectedDistrictName" :disabled="districtLoading || !districtNodes.length" @change="selectDistrict(selectedDistrictName)"><option v-if="districtLoading" value="">加载中…</option><option v-for="district in districtNodes" :key="district.id">{{ district.name }}</option></select><ChevronDown :size="14" style="position: absolute; right: 9px; top: 10px; color: #96919d" /></div></label>
-        <label><span>所在街道</span><div style="position: relative"><select :value="selectedStreetName" :disabled="streetLoading || !streetNodes.length" @change="selectStreet"><option value="">全部街道</option><option v-if="streetLoading" value="__loading" disabled>加载中…</option><option v-for="street in streetNodes" :key="street.id">{{ street.name }}</option></select><ChevronDown :size="14" style="position: absolute; right: 9px; top: 10px; color: #96919d" /></div></label>
+        <label><select v-model="selectedDistrictName" aria-label="所在区县" :disabled="districtLoading || !districtNodes.length" @change="selectDistrict(selectedDistrictName)"><option v-if="districtLoading" value="">加载中…</option><option v-for="district in districtNodes" :key="district.id">{{ district.name }}</option></select></label>
+        <label><select :value="selectedStreetName" aria-label="所在街道" :disabled="streetLoading || !streetNodes.length" @change="selectStreet"><option value="">全部街道</option><option v-if="streetLoading" value="__loading" disabled>加载中…</option><option v-for="street in streetNodes" :key="street.id">{{ street.name }}</option></select></label>
       </div>
       <div class="community-table-toolbar">
         <div><h3>{{ selectedStreetName || '全部' }}社区列表</h3><span>共 {{ total }} 个社区</span></div>
