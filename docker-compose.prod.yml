@@ -1,7 +1,7 @@
 # 邻里小栈生产编排（Linux + Docker Compose v2）。
 #
 # 百度云 Redis/PostgreSQL/MinIO 发布在部署机 127.0.0.1:5201/5205/5206，
-# 因此后端使用 host 网络；两个 nginx 也使用 host 网络，分别监听 5192/5191，
+# 因此后端使用 host 网络；两个 nginx 也使用 host 网络，分别监听 5192/80，
 # 并把 /api 反代到 127.0.0.1:5193。
 #
 # 启动（管理端 + 统一服务端）：
@@ -43,7 +43,7 @@ services:
     image: neighinn/mobile-h5:latest
     network_mode: host
     environment:
-      NGINX_PORT: "5191"
+      NGINX_PORT: "80"
       BACKEND_UPSTREAM: "http://127.0.0.1:5193"
     depends_on:
       backend:

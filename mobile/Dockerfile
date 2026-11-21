@@ -9,7 +9,7 @@
 #   2. HBuilderX → 发行 → 网站-PC Web或手机H5，输出到 unpackage/dist/build/web；
 #   3. docker build -t neighinn-mobile ./mobile
 # 运行：
-#   docker run --rm --network host -e NGINX_PORT=5191 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 neighinn-mobile
+#   docker run --rm --network host -e NGINX_PORT=80 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 neighinn-mobile
 FROM nginx:1.27-alpine
 
 # HBuilderX 的 H5 发行目录；若版本输出到 h5 等其他目录，可用 --build-arg 覆盖。
@@ -31,15 +31,15 @@ RUN found=0; \
 
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
-# 宿主机网络模式下直接监听 5191，与开发环境端口保持一致。
-ENV NGINX_PORT=5191 \
+# 宿主机网络模式下直接监听 80（生产 H5 默认 HTTP 端口）。
+ENV NGINX_PORT=80 \
     BACKEND_UPSTREAM=http://127.0.0.1:5193
 
 # 删除镜像自带的 80 端口默认站点，由启动时的 envsubst 模板生成唯一站点配置。
 RUN sed -i 's/\r$//' /etc/nginx/templates/default.conf.template \
     && rm -f /etc/nginx/conf.d/default.conf
 
-EXPOSE 5191
+EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- "http://127.0.0.1:${NGINX_PORT}/" >/dev/null 2>&1 || exit 1
