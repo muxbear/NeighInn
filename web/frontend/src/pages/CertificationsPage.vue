@@ -107,6 +107,11 @@ function isImageMaterial(objectKey: string): boolean {
   return /\.(jpe?g|png|webp)(\?|$)/i.test(objectKey || '')
 }
 
+/** 材料读取地址：优先后端同源代理（不依赖浏览器访问 MinIO 主机），回退签名 URL。 */
+function materialSrc(material: any): string {
+  return material?.url || material?.signedUrl || ''
+}
+
 async function refreshAfterAction() {
   drawerOpen.value = false
   await Promise.all([load(), loadSummary()])
@@ -218,21 +223,21 @@ onMounted(async () => {
         <label><span>身份类型</span><input :value="selected.identity === 'owner' ? '业主' : selected.identity === 'tenant' ? '租户' : selected.identity === 'family' ? '家属' : '—'" disabled /></label>
         <label><span>追踪号</span><input :value="selected.traceId" disabled /></label>
       </div>
-      <h4 class="section-title" style="margin-top: 20px">材料（私有桶签名 URL，10 分钟时效）</h4>
+      <h4 class="section-title" style="margin-top: 20px">材料（登录态同源读取，仅审核人员可见）</h4>
       <div class="material-grid">
         <a v-for="(material, index) in selected.materials || []" :key="material.objectKey"
-          :href="material.signedUrl || undefined" target="_blank" rel="noopener"
-          class="material-card" :class="{ 'material-card--disabled': !material.signedUrl }">
-          <img v-if="material.signedUrl && isImageMaterial(material.objectKey)" class="material-thumb"
-            :src="material.signedUrl" :alt="materialLabel(index)" />
+          :href="materialSrc(material) || undefined" target="_blank" rel="noopener"
+          class="material-card" :class="{ 'material-card--disabled': !materialSrc(material) }">
+          <img v-if="materialSrc(material) && isImageMaterial(material.objectKey)" class="material-thumb"
+            :src="materialSrc(material)" :alt="materialLabel(index)" />
           <FileImage v-else :size="15" />
           <span>{{ materialLabel(index) }}</span>
         </a>
         <p v-if="!(selected.materials || []).length" style="color: #988da2; font-size: var(--font-size-body)">无材料</p>
       </div>
-      <p v-if="(selected.materials || []).some((material: any) => !material.signedUrl)"
+      <p v-if="(selected.materials || []).some((material: any) => !materialSrc(material))"
         style="margin-top: 8px; color: #c08a35; font-size: var(--font-size-caption)">
-        部分材料签名 URL 生成失败，请确认 MinIO 已启动且对象存在。
+        部分材料读取地址缺失，请确认对象存储已配置且对象存在。
       </p>
       <div v-if="selected.type === 'OWNER_PROOF'" class="community-selector-card"
         style="min-height: 52px; padding: 9px 12px; margin-top: 12px; margin-bottom: 0">
