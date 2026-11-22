@@ -157,13 +157,14 @@ class WsService {
     conversationId: string,
     content: string,
     clientMsgId: string,
-    options: { type?: string; extra?: Record<string, any> } = {},
+    options: { type?: string; image?: string; extra?: Record<string, any> } = {},
   ): void {
     this.send('MSG_SEND', {
       clientMsgId,
       conversationId,
       type: options.type ?? 'TEXT',
       content,
+      image: options.image ?? '',
       extra: options.extra ?? {},
     })
   }

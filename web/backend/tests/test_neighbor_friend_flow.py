@@ -283,6 +283,115 @@ async def test_emoji_message_and_idempotency_conflict(client):
 
 
 @pytest.mark.asyncio
+async def test_image_and_video_messages_return_signed_media_url(client):
+    """图片/小视频消息：必须是 chat/ 媒体键；下发签名地址；列表预览为[图片]/[视频]。"""
+    first, second = await _dual_users(client)
+    conv = await client.post(
+        f"{C_BASE}/conversations",
+        json={"peerId": int(second["profile"]["id"])},
+        headers=bearer(first["token"]),
+    )
+    conv_id = conv.json()["data"]["id"]
+    headers = bearer(first["token"])
+
+    # 缺少媒体键 / 非 chat 前缀一律拒绝。
+    missing = await client.post(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        json={"type": "IMAGE", "clientMsgId": "img-0"},
+        headers=headers,
+    )
+    assert missing.status_code == 400
+    assert missing.json()["code"] == 40001
+
+    forged = await client.post(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        json={
+            "type": "IMAGE",
+            "image": "uploads/item_image/1/a.jpg",
+            "clientMsgId": "img-0",
+        },
+        headers=headers,
+    )
+    assert forged.status_code == 400
+
+    image_key = "chat/chat_image/1/a.jpg"
+    image = await client.post(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        json={
+            "type": "IMAGE",
+            "clientMsgId": "img-1",
+            "image": image_key,
+            "extra": {"width": 800, "height": 600},
+        },
+        headers=headers,
+    )
+    assert image.status_code == 200, image.text
+    image_data = image.json()["data"]
+    assert image_data["type"] == "IMAGE"
+    assert image_data["imageKey"] == image_key
+    assert image_data["image"].startswith("/api/v1/media/private/chat/chat_image/")
+    assert "?e=" in image_data["image"] and "&s=" in image_data["image"]
+    assert image_data["extra"] == {"width": 800, "height": 600}
+
+    # 同一 clientMsgId 换文件属于幂等冲突。
+    conflict = await client.post(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        json={
+            "type": "IMAGE",
+            "clientMsgId": "img-1",
+            "image": "chat/chat_image/1/b.jpg",
+        },
+        headers=headers,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == 40902
+
+    # 超过 60 秒的小视频拒绝。
+    too_long = await client.post(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        json={
+            "type": "VIDEO",
+            "clientMsgId": "vid-0",
+            "image": "chat/chat_video/1/v.mp4",
+            "extra": {"duration": 61},
+        },
+        headers=headers,
+    )
+    assert too_long.status_code == 400
+    assert "60" in too_long.json()["message"]
+
+    video = await client.post(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        json={
+            "type": "VIDEO",
+            "clientMsgId": "vid-1",
+            "image": "chat/chat_video/1/v.mp4",
+            "extra": {"duration": 12.5, "size": 12345},
+        },
+        headers=headers,
+    )
+    assert video.status_code == 200, video.text
+    assert video.json()["data"]["image"].startswith(
+        "/api/v1/media/private/chat/chat_video/")
+
+    conversations = (await client.get(
+        f"{C_BASE}/conversations", headers=bearer(second["token"])
+    )).json()["data"]
+    row = next(item for item in conversations if item["id"] == conv_id)
+    assert row["lastMessage"] == "[视频]"
+    assert row["lastMessageType"] == "VIDEO"
+
+    # 对方拉取消息时同样拿到可播放/可预览的签名地址。
+    page = (await client.get(
+        f"{C_BASE}/conversations/{conv_id}/messages",
+        headers=bearer(second["token"]),
+    )).json()["data"]
+    types = {item["type"]: item for item in page["items"]}
+    assert types["IMAGE"]["image"].startswith("/api/v1/media/private/")
+    assert types["VIDEO"]["imageKey"] == "chat/chat_video/1/v.mp4"
+
+
+@pytest.mark.asyncio
 async def test_message_rate_limit(client, monkeypatch):
     """超过每分钟发送上限返回 42901。"""
     monkeypatch.setattr(settings, "neighbor_message_rate_per_minute", 2)

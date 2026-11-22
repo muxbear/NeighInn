@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import time
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -83,3 +86,52 @@ def public_media_url(object_key: str | None) -> str:
         return key
     base = (settings.public_media_base_url or "").rstrip("/")
     return f"{base}/api/v1/media/{quote(key, safe='/')}"
+
+
+# ---------------------------------------------------------------- 私信媒体（私有桶）
+
+# 私信图片/视频存放在私有桶；客户端通过带 HMAC 签名的同源地址访问，
+# 避免把 MinIO 内网地址暴露给手机浏览器（签名 URL 主机常为 127.0.0.1:5206）。
+CHAT_MEDIA_PREFIX = "chat/"
+CHAT_MEDIA_URL_TTL_SECONDS = 7 * 24 * 3600
+
+
+def _chat_media_signature(object_key: str, expires_at: int) -> str:
+    message = f"chat-media:{object_key}:{expires_at}".encode()
+    return hmac.new(
+        settings.secret_key.encode(), message, hashlib.sha256
+    ).hexdigest()
+
+
+def private_media_url(
+    object_key: str | None, ttl_seconds: int = CHAT_MEDIA_URL_TTL_SECONDS
+) -> str:
+    """私信媒体对象键 → 带时效签名的同源访问地址。"""
+    key = str(object_key or "").strip()
+    if not key:
+        return ""
+    if key.startswith(("http://", "https://", "data:", "blob:")):
+        return key
+    if not key.startswith(CHAT_MEDIA_PREFIX):
+        # 只对私信媒体签名；认证材料等私有文件不得走此通道。
+        return ""
+    expires_at = int(time.time()) + max(60, ttl_seconds)
+    signature = _chat_media_signature(key, expires_at)
+    base = (settings.public_media_base_url or "").rstrip("/")
+    return (
+        f"{base}/api/v1/media/private/{quote(key, safe='/')}"
+        f"?e={expires_at}&s={signature}"
+    )
+
+
+def verify_private_media_signature(
+    object_key: str, expires_at: int, signature: str
+) -> bool:
+    """校验私信媒体签名（constant-time）；仅接受 chat/ 前缀。"""
+    key = str(object_key or "").lstrip("/")
+    if not key.startswith(CHAT_MEDIA_PREFIX):
+        return False
+    if expires_at < int(time.time()):
+        return False
+    expected = _chat_media_signature(key, expires_at)
+    return hmac.compare_digest(expected, str(signature or ""))

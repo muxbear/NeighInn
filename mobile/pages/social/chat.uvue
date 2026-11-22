@@ -65,7 +65,7 @@
           <view class="chat__message" :class="{ 'chat__message--mine': message.mine }">
             <view
               class="chat__bubble"
-              :class="{ 'chat__bubble--mine': message.mine }"
+              :class="{ 'chat__bubble--mine': message.mine, 'chat__bubble--media': isMediaMessage(message) }"
               @longpress="openMessageActions(message)"
             >
               <text
@@ -82,9 +82,26 @@
               >
                 {{ message.content }}
               </text>
+              <image
+                v-else-if="message.type === 'IMAGE' && message.image"
+                class="chat__media"
+                :style="mediaStyle(message)"
+                :src="resolveMediaUrl(message.image)"
+                mode="aspectFill"
+                @click="previewImageMessage(message)"
+              />
               <text v-else-if="message.type === 'IMAGE'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
                 [图片]
               </text>
+              <video
+                v-else-if="message.type === 'VIDEO' && message.image"
+                class="chat__media"
+                :style="mediaStyle(message)"
+                :src="resolveMediaUrl(message.image)"
+                :controls="true"
+                :show-center-play-btn="true"
+                object-fit="cover"
+              />
               <text v-else-if="message.type === 'VIDEO'" class="chat__text" :class="{ 'chat__text--mine': message.mine }">
                 [视频]
               </text>
@@ -130,6 +147,9 @@
     </view>
 
     <view class="chat__input-bar">
+      <view class="chat__media-toggle" @click="openMediaPicker">
+        <ni-icon name="image" :size="20" state="secondary" />
+      </view>
       <view class="chat__emoji-toggle" @click="toggleEmoji">
         <text class="chat__emoji-toggle-text">{{ emojiPanelVisible ? '⌨' : '☺' }}</text>
       </view>
@@ -161,9 +181,22 @@ import { onLoad } from '@dcloudio/uni-app'
 import type { ChatMessage, Conversation } from '../../models'
 import { useSocialStore } from '../../stores/social.store'
 import { useToast } from '../../composables/useToast'
+import { useUpload } from '../../composables/useUpload'
+import {
+  chooseImages,
+  chooseVideo,
+  compressImage,
+  getImageInfo,
+  previewImages,
+  resolveMediaUrl,
+} from '../../utils/image'
 
 const socialStore = useSocialStore()
 const { toast, showToast } = useToast()
+const { uploadOne } = useUpload()
+
+const MAX_VIDEO_SECONDS = 60
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024
 
 const EMOJIS = [
   '😀', '😄', '😁', '😆', '😅', '😂', '🙂', '🙃',
@@ -180,6 +213,7 @@ const conversationId = ref('')
 const draft = ref('')
 const scrollTarget = ref('')
 const sending = ref(false)
+const sendingMedia = ref(false)
 const loadingOlder = ref(false)
 const emojiPanelVisible = ref(false)
 
@@ -249,6 +283,130 @@ async function send(): Promise<void> {
   }
 }
 
+function openMediaPicker(): void {
+  if (!canSend.value) {
+    showToast(readOnlyText.value, 'alert')
+    return
+  }
+  if (sendingMedia.value) return
+  emojiPanelVisible.value = false
+  uni.showActionSheet({
+    itemList: ['发送图片', '发送小视频'],
+    success: (res: any) => {
+      if (Number(res.tapIndex) === 0) void sendImage()
+      else void sendVideo()
+    },
+  })
+}
+
+async function sendImage(): Promise<void> {
+  if (sendingMedia.value) return
+  try {
+    const paths = await chooseImages({ count: 1, sizeType: ['compressed'] })
+    if (!paths.length) return
+    sendingMedia.value = true
+    uni.showLoading({ title: '图片发送中', mask: true })
+    const localPath = await compressImage(paths[0], 82)
+    const info = await getImageInfo(localPath)
+    const key = await uploadOne(localPath, 'CHAT_IMAGE')
+    uni.hideLoading()
+    const extra: Record<string, any> = {}
+    if (info?.width && info?.height) {
+      extra.width = info.width
+      extra.height = info.height
+    }
+    await socialStore.sendMessage(conversationId.value, '', {
+      type: 'IMAGE',
+      image: key,
+      localPreview: localPath,
+      extra,
+    })
+    scrollToBottom()
+  } catch (error) {
+    if (isUserCancel(error)) return
+    showToast(error instanceof Error ? error.message : '图片发送失败', 'alert')
+  } finally {
+    uni.hideLoading()
+    sendingMedia.value = false
+  }
+}
+
+async function sendVideo(): Promise<void> {
+  if (sendingMedia.value) return
+  try {
+    const video = await chooseVideo({ maxDuration: MAX_VIDEO_SECONDS })
+    if (!video.path) return
+    if (video.duration && video.duration > MAX_VIDEO_SECONDS + 0.5) {
+      showToast(`小视频最长 ${MAX_VIDEO_SECONDS} 秒`, 'alert')
+      return
+    }
+    if (video.size && video.size > MAX_VIDEO_BYTES) {
+      showToast('小视频不能超过 100MB', 'alert')
+      return
+    }
+    sendingMedia.value = true
+    uni.showLoading({ title: '视频发送中', mask: true })
+    const key = await uploadOne(video.path, 'CHAT_VIDEO')
+    uni.hideLoading()
+    const extra: Record<string, any> = {}
+    if (video.duration) extra.duration = Math.round(video.duration * 10) / 10
+    if (video.size) extra.size = video.size
+    if (video.width && video.height) {
+      extra.width = video.width
+      extra.height = video.height
+    }
+    await socialStore.sendMessage(conversationId.value, '', {
+      type: 'VIDEO',
+      image: key,
+      localPreview: video.path,
+      extra,
+    })
+    scrollToBottom()
+  } catch (error) {
+    if (isUserCancel(error)) return
+    showToast(error instanceof Error ? error.message : '视频发送失败', 'alert')
+  } finally {
+    uni.hideLoading()
+    sendingMedia.value = false
+  }
+}
+
+function isUserCancel(error: unknown): boolean {
+  const message = String((error as any)?.errMsg || (error as any)?.message || '')
+  return /cancel/i.test(message)
+}
+
+function isMediaMessage(message: ChatMessage): boolean {
+  return message.type === 'IMAGE' || message.type === 'VIDEO'
+}
+
+/** 气泡内媒体尺寸：按原始比例缩放到聊天页合适大小，避免长图撑爆布局。 */
+function mediaStyle(message: ChatMessage): Record<string, string> {
+  const extra = message.extra ?? {}
+  const width = Number(extra.width) || 0
+  const height = Number(extra.height) || 0
+  const maxWidth = message.type === 'VIDEO' ? 220 : 190
+  const maxHeight = message.type === 'VIDEO' ? 160 : 220
+  if (width > 0 && height > 0) {
+    const scale = Math.min(maxWidth / width, maxHeight / height, 1)
+    return {
+      width: `${Math.max(80, Math.round(width * scale))}px`,
+      height: `${Math.max(60, Math.round(height * scale))}px`,
+    }
+  }
+  return message.type === 'VIDEO'
+    ? { width: '220px', height: '150px' }
+    : { width: '170px', height: '127px' }
+}
+
+function previewImageMessage(message: ChatMessage): void {
+  const urls = messages.value
+    .filter((item) => item.type === 'IMAGE' && item.image)
+    .map((item) => resolveMediaUrl(item.image))
+  if (!urls.length) return
+  previewImages(urls, resolveMediaUrl(message.image) || urls[0])
+}
+
 async function resend(message: ChatMessage): Promise<void> {
   try {
     await socialStore.resendMessage(conversationId.value, message)
@@ -297,17 +455,20 @@ function scrollToBottom(): void {
 }
 
 function openMessageActions(message: ChatMessage): void {
-  const items = ['复制', '举报该消息']
+  const media = isMediaMessage(message)
+  const items = media ? ['举报该消息'] : ['复制', '举报该消息']
   uni.showActionSheet({
     itemList: items,
     success: (res: any) => {
       const index = Number(res.tapIndex)
-      if (index === 0) {
+      const copyIndex = media ? -1 : 0
+      const reportIndex = media ? 0 : 1
+      if (index === copyIndex) {
         uni.setClipboardData({
           data: message.content,
           success: () => showToast('已复制'),
         })
-      } else if (index === 1) {
+      } else if (index === reportIndex) {
         uni.navigateTo({ url: `/pages/report/index?type=message&targetId=${message.id}` })
       }
     },
@@ -503,6 +664,16 @@ function goBack(): void {
   border-top-right-radius: 4px;
   background-image: $ni-gradient-brand;
 }
+.chat__bubble--media {
+  padding: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+.chat__media {
+  border-radius: 12px;
+  background-color: #e9e1da;
+}
 .chat__text {
   font-size: $ni-font-12;
   line-height: 19px;
@@ -599,8 +770,14 @@ function goBack(): void {
   background-color: rgba(255, 255, 255, 0.98);
   border-top: 1px solid #eee9e4;
 }
+.chat__media-toggle {
+  width: 32px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+}
 .chat__emoji-toggle {
-  width: 36px;
+  width: 34px;
   height: 40px;
   align-items: center;
   justify-content: center;

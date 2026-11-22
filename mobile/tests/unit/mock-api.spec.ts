@@ -1,7 +1,15 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { mockRequest } from '../../api/mock'
 import { env } from '../../config/env'
-import type { CommunityBinding, HomeBundle, PageResult, RegionNode, ServicePost } from '../../models'
+import type {
+  ChatMessage,
+  CommunityBinding,
+  Conversation,
+  HomeBundle,
+  PageResult,
+  RegionNode,
+  ServicePost,
+} from '../../models'
 import type { Item, Order } from '../../models'
 
 beforeAll(() => {
@@ -177,6 +185,49 @@ describe('mock api', () => {
       data: { finish: true },
     })
     expect(done.onboardingStatus).toBe('COMPLETED')
+  })
+
+  it('sends image messages and previews them in the conversation list', async () => {
+    const created = await mockRequest<ChatMessage>({
+      url: '/conversations/c1/messages',
+      method: 'POST',
+      data: {
+        type: 'IMAGE',
+        content: '',
+        clientMsgId: 'mock-img-1',
+        image: 'blob:mock-preview',
+        extra: { width: 800, height: 600 },
+      },
+    })
+    expect(created.type).toBe('IMAGE')
+    expect(created.image).toBe('blob:mock-preview')
+    expect(created.imageKey).toBe('blob:mock-preview')
+
+    const conversations = await mockRequest<Conversation[]>({
+      url: '/conversations',
+      method: 'GET',
+    })
+    const target = conversations.find((item) => item.id === 'c1')
+    expect(target?.lastMessage).toBe('[图片]')
+    expect(target?.lastMessageType).toBe('IMAGE')
+
+    const video = await mockRequest<ChatMessage>({
+      url: '/conversations/c1/messages',
+      method: 'POST',
+      data: {
+        type: 'VIDEO',
+        content: '',
+        clientMsgId: 'mock-video-1',
+        image: 'blob:mock-video',
+        extra: { duration: 12 },
+      },
+    })
+    expect(video.type).toBe('VIDEO')
+    const afterVideo = await mockRequest<Conversation[]>({
+      url: '/conversations',
+      method: 'GET',
+    })
+    expect(afterVideo.find((item) => item.id === 'c1')?.lastMessage).toBe('[视频]')
   })
 
   it('rejects login for an unregistered phone', async () => {

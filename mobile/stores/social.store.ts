@@ -36,6 +36,20 @@ function dedupeMessages(list: ChatMessage[]): ChatMessage[] {
   return result
 }
 
+const MEDIA_MESSAGE_TYPES = ['IMAGE', 'VIDEO']
+
+function isMediaType(type: string): boolean {
+  return MEDIA_MESSAGE_TYPES.indexOf(type) >= 0
+}
+
+/** 会话列表预览文案：媒体消息没有文本，使用固定占位。 */
+function previewOf(type: string, content: string): string {
+  if (type === 'IMAGE') return '[图片]'
+  if (type === 'VIDEO') return '[视频]'
+  if (type === 'EMOJI') return '[表情]'
+  return content
+}
+
 export const useSocialStore = defineStore('social', () => {
   const conversations = ref<Conversation[]>([])
   const neighbors = ref<Friend[]>([])
@@ -180,12 +194,21 @@ export const useSocialStore = defineStore('social', () => {
   async function sendMessage(
     conversationId: string,
     content: string,
-    options: { type?: string; extra?: Record<string, any> } = {},
+    options: {
+      type?: string
+      extra?: Record<string, any>
+      /** 已上传的媒体对象键（IMAGE / VIDEO） */
+      image?: string
+      /** 本地临时路径，用于乐观气泡即时展示 */
+      localPreview?: string
+    } = {},
   ): Promise<void> {
     const text = content.trim()
-    if (!text) return
-    const clientMsgId = uuidv4()
     const type = options.type ?? 'TEXT'
+    const media = isMediaType(type)
+    const image = options.image ?? ''
+    if (media ? !image : !text) return
+    const clientMsgId = uuidv4()
     const optimistic: ChatMessage = {
       id: `local-${clientMsgId}`,
       clientMsgId,
@@ -195,6 +218,8 @@ export const useSocialStore = defineStore('social', () => {
       senderName: '我',
       type: type as ChatMessage['type'],
       content: text,
+      image: options.localPreview || image || undefined,
+      imageKey: image || undefined,
       extra: options.extra,
       createdAt: Date.now(),
       timeText: formatTime(Date.now()),
@@ -208,7 +233,8 @@ export const useSocialStore = defineStore('social', () => {
     }
     const conversation = conversations.value.find((item) => item.id === conversationId)
     if (conversation) {
-      conversation.lastMessage = type === 'EMOJI' ? '[表情]' : text
+      conversation.lastMessage = previewOf(type, text)
+      conversation.lastMessageType = type
       conversation.lastTime = '刚刚'
     }
 
@@ -217,6 +243,7 @@ export const useSocialStore = defineStore('social', () => {
       const saved = await socialService.sendMessage(conversationId, text, {
         type,
         clientMsgId,
+        image: image || undefined,
         extra: options.extra,
       })
       replaceLocal(conversationId, optimistic.id, { ...saved, status: 'SENT', mine: true })
@@ -228,12 +255,17 @@ export const useSocialStore = defineStore('social', () => {
 
   async function resendMessage(conversationId: string, message: ChatMessage): Promise<void> {
     if (!message.clientMsgId) return
+    const media = isMediaType(message.type)
+    if (media && !message.imageKey) {
+      throw new Error('媒体文件已失效，请重新选择后发送')
+    }
     const updated = { ...message, status: 'SENDING' as const }
     replaceLocal(conversationId, message.id, updated)
     try {
       const saved = await socialService.sendMessage(conversationId, message.content, {
         type: message.type,
         clientMsgId: message.clientMsgId,
+        image: media ? message.imageKey : undefined,
         extra: message.extra,
       })
       replaceLocal(conversationId, message.id, { ...saved, status: 'SENT', mine: true })
@@ -321,7 +353,8 @@ export const useSocialStore = defineStore('social', () => {
     }
     const conversation = conversations.value.find((item) => item.id === conversationId)
     if (conversation) {
-      conversation.lastMessage = message.type === 'EMOJI' ? '[表情]' : message.content
+      conversation.lastMessage = previewOf(message.type, message.content)
+      conversation.lastMessageType = message.type
       conversation.lastTime = message.timeText || formatTime(message.createdAt)
       conversation.unread += 1
     } else {

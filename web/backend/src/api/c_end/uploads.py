@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+from collections.abc import Iterator
 from typing import Annotated
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ from fastapi import APIRouter, File, Form, Response, UploadFile
 from minio.error import S3Error
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
 
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
@@ -21,7 +23,12 @@ from src.core.responses import (
     ApiError,
     ok,
 )
-from src.core.storage import extension, get_minio, presign_download
+from src.core.storage import (
+    extension,
+    get_minio,
+    presign_download,
+    verify_private_media_signature,
+)
 from src.core.upload import (
     EXT_BY_TYPE,
     IMAGE_TYPES,
@@ -35,13 +42,27 @@ from src.db.models import FileObject
 router = APIRouter(tags=["c:uploads"])
 logger = logging.getLogger(__name__)
 
-# 认证材料、纠纷证据一律私有桶；公开图片/生活短视频可走公共桶。
+# 认证材料、私信媒体一律私有桶；公开图片/生活短视频可走公共桶。
 SCENE_TYPES: dict[str, tuple[set[str], str]] = {
     "REALNAME_ID": (IMAGE_TYPES, "private"),
     "OWNER_PROOF": (IMAGE_TYPES | {"application/pdf"}, "private"),
     "ITEM_IMAGE": (IMAGE_TYPES, "public"),
     "PUBLIC_IMAGE": (IMAGE_TYPES, "public"),
     "LIFE_VIDEO": (VIDEO_TYPES, "public"),
+    "CHAT_IMAGE": (IMAGE_TYPES, "private"),
+    "CHAT_VIDEO": (VIDEO_TYPES, "private"),
+}
+
+# 私信媒体与认证材料同桶不同前缀，便于签名通道只放行 chat/。
+PRIVATE_SCENE_PREFIX = {
+    "CHAT_IMAGE": "chat",
+    "CHAT_VIDEO": "chat",
+}
+
+_MEDIA_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "webp": "image/webp", "gif": "image/gif", "mp4": "video/mp4",
+    "mov": "video/quicktime", "webm": "video/webm",
 }
 
 
@@ -81,7 +102,10 @@ async def upload_file(
     # 避免 App/小程序端把图片统一标成 octet-stream 时误拒。
     original_name = file.filename or f"upload{EXT_BY_TYPE.get(detected, extension(''))}"
     suffix = EXT_BY_TYPE.get(detected) or extension(original_name)
-    prefix = "certifications" if visibility == "private" else "uploads"
+    if visibility == "private":
+        prefix = PRIVATE_SCENE_PREFIX.get(scene, "certifications")
+    else:
+        prefix = "uploads"
     object_key = f"{prefix}/{scene.lower()}/{user.id}/{uuid4().hex}{suffix}"
 
     client = get_minio()
@@ -159,15 +183,69 @@ async def complete_upload(user: CurrentUser, db: DbSession):
     raise not_implemented("POST /uploads/complete")
 
 
+# ---------------------------------------------------------------- 私信媒体同源代理
+
+def _iter_minio_object(upstream) -> Iterator[bytes]:
+    """同步分块迭代，Starlette 会在工作线程中消费，避免大视频阻塞事件循环。"""
+    try:
+        while True:
+            chunk = upstream.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        upstream.close()
+        upstream.release_conn()
+
+
+# 注意：必须注册在 /media/{object_key:path} 之前，否则会被公开媒体路由吞掉。
+@router.get("/media/private/{object_key:path}")
+async def private_media(
+    object_key: str, db: DbSession, e: int = 0, s: str = ""
+):
+    """私信图片/短视频同源代理（私有桶 + HMAC 时效签名）。
+
+    签名由 ``private_media_url`` 在消息下发时生成，只对 ``chat/`` 前缀有效；
+    签名本身即访问凭证，因此不要求额外 Bearer Token（``<image>``/``<video>``
+    无法携带请求头）。
+    """
+    key = object_key.lstrip("/")
+    segments = key.split("/")
+    if any(part in ("", ".", "..") for part in segments):
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404)
+    if not verify_private_media_signature(key, e, s):
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404)
+
+    record = await db.scalar(
+        select(FileObject).where(FileObject.object_key == key))
+    if record is not None and record.visibility != "private":
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404)
+
+    client = get_minio()
+    if client is None:
+        raise ApiError(ERR_DEPENDENCY, "对象存储未配置，暂无法访问文件", 503)
+    try:
+        upstream = await run_in_threadpool(
+            client.get_object, settings.minio_bucket_private, key)
+    except S3Error as exc:
+        logger.warning("私信媒体不存在 %s：%s", key, exc)
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404) from exc
+    except Exception as exc:  # 网络/连接异常降级为依赖不可用
+        logger.warning("私信媒体读取异常 %s：%s", key, exc)
+        raise ApiError(ERR_DEPENDENCY, "文件读取失败，请稍后重试", 503) from exc
+
+    media_type = (record.content_type if record and record.content_type else "") or \
+        _MEDIA_MIME.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+    return StreamingResponse(_iter_minio_object(upstream), media_type=media_type, headers={
+        "Cache-Control": "private, max-age=600",
+        "Content-Disposition": "inline",
+    })
+
+
 # ---------------------------------------------------------------- 公开媒体同源代理
 
-# 公开桶对象键只允许这些前缀；认证材料在私有桶，永不从这里出。
+# 公开桶对象键只允许这些前缀；认证材料与私信媒体在私有桶，永不从这里出。
 PUBLIC_MEDIA_PREFIXES = ("uploads/",)
-_PUBLIC_MEDIA_MIME = {
-    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-    "webp": "image/webp", "gif": "image/gif", "mp4": "video/mp4",
-    "mov": "video/quicktime", "webm": "video/webm",
-}
 
 
 @router.get("/media/{object_key:path}")
@@ -209,7 +287,7 @@ async def public_media(object_key: str, db: DbSession):
             await run_in_threadpool(upstream.release_conn)
 
     media_type = (record.content_type if record and record.content_type else "") or \
-        _PUBLIC_MEDIA_MIME.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+        _MEDIA_MIME.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
     # 键名含 uuid，内容不会变，可长缓存。
     return Response(content=data, media_type=media_type, headers={
         "Cache-Control": "public, max-age=604800",

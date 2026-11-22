@@ -5,7 +5,20 @@ import { secureStorage } from '../utils/storage'
 import { createIdempotencyKey } from '../utils/idempotency'
 import { chooseImages, chooseVideo, compressImage } from '../utils/image'
 
-export type UploadScene = 'REALNAME_ID' | 'OWNER_PROOF' | 'ITEM_IMAGE' | 'PUBLIC_IMAGE' | 'LIFE_VIDEO'
+export type UploadScene =
+  | 'REALNAME_ID'
+  | 'OWNER_PROOF'
+  | 'ITEM_IMAGE'
+  | 'PUBLIC_IMAGE'
+  | 'LIFE_VIDEO'
+  | 'CHAT_IMAGE'
+  | 'CHAT_VIDEO'
+
+const VIDEO_SCENES: UploadScene[] = ['LIFE_VIDEO', 'CHAT_VIDEO']
+
+function isVideoScene(scene: UploadScene): boolean {
+  return VIDEO_SCENES.indexOf(scene) >= 0
+}
 
 function contentTypeOf(path: string): string {
   const ext = (path.split('.').pop() ?? '').toLowerCase()
@@ -62,9 +75,11 @@ async function fetchOrApiError(
   }
 }
 
-// 单文件上限 10MB（服务端 MAX_IMAGE_UPLOAD_BYTES）。华为/iPhone 原图常见 8–20MB，
-// H5 的 sizeType:'compressed' 不生效，这里在浏览器端先等比缩放再上传。
+// 服务端上限：图片 10MB、短视频 100MB（core/upload.py）。
+// 华为/iPhone 原图常见 8–20MB，H5 的 sizeType:'compressed' 不生效，
+// 这里在浏览器端先等比缩放再上传。
 const IMAGE_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024
+const VIDEO_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024
 const IMAGE_SHRINK_TARGET_BYTES = 3 * 1024 * 1024
 
 async function shrinkImageForUpload(blob: Blob, scene: UploadScene): Promise<Blob> {
@@ -121,15 +136,18 @@ export function useUpload() {
     return compressed
   }
 
-  async function prepareVideo(): Promise<string> {
-    const video = await chooseVideo({ maxDuration: env.mock ? 180 : 180 })
+  async function prepareVideo(maxDuration = 180): Promise<string> {
+    const video = await chooseVideo({ maxDuration })
     return video.path
   }
 
   async function uploadOne(path: string, scene: UploadScene = 'PUBLIC_IMAGE'): Promise<string> {
     if (env.mock) {
       progress.value = 100
-      return `mock/certifications/${scene.toLowerCase()}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`
+      // 私信媒体没有真实后端可访问：直接返回本地临时路径，聊天页可立即展示。
+      if (scene === 'CHAT_IMAGE' || scene === 'CHAT_VIDEO') return path
+      const ext = isVideoScene(scene) ? '.mp4' : '.jpg'
+      return `mock/${scene.toLowerCase()}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`
     }
     if (/^https?:\/\//.test(path)) return path
 
@@ -153,8 +171,14 @@ export function useUpload() {
           throw new ApiError(40001, '图片内容为空，请重新选择')
         }
         const blob = await shrinkImageForUpload(raw, scene)
-        if (blob.size > IMAGE_UPLOAD_LIMIT_BYTES) {
-          throw new ApiError(41301, '照片超过 10MB，请重新选择较小的照片')
+        const limitBytes = isVideoScene(scene) ? VIDEO_UPLOAD_LIMIT_BYTES : IMAGE_UPLOAD_LIMIT_BYTES
+        if (blob.size > limitBytes) {
+          throw new ApiError(
+            41301,
+            isVideoScene(scene)
+              ? '视频超过 100MB，请选择更短的小视频'
+              : '照片超过 10MB，请重新选择较小的照片',
+          )
         }
         const fileName = `upload-${Date.now()}${extensionOf(blob.type || contentTypeOf(path))}`
         const form = new FormData()
@@ -178,9 +202,12 @@ export function useUpload() {
         return String(body?.data?.objectKey ?? '')
       }
 
-      // App/小程序：uni.uploadFile 直接读本地路径，先压缩一遍，避免原图超过 10MB 被服务端拒绝。
+      // App/小程序：uni.uploadFile 直接读本地路径，图片先压缩一遍，避免原图超过 10MB；
+      // 视频不压缩（compressImage 对视频无效，且会额外耗时）。
       const isCertScene = scene === 'REALNAME_ID' || scene === 'OWNER_PROOF'
-      const uploadPath = await compressImage(path, isCertScene ? 92 : 80)
+      const uploadPath = isVideoScene(scene)
+        ? path
+        : await compressImage(path, isCertScene ? 92 : 80)
       return await new Promise<string>((resolve, reject) => {
         const task = uni.uploadFile({
           url: uploadUrl,

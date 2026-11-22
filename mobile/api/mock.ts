@@ -1145,6 +1145,7 @@ async function route(
     if (method === 'POST') {
       const list = state.messages[conversationId] ?? []
       const seq = list.reduce((max, item) => Math.max(max, item.seq ?? 0), 0) + 1
+      const messageType = String(body.type ?? 'TEXT')
       const message: ChatMessage = {
         id: `m-${Date.now()}`,
         clientMsgId: body.clientMsgId,
@@ -1152,9 +1153,10 @@ async function route(
         seq,
         senderId: 'me',
         senderName: '我',
-        type: body.type ?? 'TEXT',
+        type: messageType as ChatMessage['type'],
         content: String(body.content ?? ''),
         image: body.image,
+        imageKey: body.image,
         extra: body.extra ?? {},
         createdAt: Date.now(),
         timeText: '刚刚',
@@ -1164,7 +1166,12 @@ async function route(
       state.messages[conversationId] = [...list, message]
       const conversation = state.conversations.find((item) => item.id === conversationId)
       if (conversation) {
-        conversation.lastMessage = message.content || '[图片]'
+        conversation.lastMessage = messageType === 'IMAGE'
+          ? '[图片]'
+          : messageType === 'VIDEO'
+            ? '[视频]'
+            : message.content
+        conversation.lastMessageType = messageType
         conversation.lastTime = '刚刚'
       }
       return clone(message)

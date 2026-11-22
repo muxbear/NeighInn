@@ -14,7 +14,10 @@ export interface ChatMessage {
   senderAvatar?: string
   type: ChatMessageType
   content: string
+  /** 可直接展示/播放的媒体地址（服务端下发签名 URL，本地乐观消息为临时路径） */
   image?: string
+  /** 媒体对象键，重发时使用 */
+  imageKey?: string
   item?: Item
   extra?: Record<string, any>
   createdAt: number

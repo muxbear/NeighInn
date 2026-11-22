@@ -32,8 +32,12 @@ class FakeMinio:
 class _FakeReadable:
     def __init__(self, payload: bytes):
         self._payload = payload
+        self._consumed = False
 
-    def read(self) -> bytes:
+    def read(self, size: int = -1) -> bytes:
+        if self._consumed:
+            return b""
+        self._consumed = True
         return self._payload
 
     def close(self) -> None:
@@ -169,6 +173,75 @@ async def test_realname_rejects_unowned_material_keys(client, monkeypatch):
     )
     assert ok.status_code == 200, ok.text
     assert ok.json()["data"]["status"] == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_chat_media_upload_private_bucket_and_signed_proxy(
+    client, db_session, monkeypatch
+):
+    """私信图片/视频：私有桶 + chat/ 前缀 + HMAC 签名同源代理。"""
+    from src.core.storage import private_media_url, verify_private_media_signature
+
+    fake = FakeMinio()
+    monkeypatch.setattr("src.api.c_end.uploads.get_minio", lambda: fake)
+    account = await register_user(client)
+    headers = bearer(account["token"])
+
+    image = await client.post(
+        f"{C_BASE}/uploads",
+        data={"scene": "CHAT_IMAGE"},
+        files={"file": ("chat.jpg", JPEG_BYTES, "image/jpeg")},
+        headers=headers,
+    )
+    assert image.status_code == 200, image.text
+    image_data = image.json()["data"]
+    assert image_data["objectKey"].startswith("chat/chat_image/")
+    assert image_data["visibility"] == "private"
+    assert fake.calls[-1][0] == settings.minio_bucket_private
+
+    video_bytes = b"\x00\x00\x00\x18ftypmp42" + b"0" * 24
+    video = await client.post(
+        f"{C_BASE}/uploads",
+        data={"scene": "CHAT_VIDEO"},
+        files={"file": ("chat.mp4", video_bytes, "video/mp4")},
+        headers=headers,
+    )
+    assert video.status_code == 200, video.text
+    video_key = video.json()["data"]["objectKey"]
+    assert video_key.startswith("chat/chat_video/") and video_key.endswith(".mp4")
+
+    signed = private_media_url(image_data["objectKey"])
+    assert signed.startswith("/api/v1/media/private/chat/chat_image/")
+    assert "?e=" in signed and "&s=" in signed
+    expires, sig = signed.split("?e=")[1].split("&s=")
+    assert verify_private_media_signature(image_data["objectKey"], int(expires), sig)
+
+    # 不带登录态也能按签名读取，返回私有桶内容。
+    fetched = await client.get(signed)
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.headers["content-type"] == "image/jpeg"
+    assert fetched.content == JPEG_BYTES
+    assert fake.calls[-1][0] == settings.minio_bucket_private
+
+    # 篡改签名 / 过期 / 非 chat 前缀一律 404。
+    tampered = signed.rsplit("&s=", 1)[0] + "&s=" + ("0" * 64)
+    assert (await client.get(tampered)).status_code == 404
+    import time
+    from urllib.parse import quote
+
+    from src.core.storage import _chat_media_signature
+
+    stale_exp = int(time.time()) - 10
+    stale = (
+        f"/api/v1/media/private/{quote(image_data['objectKey'], safe='/')}"
+        f"?e={stale_exp}&s={_chat_media_signature(image_data['objectKey'], stale_exp)}"
+    )
+    assert (await client.get(stale)).status_code == 404
+    assert private_media_url("certifications/realname_id/1/a.jpg") == ""
+
+    # 公开通道不能读取私信媒体。
+    assert (await client.get(
+        f"{C_BASE}/media/{image_data['objectKey']}")).status_code == 404
 
 
 @pytest.mark.asyncio

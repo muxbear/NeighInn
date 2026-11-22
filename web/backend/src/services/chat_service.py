@@ -23,6 +23,7 @@ from src.core.responses import (
     ERR_RATE_LIMIT,
     ApiError,
 )
+from src.core.storage import CHAT_MEDIA_PREFIX, private_media_url
 from src.core.ws_manager import ws_manager
 from src.db.models import Conversation, Message, User
 from src.db.models.common import utcnow
@@ -35,6 +36,9 @@ from src.services.social_service import (
 
 # 客户端可发送的消息类型；SYSTEM/ITEM 由服务端内部生成，禁止客户端伪造。
 ALLOWED_MESSAGE_TYPES = {"TEXT", "EMOJI", "IMAGE", "VIDEO", "VOICE"}
+MEDIA_MESSAGE_TYPES = {"IMAGE", "VIDEO"}
+MAX_VIDEO_DURATION_SECONDS = 60
+MAX_EXTRA_JSON_LENGTH = 2048
 
 # 单进程滑动窗口限流；多实例可替换为 Redis 实现。
 _RATE_BUCKETS: dict[int, list[float]] = {}
@@ -51,6 +55,10 @@ def _check_rate_limit(user_id: int) -> None:
 
 
 def message_payload(message: Message, *, mine: bool, sender: User) -> dict:
+    image_url = message.image_key or ""
+    if message.type in MEDIA_MESSAGE_TYPES and image_url:
+        # 私信媒体在私有桶：下发带时效签名的同源地址，客户端直接加载。
+        image_url = private_media_url(image_url) or image_url
     return {
         "id": str(message.id),
         "clientMsgId": message.client_msg_id or None,
@@ -62,7 +70,8 @@ def message_payload(message: Message, *, mine: bool, sender: User) -> dict:
         "type": message.type,
         "content": message.content,
         "extra": message.extra or {},
-        "image": message.image_key or None,
+        "image": image_url or None,
+        "imageKey": message.image_key or None,
         "createdAt": int(message.created_at.timestamp() * 1000) if message.created_at else 0,
         "status": message.status,
         "mine": mine,
@@ -105,11 +114,31 @@ async def send_chat_message(
         raise ApiError(ERR_PARAM, "表情消息暂未开放", 400)
 
     content = (content or "").strip()
+    image = (image or "").strip()
+    extra = extra or {}
     client_msg_id = (client_msg_id or "").strip()[:64]
     if msg_type == "TEXT" and not content:
         raise ApiError(ERR_PARAM, "消息内容不能为空", 400)
     if msg_type == "EMOJI" and not content:
         raise ApiError(ERR_PARAM, "表情消息缺少表情标识", 400)
+    if msg_type in MEDIA_MESSAGE_TYPES:
+        if not image:
+            raise ApiError(ERR_PARAM, "媒体消息缺少文件", 400)
+        if not image.startswith(CHAT_MEDIA_PREFIX) or len(image) > 255:
+            raise ApiError(ERR_PARAM, "媒体文件不合法", 400)
+        if len(str(extra)) > MAX_EXTRA_JSON_LENGTH:
+            raise ApiError(ERR_PARAM, "消息扩展信息过长", 400)
+        if msg_type == "VIDEO":
+            try:
+                duration = float(extra.get("duration") or 0)
+            except (TypeError, ValueError):
+                duration = 0
+            if duration > MAX_VIDEO_DURATION_SECONDS:
+                raise ApiError(
+                    ERR_PARAM,
+                    f"小视频最长 {MAX_VIDEO_DURATION_SECONDS} 秒",
+                    400,
+                )
     max_length = max(1, settings.neighbor_message_max_length)
     if len(content) > max_length:
         raise ApiError(ERR_PARAM, f"消息最长 {max_length} 字", 400)
@@ -131,7 +160,11 @@ async def send_chat_message(
             ).limit(1)
         )
         if existing:
-            if existing.content != content or existing.type != msg_type:
+            if (
+                existing.content != content
+                or existing.type != msg_type
+                or existing.image_key != image
+            ):
                 raise ApiError(
                     ERR_IDEMPOTENT_CONFLICT,
                     "同一 clientMsgId 对应了不同的消息内容",
