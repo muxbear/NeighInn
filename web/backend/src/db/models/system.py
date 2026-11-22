@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,6 +77,30 @@ class AdminUser(TimestampMixin, Base):
     # 首登/重置后强制改密；改密、撤销、停用、重置密码时自增会话版本使旧会话立即失效。
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     session_version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AdminUserRegionGrant(TimestampMixin, Base):
+    """后台账号的区划级管理范围（社区管理员页面）。
+
+    指定社区仍落在 ``admin_user_communities``；本表只保存“整个区划”授权，
+    数据范围解析时按区划子树动态展开，区划下后续新增社区自动纳入。
+    """
+
+    __tablename__ = "admin_user_region_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "admin_user_id", "region_id",
+            name="uq_admin_user_region_grants_admin_region",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    admin_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("admin_users.id"), index=True
+    )
+    region_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("regions.id"), index=True
+    )
 
 
 class Role(TimestampMixin, Base):

@@ -10,7 +10,11 @@ from sqlalchemy import select
 
 from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import get_data_scope, get_permission_codes
+from src.core.permissions import (
+    allowed_community_ids,
+    get_data_scope,
+    get_permission_codes,
+)
 from src.core.responses import (
     ERR_2FA_INVALID,
     ERR_BAD_CREDENTIALS,
@@ -35,7 +39,6 @@ from src.db.models import (
     PlatformUser,
     Resident,
     Role,
-    admin_user_communities,
     admin_user_roles,
 )
 from src.db.models.common import ensure_utc, utcnow
@@ -113,15 +116,17 @@ async def admin_payload(db: DbSession, admin: AdminUser) -> dict:
         .where(admin_user_roles.c.admin_user_id == admin.id)
     )
     data_scope = await get_data_scope(db, admin)
-    if admin.is_super_admin or data_scope == "ALL":
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is None:
         community_rows = (await db.execute(
             select(Community.id, Community.name).order_by(Community.id)
         )).all()
+    elif not allowed:
+        community_rows = []
     else:
         community_rows = (await db.execute(
             select(Community.id, Community.name)
-            .join(admin_user_communities, admin_user_communities.c.community_id == Community.id)
-            .where(admin_user_communities.c.admin_user_id == admin.id)
+            .where(Community.id.in_(allowed))
             .order_by(Community.id)
         )).all()
     return {

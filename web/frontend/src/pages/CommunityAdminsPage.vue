@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * 社区管理员（前端先行版）：为「用户管理」中的后台账号分配可管理的行政区划与社区/院校。
- * 账号、区划、社区读取现有只读接口；分配结果暂存 localStorage，待后端管理范围接口接入后替换。
+ * 社区管理员：为「用户管理」中的后台账号分配可管理的行政区划与社区/院校。
+ * 区划授权与指定社区均由服务端持久化，保存后立即影响账号的数据范围。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
@@ -24,6 +24,7 @@ import {
 import { adminUsersApi, communityApi } from '@/api'
 import { fmtRelative } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
 import { groupProvinces, indexRegions, type RegionEntry, type RegionNode } from '@/utils/region'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -52,9 +53,8 @@ type GrantStore = Record<string, ScopeGrant[]>
 
 type ScopeFilter = 'ALL' | 'ASSIGNED' | 'EMPTY'
 
-const STORAGE_KEY = 'neighinn.community-admin-scopes.v1'
-
 const app = useAppStore()
+const auth = useAuthStore()
 const { confirm } = useConfirm()
 
 const adminRows = ref<any[]>([])
@@ -65,8 +65,9 @@ const adminQuery = ref('')
 const scopeFilter = ref<ScopeFilter>('ALL')
 const selectedUserId = ref('')
 
-const grantsByUser = ref<GrantStore>(readGrantStore())
-const seedingUsers = ref<Set<string>>(new Set())
+const grantsByUser = ref<GrantStore>({})
+const loadingScopeUsers = ref<Set<string>>(new Set())
+const scopeSaving = ref(false)
 
 const regionRoots = ref<RegionNode[]>([])
 const regionIndex = ref<Record<string, RegionEntry>>({})
@@ -100,13 +101,19 @@ const currentGrants = computed(() =>
   selectedUserId.value ? grantsByUser.value[selectedUserId.value] || [] : [])
 
 const scopeLoading = computed(() =>
-  Boolean(selectedUserId.value) && seedingUsers.value.has(selectedUserId.value))
+  Boolean(selectedUserId.value) && loadingScopeUsers.value.has(selectedUserId.value))
 
 const editBlockedReason = computed(() => {
   const user = selectedUser.value
   if (!user) return ''
   if (user.isSuperAdmin) return '超级管理员默认拥有全部社区权限，无需单独分配管理范围。'
   if (user.status !== 'ACTIVE') return '该账号已停用，请先在「用户管理」中启用后再分配管理范围。'
+  if (!auth.hasPermission('system:admin-user:update')) {
+    return '当前账号仅有查看权限，不能调整社区管理范围。'
+  }
+  if (!auth.isSuperAdmin && auth.dataScope !== 'ALL') {
+    return '仅全局数据范围的管理员可调整社区管理范围。'
+  }
   return ''
 })
 
@@ -145,13 +152,13 @@ const pageStats = computed(() => {
   let assigned = 0
   for (const row of adminRows.value) {
     const id = String(row.id)
-    if (localHasEntry(id)) {
+    if (hasLoadedScope(id)) {
       const grants = grantsByUser.value[id] || []
       if (grants.length) assigned += 1
       grants.forEach((grant) => {
         if (grant.mode === 'COMMUNITY') grant.communities.forEach((item) => communityIds.add(item.id))
       })
-    } else if ((row.communities || []).length) {
+    } else if (Number(row.scopeRegionCount || 0) > 0 || (row.communities || []).length) {
       assigned += 1
       row.communities.forEach((item: any) => communityIds.add(String(item.id)))
     }
@@ -260,62 +267,87 @@ const pickerValid = computed(() => {
   return pickerSelectedCount.value > 0
 })
 
-function readGrantStore(): GrantStore {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    const store: GrantStore = {}
-    for (const [key, value] of Object.entries(parsed)) {
-      if (!Array.isArray(value)) continue
-      store[key] = value
-        .filter((item: any) => item && typeof item === 'object' && Array.isArray(item.path))
-        .map((item: any) => ({
-          id: String(item.id || uniqueId()),
-          mode: item.mode === 'REGION' ? 'REGION' : 'COMMUNITY',
-          regionIds: Array.isArray(item.regionIds) ? item.regionIds.map(String) : [],
-          path: item.path.map(String),
-          level: String(item.level || 'UNKNOWN'),
-          communities: Array.isArray(item.communities)
-            ? item.communities.map((community: any) => ({
-              id: String(community.id || ''),
-              name: String(community.name || '社区'),
-              code: String(community.code || ''),
-              type: String(community.type || ''),
-              address: String(community.address || ''),
-            }))
-            : [],
-          updatedAt: Number(item.updatedAt || Date.now()),
-        }))
-    }
-    return store
-  } catch {
-    return {}
-  }
-}
-
-function persistStore() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(grantsByUser.value))
-  } catch {
-    // 本地存储不可用时仅保留当前会话内存状态
-  }
+function hasLoadedScope(userId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(grantsByUser.value, userId)
 }
 
 function setUserGrants(userId: string, grants: ScopeGrant[]) {
   grantsByUser.value = { ...grantsByUser.value, [userId]: grants }
-  persistStore()
-}
-
-function localHasEntry(userId: string): boolean {
-  return Object.prototype.hasOwnProperty.call(grantsByUser.value, userId)
 }
 
 function hasAssignments(row: any): boolean {
   const id = String(row.id)
-  if (localHasEntry(id)) return (grantsByUser.value[id] || []).length > 0
-  return (row.communities || []).length > 0
+  if (hasLoadedScope(id)) return (grantsByUser.value[id] || []).length > 0
+  return Number(row.scopeRegionCount || 0) > 0 || (row.communities || []).length > 0
+}
+
+/** 服务端范围 -> 页面分组。区划授权与指定社区分开返回，社区按所在区划路径分组。 */
+function scopeFromPayload(data: any): ScopeGrant[] {
+  const grants: ScopeGrant[] = []
+  const coveredRegionPaths: string[][] = []
+  for (const item of data?.regionGrants || []) {
+    const nodes = item?.path || []
+    const regionIds = nodes.map((node: any) => String(node.id))
+    const grant: ScopeGrant = {
+      id: `region-${item?.regionId || regionIds[regionIds.length - 1] || uniqueId()}`,
+      mode: 'REGION',
+      regionIds,
+      path: nodes.map((node: any) => String(node.name || '')),
+      level: String(item?.level || nodes[nodes.length - 1]?.level || 'UNKNOWN'),
+      communities: [],
+      updatedAt: Number(item?.updatedAt || 0),
+    }
+    grants.push(grant)
+    if (regionIds.length) coveredRegionPaths.push(regionIds)
+  }
+
+  const groups = new Map<string, ScopeGrant>()
+  for (const community of data?.communities || []) {
+    const nodes = community?.path || []
+    const regionIds = nodes.map((node: any) => String(node.id))
+    // 区划授权已经覆盖的社区不在“社区授权”中重复展示。
+    if (coveredRegionPaths.some((prefix) => isPrefix(prefix, regionIds))) continue
+    const key = regionIds.join('/') || `unassigned-${community?.id || ''}`
+    let grant = groups.get(key)
+    if (!grant) {
+      grant = {
+        id: `community-${key}`,
+        mode: 'COMMUNITY',
+        regionIds,
+        path: nodes.map((node: any) => String(node.name || '')),
+        level: String(nodes[nodes.length - 1]?.level || 'UNKNOWN'),
+        communities: [],
+        updatedAt: 0,
+      }
+      groups.set(key, grant)
+    }
+    grant.communities.push({
+      id: String(community.id),
+      name: String(community.name || '社区'),
+      code: String(community.code || ''),
+      type: String(community.type || ''),
+      address: String(community.address || ''),
+    })
+  }
+  return grants.concat(Array.from(groups.values()))
+}
+
+/** 页面分组 -> 服务端全量替换载荷。区划只提交最末级节点，由服务端展开子树。 */
+function serializeScope(grants: ScopeGrant[]): { regionIds: number[]; communityIds: number[] } {
+  const regionIds = new Set<number>()
+  const communityIds = new Set<number>()
+  for (const grant of grants) {
+    if (grant.mode === 'REGION') {
+      const deepest = Number(grant.regionIds[grant.regionIds.length - 1] || 0)
+      if (deepest > 0) regionIds.add(deepest)
+      continue
+    }
+    grant.communities.forEach((item) => {
+      const id = Number(item.id)
+      if (id > 0) communityIds.add(id)
+    })
+  }
+  return { regionIds: Array.from(regionIds), communityIds: Array.from(communityIds) }
 }
 
 function uniqueId(): string {
@@ -362,7 +394,7 @@ function roleNames(row: any): string {
 
 function adminScopeText(row: any): string {
   const id = String(row.id)
-  if (localHasEntry(id)) {
+  if (hasLoadedScope(id)) {
     const grants = grantsByUser.value[id] || []
     if (!grants.length) return '未分配管理范围'
     const communities = new Set<string>()
@@ -376,8 +408,12 @@ function adminScopeText(row: any): string {
     if (communities.size) parts.push(`${communities.size} 个指定社区`)
     return parts.join(' · ') || '未分配管理范围'
   }
-  const count = (row.communities || []).length
-  return count ? `${count} 个社区` : '未分配管理范围'
+  const parts: string[] = []
+  const regionCount = Number(row.scopeRegionCount || 0)
+  const communityCount = (row.communities || []).length
+  if (regionCount) parts.push(`${regionCount} 项区划授权`)
+  if (communityCount) parts.push(`${communityCount} 个指定社区`)
+  return parts.join(' · ') || '未分配管理范围'
 }
 
 function grantLocation(grant: ScopeGrant): string {
@@ -436,6 +472,13 @@ async function loadAdmins() {
   }
 }
 
+async function refreshAll() {
+  grantsByUser.value = {}
+  loadingScopeUsers.value = new Set()
+  await loadAdmins()
+  if (selectedUser.value) await loadUserScope(selectedUser.value)
+}
+
 function ensureRegions(): Promise<void> {
   if (regionRoots.value.length) return Promise.resolve()
   if (regionPromise) return regionPromise
@@ -464,72 +507,38 @@ function retryRegions() {
   ensureRegions()
 }
 
-function pathForCommunity(detail: any): Pick<ScopeGrant, 'regionIds' | 'path' | 'level'> {
-  const districtId = String(detail?.regionId || '')
-  const streetId = String(detail?.streetId || '')
-  const district = districtId ? regionIndex.value[districtId] : undefined
-  const street = streetId ? regionIndex.value[streetId] : undefined
-  let target = district
-  if (street && district && street.parentId === districtId) target = street
-  if (!target) {
-    return { regionIds: [], path: ['未归属区划'], level: 'UNKNOWN' }
-  }
-  return {
-    regionIds: [...target.ancestors.map((item) => String(item.id)), String(target.node.id)],
-    path: [...target.ancestors.map((item) => item.name), target.node.name],
-    level: target.node.level || 'UNKNOWN',
+async function loadUserScope(row: any) {
+  const id = String(row.id)
+  if (hasLoadedScope(id) || loadingScopeUsers.value.has(id)) return
+  const pending = new Set(loadingScopeUsers.value)
+  pending.add(id)
+  loadingScopeUsers.value = pending
+  try {
+    const data = await adminUsersApi.communityScope(id)
+    setUserGrants(id, scopeFromPayload(data))
+  } catch (exc: any) {
+    app.showToast(exc?.message || '管理范围加载失败')
+  } finally {
+    const done = new Set(loadingScopeUsers.value)
+    done.delete(id)
+    loadingScopeUsers.value = done
   }
 }
 
-async function ensureUserGrants(row: any) {
-  const id = String(row.id)
-  if (localHasEntry(id)) return
-  const communities = row.communities || []
-  if (!communities.length) {
-    setUserGrants(id, [])
-    return
-  }
-  const pending = new Set(seedingUsers.value)
-  pending.add(id)
-  seedingUsers.value = pending
+async function persistScope(grants: ScopeGrant[], message: string): Promise<boolean> {
+  const user = selectedUser.value
+  if (!user || scopeSaving.value) return false
+  scopeSaving.value = true
   try {
-    await ensureRegions()
-    const groups = new Map<string, ScopeGrant>()
-    await Promise.all(communities.map(async (community: any) => {
-      let detail: any = null
-      try {
-        detail = await communityApi.detail(community.id)
-      } catch {
-        // 社区详情不可用时退化为仅展示社区名称
-      }
-      const location = pathForCommunity(detail)
-      const key = location.regionIds.join('/') || `unassigned-${community.id}`
-      let grant = groups.get(key)
-      if (!grant) {
-        grant = {
-          id: uniqueId(),
-          mode: 'COMMUNITY',
-          regionIds: location.regionIds,
-          path: location.path,
-          level: location.level,
-          communities: [],
-          updatedAt: Date.now(),
-        }
-        groups.set(key, grant)
-      }
-      grant.communities.push({
-        id: String(community.id),
-        name: community.name || detail?.name || '社区',
-        code: detail?.code || '',
-        type: detail?.type || '',
-        address: detail?.address || '',
-      })
-    }))
-    setUserGrants(id, Array.from(groups.values()))
+    const data = await adminUsersApi.saveCommunityScope(user.id, serializeScope(grants))
+    setUserGrants(String(user.id), scopeFromPayload(data))
+    app.showToast(message)
+    return true
+  } catch (exc: any) {
+    app.showToast(exc?.message || '管理范围保存失败')
+    return false
   } finally {
-    const done = new Set(seedingUsers.value)
-    done.delete(id)
-    seedingUsers.value = done
+    scopeSaving.value = false
   }
 }
 
@@ -538,7 +547,7 @@ watch(selectedUserId, async (id) => {
   collapsedProvinces.value = new Set()
   if (!id) return
   const row = adminRows.value.find((item) => String(item.id) === id)
-  if (row) await ensureUserGrants(row)
+  if (row) await loadUserScope(row)
 })
 
 function selectUser(row: any) {
@@ -738,11 +747,10 @@ function toggleAllVisibleCommunities() {
   pickerSelected.value = next
 }
 
-function submitGrant() {
+async function submitGrant() {
   const user = selectedUser.value
-  if (!user || !pickerValid.value) return
-  const userId = String(user.id)
-  const existing = (grantsByUser.value[userId] || []).slice()
+  if (!user || !pickerValid.value || scopeSaving.value) return
+  const existing = currentGrants.value.slice()
   const pathIds = pickerPathIds.value.slice()
   const pathNames = pickerRegionPath.value.slice()
   const level = pickerLevel.value || 'UNKNOWN'
@@ -761,7 +769,7 @@ function submitGrant() {
     const kept = existing.filter((grant) => !isPrefix(pathIds, grant.regionIds))
     const merged = existing.length - kept.length
     kept.push({
-      id: uniqueId(),
+      id: `region-${pathIds[pathIds.length - 1] || uniqueId()}`,
       mode: 'REGION',
       regionIds: pathIds,
       path: pathNames,
@@ -769,11 +777,11 @@ function submitGrant() {
       communities: [],
       updatedAt: now,
     })
-    setUserGrants(userId, kept)
-    grantDrawerOpen.value = false
-    app.showToast(merged
-      ? `已添加区划授权，并合并 ${merged} 项下级授权`
-      : '管理范围已添加（本地暂存）')
+    const saved = await persistScope(
+      kept,
+      merged ? `已添加区划授权，并合并 ${merged} 项下级授权` : '区划授权已添加',
+    )
+    if (saved) grantDrawerOpen.value = false
     return
   }
 
@@ -807,27 +815,27 @@ function submitGrant() {
       communities: Array.from(merged.values()),
       updatedAt: now,
     }
-    setUserGrants(userId, existing)
-    app.showToast(`已追加 ${added} 个社区到现有授权（本地暂存）`)
-  } else {
-    existing.push({
-      id: uniqueId(),
-      mode: 'COMMUNITY',
-      regionIds: pathIds,
-      path: pathNames,
-      level,
-      communities: chosen,
-      updatedAt: now,
-    })
-    setUserGrants(userId, existing)
-    app.showToast(`已添加 ${chosen.length} 个社区（本地暂存）`)
+    const saved = await persistScope(existing, `已追加 ${added} 个社区到现有授权`)
+    if (saved) grantDrawerOpen.value = false
+    return
   }
-  grantDrawerOpen.value = false
+
+  existing.push({
+    id: `community-${pathIds.join('/') || uniqueId()}`,
+    mode: 'COMMUNITY',
+    regionIds: pathIds,
+    path: pathNames,
+    level,
+    communities: chosen,
+    updatedAt: now,
+  })
+  const saved = await persistScope(existing, `已添加 ${chosen.length} 个社区`)
+  if (saved) grantDrawerOpen.value = false
 }
 
 async function removeGrant(grant: ScopeGrant) {
   const user = selectedUser.value
-  if (!user || !canEditSelected.value) return
+  if (!user || !canEditSelected.value || scopeSaving.value) return
   const ok = await confirm({
     title: '移除管理范围',
     message: `确定从“${user.realName || user.username}”的管理范围中移除“${grant.path.join(' / ')}”吗？`,
@@ -836,14 +844,15 @@ async function removeGrant(grant: ScopeGrant) {
     danger: true,
   })
   if (!ok) return
-  const userId = String(user.id)
-  setUserGrants(userId, (grantsByUser.value[userId] || []).filter((item) => item.id !== grant.id))
-  app.showToast('管理范围已移除（本地暂存）')
+  await persistScope(
+    currentGrants.value.filter((item) => item.id !== grant.id),
+    '管理范围已移除',
+  )
 }
 
 async function clearAllGrants() {
   const user = selectedUser.value
-  if (!user || !canEditSelected.value || !currentGrants.value.length) return
+  if (!user || !canEditSelected.value || !currentGrants.value.length || scopeSaving.value) return
   const ok = await confirm({
     title: '清空管理范围',
     message: `确定清空“${user.realName || user.username}”的全部管理范围吗？`,
@@ -852,8 +861,7 @@ async function clearAllGrants() {
     danger: true,
   })
   if (!ok) return
-  setUserGrants(String(user.id), [])
-  app.showToast('管理范围已清空（本地暂存）')
+  await persistScope([], '管理范围已清空')
 }
 
 onMounted(loadAdmins)
@@ -868,7 +876,6 @@ onBeforeUnmount(() => {
   <div class="community-admins-page">
     <header class="admin-heading">
       <div class="admin-heading-main">
-        <p class="admin-eyebrow">社区管理 · 管理范围授权</p>
         <h1>社区管理员</h1>
         <p class="admin-subtitle">为后台账号分配可管理的社区范围，一次配置一个账号，支持跨省份、地市、区县与街道授权。</p>
       </div>
@@ -876,7 +883,7 @@ onBeforeUnmount(() => {
         <div class="admin-stat"><strong>{{ pageStats.total }}</strong><span>后台账号</span></div>
         <div class="admin-stat"><strong>{{ pageStats.assigned }}</strong><span>已配置</span></div>
         <div class="admin-stat"><strong>{{ pageStats.communities }}</strong><span>指定社区</span></div>
-        <button class="admin-refresh" type="button" title="刷新账号数据" :disabled="adminLoading" @click="loadAdmins">
+        <button class="admin-refresh" type="button" title="刷新账号与管理范围" :disabled="adminLoading || scopeLoading || scopeSaving" @click="refreshAll">
           <RefreshCw :size="17" :class="{ spinning: adminLoading }" />
         </button>
       </div>
@@ -884,8 +891,7 @@ onBeforeUnmount(() => {
 
     <div class="admin-guidance">
       <span class="guidance-icon"><Info :size="16" /></span>
-      <p><strong>一个账号可同时管理多个省份、地市、区县、街道及社区/院校。</strong>区划授权会覆盖该区划下全部社区，后续新增社区自动纳入；分配结果当前仅暂存于本浏览器。</p>
-      <span class="guidance-local">本地暂存</span>
+      <p><strong>一个账号可同时管理多个省份、地市、区县、街道及社区/院校。</strong>区划授权会覆盖该区划下全部社区，后续新增社区自动纳入；保存后立即影响该账号的数据范围。</p>
     </div>
 
     <div class="admin-workspace">
@@ -974,15 +980,15 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="scope-clear"
-                :disabled="!currentGrants.length || !canEditSelected"
+                :disabled="!currentGrants.length || !canEditSelected || scopeSaving"
                 @click="clearAllGrants"
               >
-                <RotateCcw :size="15" />清空范围
+                <RotateCcw :size="15" />{{ scopeSaving ? '保存中…' : '清空范围' }}
               </button>
               <button
                 type="button"
                 class="primary-button"
-                :disabled="!canEditSelected || scopeLoading"
+                :disabled="!canEditSelected || scopeLoading || scopeSaving"
                 @click="openGrantDrawer"
               >
                 <Plus :size="16" />新增管理范围
@@ -1066,7 +1072,9 @@ onBeforeUnmount(() => {
                           <em v-if="community.type">{{ community.type }}</em>
                         </span>
                       </div>
-                      <span class="grant-time">更新于 {{ fmtRelative(grant.updatedAt) }}</span>
+                      <span class="grant-time">
+                        {{ grant.updatedAt ? `更新于 ${fmtRelative(grant.updatedAt)}` : '配置已生效' }}
+                      </span>
                     </div>
                     <div class="grant-side">
                       <strong>{{ grant.mode === 'COMMUNITY' ? grant.communities.length : '全部' }}</strong>
@@ -1075,7 +1083,7 @@ onBeforeUnmount(() => {
                         type="button"
                         class="grant-remove"
                         title="移除该管理范围"
-                        :disabled="!canEditSelected"
+                        :disabled="!canEditSelected || scopeSaving"
                         @click="removeGrant(grant)"
                       >
                         <Trash2 :size="15" />
@@ -1316,8 +1324,8 @@ onBeforeUnmount(() => {
         <strong>{{ pickerMode === 'REGION' ? '整个区划' : `${pickerSelectedCount} 个社区` }}</strong>
       </span>
       <button type="button" @click="closeGrantDrawer">取消</button>
-      <button type="button" class="primary-button" :disabled="!pickerValid" @click="submitGrant">
-        添加管理范围
+      <button type="button" class="primary-button" :disabled="!pickerValid || scopeSaving" @click="submitGrant">
+        {{ scopeSaving ? '保存中…' : '添加管理范围' }}
       </button>
     </template>
   </NiDrawer>
@@ -1333,7 +1341,6 @@ onBeforeUnmount(() => {
 }
 
 .admin-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
-.admin-eyebrow { margin: 0 0 5px; color: #9692a1; font-size: var(--font-size-caption); letter-spacing: .02em; }
 .admin-heading h1 { margin: 0; color: #2c2838; font-size: var(--font-size-page-title); font-weight: 700; letter-spacing: -.03em; }
 .admin-subtitle { margin: 6px 0 0; color: #8d8997; font-size: var(--font-size-body); }
 .admin-heading-side { display: flex; align-items: center; gap: 20px; flex: 0 0 auto; }
@@ -1375,7 +1382,6 @@ onBeforeUnmount(() => {
 }
 .admin-guidance p { margin: 0; flex: 1; color: #7b7590; font-size: var(--font-size-caption); line-height: 1.55; }
 .admin-guidance p strong { color: #554b78; font-weight: 600; }
-.guidance-local { flex: 0 0 auto; padding: 3px 8px; border-radius: 6px; color: #7a63c9; background: #ece7fb; font-size: 11px; }
 
 .admin-workspace {
   flex: 1 1 auto;

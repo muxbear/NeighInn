@@ -3,14 +3,17 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.responses import ERR_DATA_SCOPE, ERR_FORBIDDEN, ApiError
 from src.db.models import (
     AdminUser,
+    AdminUserRegionGrant,
+    Community,
     Permission,
+    Region,
     Role,
     admin_user_communities,
     admin_user_roles,
@@ -55,8 +58,44 @@ async def get_data_scope(db: AsyncSession, admin: AdminUser) -> str:
     return "SELF"
 
 
+async def region_granted_community_ids(db: AsyncSession, admin_id: int) -> set[int]:
+    """展开后台账号的“整个区划”授权，返回其下全部社区 ID。
+
+    社区档案的 ``region_id`` 指向区县、``street_id`` 指向街道；区划授权可能
+    落在省/市/区县/街道任一层级，因此统一按区划子树匹配这两个字段。
+    """
+    has_grant = await db.scalar(
+        select(AdminUserRegionGrant.id)
+        .where(AdminUserRegionGrant.admin_user_id == admin_id)
+        .limit(1)
+    )
+    if not has_grant:
+        return set()
+
+    region_scope = (
+        select(AdminUserRegionGrant.region_id.label("region_id"))
+        .where(AdminUserRegionGrant.admin_user_id == admin_id)
+        .cte(name="admin_region_scope", recursive=True)
+    )
+    region_scope = region_scope.union_all(
+        select(Region.id).where(Region.parent_id == region_scope.c.region_id)
+    )
+    region_ids = select(region_scope.c.region_id)
+    rows = await db.execute(
+        select(Community.id).where(or_(
+            Community.region_id.in_(region_ids),
+            Community.street_id.in_(region_ids),
+        ))
+    )
+    return set(rows.scalars().all())
+
+
 async def allowed_community_ids(db: AsyncSession, admin: AdminUser) -> set[int] | None:
-    """None 表示全部社区可见。仓储查询必须以此过滤，禁止在 Router 手工拼 community_id。"""
+    """None 表示全部社区可见。仓储查询必须以此过滤，禁止在 Router 手工拼 community_id。
+
+    受限账号的可见社区 = 指定社区集合（admin_user_communities）
+    ∪ 区划授权动态展开的社区（admin_user_region_grants）。
+    """
     if admin.is_super_admin:
         return None
     scope = await get_data_scope(db, admin)
@@ -67,7 +106,8 @@ async def allowed_community_ids(db: AsyncSession, admin: AdminUser) -> set[int] 
             admin_user_communities.c.admin_user_id == admin.id
         )
     )
-    return set(rows.scalars().all())
+    explicit = set(rows.scalars().all())
+    return explicit | await region_granted_community_ids(db, admin.id)
 
 
 async def assert_community_allowed(db: AsyncSession, admin: AdminUser, community_id: int) -> None:

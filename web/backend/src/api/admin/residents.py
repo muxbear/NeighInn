@@ -48,6 +48,7 @@ from src.core.security import (
 from src.core.storage import get_minio, presign_download
 from src.db.models import (
     AdminUser,
+    AdminUserRegionGrant,
     Certification,
     Community,
     Dispute,
@@ -1970,6 +1971,8 @@ async def grant_resident_admin(resident_id: int, payload: ResidentAdminGrantIn,
     ])
     await db.execute(sa_delete(admin_user_communities).where(
         admin_user_communities.c.admin_user_id == admin_row.id))
+    await db.execute(sa_delete(AdminUserRegionGrant).where(
+        AdminUserRegionGrant.admin_user_id == admin_row.id))
     await db.execute(sa_insert(admin_user_communities), [
         {"admin_user_id": admin_row.id, "community_id": resident.community_id}
     ])
@@ -2033,6 +2036,8 @@ async def revoke_resident_admin(resident_id: int, request: Request,
         admin_user_roles.c.admin_user_id == admin_row.id))
     await db.execute(sa_delete(admin_user_communities).where(
         admin_user_communities.c.admin_user_id == admin_row.id))
+    await db.execute(sa_delete(AdminUserRegionGrant).where(
+        AdminUserRegionGrant.admin_user_id == admin_row.id))
     admin_row.status = "DISABLED"
     admin_row.must_change_password = True
     admin_row.session_version = int(admin_row.session_version or 0) + 1

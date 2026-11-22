@@ -304,6 +304,11 @@ export const adminUsersApi = {
   /** 关联 / 解除关联住户（residentId 传 null 表示解除）。 */
   linkResident: (id: number | string, residentId: number | null) =>
     http.put<any, any>(`/admin-users/${id}/resident`, { residentId }),
+  /** 后台账号的社区管理范围（区划授权 + 指定社区）。 */
+  communityScope: (id: number | string) =>
+    http.get<any, any>(`/admin-users/${id}/community-scope`),
+  saveCommunityScope: (id: number | string, payload: Dict) =>
+    http.put<any, any>(`/admin-users/${id}/community-scope`, payload),
 }
 
 export const repairApi = {

@@ -7,6 +7,7 @@ from src.api.admin import (
     auth,
     communication,
     communities,
+    community_admins,
     content_ops,
     dashboard,
     exports,
@@ -26,6 +27,7 @@ admin_router = APIRouter()
 for module in (
     auth,
     accounts,
+    community_admins,
     dashboard,
     communities,
     residents,

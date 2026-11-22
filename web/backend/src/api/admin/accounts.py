@@ -23,6 +23,7 @@ from src.core.responses import (
 from src.core.security import decrypt_field, encrypt_field, hash_password, mask_phone
 from src.db.models import (
     AdminUser,
+    AdminUserRegionGrant,
     Community,
     Permission,
     PlatformUser,
@@ -239,7 +240,8 @@ class AdminUserIn(BaseModel):
     status: str = "ACTIVE"
 
 
-async def _admin_row(db: AsyncSession, row: AdminUser) -> dict:
+async def _admin_row(db: AsyncSession, row: AdminUser,
+                     region_grant_count: int | None = None) -> dict:
     roles = (await db.execute(
         select(Role.id, Role.code, Role.name)
         .join(admin_user_roles, admin_user_roles.c.role_id == Role.id)
@@ -256,6 +258,10 @@ async def _admin_row(db: AsyncSession, row: AdminUser) -> dict:
         by_id = {cid: name for cid, name in community_rows}
         communities = [{"id": str(cid), "name": by_id.get(cid, "")}
                        for cid in community_ids if cid in by_id]
+    if region_grant_count is None:
+        region_grant_count = int((await db.scalar(
+            select(func.count()).select_from(AdminUserRegionGrant)
+            .where(AdminUserRegionGrant.admin_user_id == row.id))) or 0)
     locked_until = ensure_utc(row.locked_until)
     resident = await db.get(Resident, row.resident_id) if row.resident_id else None
     user = await db.get(PlatformUser, row.platform_user_id) if row.platform_user_id else None
@@ -283,6 +289,8 @@ async def _admin_row(db: AsyncSession, row: AdminUser) -> dict:
         "roleIds": [str(rid) for rid, _, _ in roles],
         "communities": communities,
         "communityIds": [str(cid) for cid in community_ids],
+        "scopeRegionCount": region_grant_count,
+        "scopeCommunityCount": len(communities),
         "locked": bool(locked_until and locked_until > utcnow()),
         "lockedUntil": int(locked_until.timestamp() * 1000) if locked_until else 0,
         "failedAttempts": int(row.failed_attempts or 0),
@@ -319,7 +327,21 @@ async def list_admin_users(admin: CurrentAdmin, db: DbSession,
         "locked": await _admin_count(db, stmt.where(
             AdminUser.locked_until.is_not(None), AdminUser.locked_until > now)),
     }
-    payload = paginated([await _admin_row(db, row) for row in rows], page, pageSize, total)
+    page_ids = [row.id for row in rows]
+    region_counts: dict[int, int] = {}
+    if page_ids:
+        region_counts = {
+            int(admin_id): int(count)
+            for admin_id, count in (await db.execute(
+                select(AdminUserRegionGrant.admin_user_id, func.count())
+                .where(AdminUserRegionGrant.admin_user_id.in_(page_ids))
+                .group_by(AdminUserRegionGrant.admin_user_id)
+            )).all()
+        }
+    payload = paginated(
+        [await _admin_row(db, row, region_counts.get(row.id, 0)) for row in rows],
+        page, pageSize, total,
+    )
     payload["data"]["stats"] = stats
     return payload
 
@@ -631,6 +653,8 @@ async def delete_admin_user(admin_id: int, request: Request,
                      .where(admin_user_roles.c.admin_user_id == row.id))
     await db.execute(delete(admin_user_communities)
                      .where(admin_user_communities.c.admin_user_id == row.id))
+    await db.execute(delete(AdminUserRegionGrant)
+                     .where(AdminUserRegionGrant.admin_user_id == row.id))
     await db.delete(row)
     await write_audit(db, request, actor=admin, action="admin-user.delete",
                       resource_type="admin_user", resource_id=admin_id,
@@ -670,6 +694,8 @@ async def batch_delete_admin_users(payload: BatchDeleteIn, request: Request,
                      .where(admin_user_roles.c.admin_user_id.in_(ids)))
     await db.execute(delete(admin_user_communities)
                      .where(admin_user_communities.c.admin_user_id.in_(ids)))
+    await db.execute(delete(AdminUserRegionGrant)
+                     .where(AdminUserRegionGrant.admin_user_id.in_(ids)))
     for row in rows:
         await db.delete(row)
     await write_audit(db, request, actor=admin, action="admin-user.batch-delete",
