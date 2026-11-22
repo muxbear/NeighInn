@@ -30,7 +30,7 @@ const total = ref(0)
 const loading = ref(false)
 let cityRequestId = 0
 
-const COMMUNITY_TYPES = ['商品房社区', '经济适用房社区', '综合型社区', '老旧小区', '村改居社区']
+const COMMUNITY_TYPES = ['商品房社区', '经济适用房社区', '老旧小区', '综合型社区', '村改居社区', '院校社区']
 const STATUS_OPTIONS = [
   { value: 'OPERATING', label: '正常运营' },
   { value: 'PREPARING', label: '筹备中' },
