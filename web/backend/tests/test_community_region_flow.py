@@ -120,6 +120,26 @@ async def test_admin_region_tree_covers_all_provinces_and_detailed_provinces(cli
     assert sum(1 for node in shaanxi_nodes if node["level"] == "STREET") == 1335
 
 
+def test_region_seed_dataset_is_complete_and_consistent():
+    """种子区划覆盖全国四级；数据被裁剪/编码冲突时此用例直接失败。"""
+    from src.db.seed import REGIONS
+
+    levels: dict[str, int] = {}
+    for _name, level, _code, _parent, _sort in REGIONS:
+        levels[level] = levels.get(level, 0) + 1
+
+    codes = [row[2] for row in REGIONS]
+    code_set = set(codes)
+    assert len(codes) == len(code_set), "区划编码必须唯一"
+    assert levels == {"PROVINCE": 31, "CITY": 342, "DISTRICT": 3056, "STREET": 41272}
+    assert all(row[3] in code_set for row in REGIONS if row[3]), "父级编码必须存在"
+
+    sichuan_cities = [row for row in REGIONS if row[1] == "CITY" and row[3] == "510000"]
+    assert len(sichuan_cities) == 21
+    # 小区档案 street_id 依赖的历史夹具编码不能丢失。
+    assert {"330106001", "330106002", "330106003"} <= code_set
+
+
 @pytest.mark.asyncio
 async def test_admin_region_lazy_loading_roots_and_children(client):
     """社区运维分级加载：roots 返回省份与子级数量，children 按需返回下一级。"""

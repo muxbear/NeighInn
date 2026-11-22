@@ -23,8 +23,29 @@ os.environ["ACCESS_LOG"] = "false"
 
 from src.api.admin.communities import clear_region_cache
 from src.db.base import Base, get_db
+from src.db.seed import REGIONS as SEED_REGIONS
 from src.db.seed import seed_if_empty
 from src.main import app
+
+
+def _region_test_subset(regions):
+    """测试只灌入所有省份 + 北京/陕西/杭州子树，避免每个用例重复写入 4.5 万行区划。"""
+    roots = {"110000", "610000", "330100"}
+    parents = {code: parent for _name, _level, code, parent, _sort in regions}
+
+    def under_test_root(code: str) -> bool:
+        parent = parents.get(code)
+        while parent:
+            if parent in roots:
+                return True
+            parent = parents.get(parent)
+        return False
+
+    return [row for row in regions
+            if row[1] == "PROVINCE" or row[2] in roots or under_test_root(row[2])]
+
+
+TEST_REGIONS = _region_test_subset(SEED_REGIONS)
 
 
 @pytest.fixture()
@@ -47,7 +68,7 @@ async def session_maker(engine):
     StaticPool 保证内存库在会话间共享，commit 后互可见。"""
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as seed_session:
-        await seed_if_empty(seed_session)
+        await seed_if_empty(seed_session, regions=TEST_REGIONS)
     yield maker
 
 

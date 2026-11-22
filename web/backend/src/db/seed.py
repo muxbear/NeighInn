@@ -35,8 +35,10 @@ from src.db.models import (
 
 # ---------------------------------------------------------------- 行政区划
 
-# 全国 31 个省级行政区；浙江省保留既有夹具编码，北京市与陕西省下钻到街道。
-# 数据源：modood/Administrative-divisions-of-China（dist/pcas-code.json，2023-09-13）。
+# 全国 31 个省级行政区、342 个地市、3,056 个区县、41,272 个街道/乡镇；
+# 数据由生产库 regions 表导出（2026-11-22），与线上区划树完全一致。
+# 历史夹具编码（如 330106001 文新街道）保留，供 COMMUNITIES 的 street_id 绑定。
+# 数据源：modood/Administrative-divisions-of-China（dist/pcas-code.json）及项目夹具。
 REGION_DATA_PATH = Path(__file__).with_name("data") / "regions.json"
 with REGION_DATA_PATH.open(encoding="utf-8") as _region_file:
     _REGION_ITEMS = json.load(_region_file)
@@ -294,10 +296,11 @@ def _parent_code_for(level: str, code: str) -> str | None:
     return None
 
 
-async def _regions_need_sync(session: AsyncSession) -> bool:
-    """用轻量计数判断是否需同步：避免每次启动拉取 1800+ 行区划。"""
+async def _regions_need_sync(session: AsyncSession,
+                             regions: list[tuple[str, str, str, str | None, int]] = REGIONS) -> bool:
+    """用轻量计数判断是否需同步：避免每次启动拉取 4.5 万行区划。"""
     total = await session.scalar(select(func.count()).select_from(Region)) or 0
-    if total < len(REGIONS):
+    if total < len(regions):
         return True
     sentinel = ("110101001", "610102001", "330106001")
     found = await session.scalar(
@@ -315,23 +318,24 @@ async def _regions_need_sync(session: AsyncSession) -> bool:
     return bool(missing_binding)
 
 
-async def _sync_regions(session: AsyncSession) -> dict[str, Region]:
-    """按 REGIONS 幂等同步区划：补齐缺失节点并校正父级/排序，不删除管理员新增区划。"""
+async def _sync_regions(session: AsyncSession,
+                        regions: list[tuple[str, str, str, str | None, int]] = REGIONS) -> dict[str, Region]:
+    """按 regions 幂等同步区划：补齐缺失节点并校正父级/排序，不删除管理员新增区划。"""
     rows = list((await session.execute(select(Region))).scalars().all())
     by_code = {row.code: row for row in rows}
-    # 按层级批量写入：每层 flush 一次，父节点先取得主键，避免 1800+ 次逐条往返。
+    # 按层级批量写入：每层 executemany 一次，父节点先取得主键。
+    # 全国区划约 4.5 万行，逐条 session.add 在 SQLite 上要 7 秒以上，批量写入只需约 1 秒。
     for level in ("PROVINCE", "CITY", "DISTRICT", "STREET"):
-        for name, item_level, code, parent_code, sort in REGIONS:
+        pending: list[dict] = []
+        for name, item_level, code, parent_code, sort in regions:
             if item_level != level:
                 continue
             parent = by_code.get(parent_code) if parent_code else None
             desired_parent_id = parent.id if parent else None
             existing = by_code.get(code)
             if existing is None:
-                region = Region(name=name, level=level, code=code,
-                                parent_id=desired_parent_id, sort=sort)
-                session.add(region)
-                by_code[code] = region
+                pending.append({"name": name, "level": level, "code": code,
+                                "parent_id": desired_parent_id, "sort": sort})
                 continue
             if (existing.name != name or existing.level != level
                     or existing.parent_id != desired_parent_id or existing.sort != sort):
@@ -339,7 +343,13 @@ async def _sync_regions(session: AsyncSession) -> dict[str, Region]:
                 existing.level = level
                 existing.parent_id = desired_parent_id
                 existing.sort = sort
-        await session.flush()
+        if pending:
+            await session.execute(insert(Region), pending)
+            await session.flush()
+        # 回查本层，既为新节点取回主键供下级使用，也保持返回值的 ORM 实体语义。
+        fresh = list((await session.execute(
+            select(Region).where(Region.level == level))).scalars().all())
+        by_code.update({row.code: row for row in fresh})
     return by_code
 
 
@@ -371,18 +381,24 @@ async def _repair_region_links(session: AsyncSession) -> None:
         await session.commit()
 
 
-async def seed_if_empty(session: AsyncSession) -> dict[str, int] | None:
-    """初始化种子；已初始化返回 None，本次写入返回各领域数量摘要。"""
+async def seed_if_empty(session: AsyncSession,
+                        regions: list[tuple[str, str, str, str | None, int]] | None = None
+                        ) -> dict[str, int] | None:
+    """初始化种子；已初始化返回 None，本次写入返回各领域数量摘要。
+
+    regions 默认使用完整全国区划；测试可传入精简子集，避免每个用例灌入 4.5 万行。
+    """
+    region_rows = REGIONS if regions is None else regions
     if await session.scalar(select(AdminUser.id).limit(1)):
         # 已初始化：仅当区划缺失/父子关系或小区绑定未修复时才同步，避免拖慢每次启动。
-        if await _regions_need_sync(session):
-            await _sync_regions(session)
+        if await _regions_need_sync(session, region_rows):
+            await _sync_regions(session, region_rows)
             await _repair_region_links(session)
             await session.commit()
         return None
 
     # 区划
-    region_by_code = await _sync_regions(session)
+    region_by_code = await _sync_regions(session, region_rows)
 
     # 社区
     for i, (name, code, ctype, street_code, address, lng, lat, households, population) in enumerate(COMMUNITIES):
@@ -477,7 +493,7 @@ async def seed_if_empty(session: AsyncSession) -> dict[str, int] | None:
 
     await session.commit()
     return {
-        "regions": len(REGIONS),
+        "regions": len(region_rows),
         "communities": len(COMMUNITIES),
         "categories": sum(1 + len(children) for _, children in ITEM_CATEGORIES),
         "dictionaries": len(DICTIONARIES),

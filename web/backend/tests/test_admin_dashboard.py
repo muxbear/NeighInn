@@ -36,7 +36,8 @@ async def test_summary_returns_real_aggregates(client):
     assert summary["metrics"]["activeUsers"] == 1
     assert summary["metrics"]["activeRate"] == 100.0
     assert summary["distribution"] == {
-        "owner": 1, "tenant": 0, "family": 0, "business": 0, "total": 1,
+        "owner": 1, "tenant": 0, "family": 0, "business": 0,
+        "staff": 0, "student": 0, "total": 1,
     }
     assert account["communityId"] == 1
 
