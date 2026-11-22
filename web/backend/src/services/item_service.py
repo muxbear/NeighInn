@@ -21,7 +21,7 @@ from src.core.responses import (
     ERR_PARAM,
     ApiError,
 )
-from src.core.storage import presign_download
+from src.core.storage import public_media_url
 from src.db.models import (
     Community,
     Favorite,
@@ -38,19 +38,11 @@ from src.domain import enums as E
 from src.services.auth_service import bound_resident, browse_community_id, latest_certification
 
 TRADE_LABEL = {E.TradeType.MONETARY: "出售", E.TradeType.FREE_GIFT: "免费", E.TradeType.BARTER: "互换"}
-# 公开物品图片签名 URL 有效期：覆盖列表缓存周期即可，避免端侧出现长期可直接访问的地址。
-PUBLIC_MEDIA_URL_TTL_MINUTES = 60 * 24 * 7
 
 
 def _public_media_url(object_key: str) -> str:
-    """对象键 → 端侧可直接加载的公开签名 URL；已经是 URL 的旧数据原样返回。"""
-    if not object_key:
-        return ""
-    if object_key.startswith(("http://", "https://", "data:", "blob:")):
-        return object_key
-    return presign_download(
-        object_key, settings.minio_bucket_public, minutes=PUBLIC_MEDIA_URL_TTL_MINUTES
-    ) or ""
+    """对象键 → 端侧可直接加载的公开媒体地址（同源代理，见 core.storage）。"""
+    return public_media_url(object_key)
 
 
 ZONE_TRADE = {"sale": E.TradeType.MONETARY, "gift": E.TradeType.FREE_GIFT, "swap": E.TradeType.BARTER}

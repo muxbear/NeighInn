@@ -351,6 +351,11 @@ function markCertMaterialError(objectKey: string) {
   certMaterialErrors.value = { ...certMaterialErrors.value, [objectKey]: true }
 }
 
+/** 材料读取地址：优先后端同源代理（不依赖浏览器访问 MinIO 主机），回退签名 URL。 */
+function materialSrc(material: any): string {
+  return material?.url || material?.signedUrl || ''
+}
+
 // ---------------------------------------------------------------- 后台身份
 
 function adminLabel(row: any): string {
@@ -658,17 +663,17 @@ watch(() => app.currentCommunityId, () => {
               v-for="material in certViewerData.materials"
               :key="material.objectKey"
               class="cert-photo-card"
-              :href="material.signedUrl || undefined"
+              :href="materialSrc(material) || undefined"
               target="_blank"
               rel="noopener"
             >
               <img
-                v-if="material.signedUrl && !certPhotoErrors[material.objectKey]"
-                :src="material.signedUrl"
+                v-if="materialSrc(material) && !certPhotoErrors[material.objectKey]"
+                :src="materialSrc(material)"
                 :alt="material.label"
                 @error="onCertPhotoError(material.objectKey)"
               />
-              <div v-else class="cert-photo-missing">{{ material.signedUrl ? '图片加载失败，请检查 MinIO 地址' : '签名 URL 生成失败' }}</div>
+              <div v-else class="cert-photo-missing">{{ materialSrc(material) ? '材料加载失败，请稍后重试' : '材料读取地址缺失' }}</div>
               <span>{{ material.label }}</span>
             </a>
           </div>
@@ -788,16 +793,16 @@ watch(() => app.currentCommunityId, () => {
           <div v-if="certMaterialsLoading.realname" class="cert-material-hint">正在加载认证材料…</div>
           <div v-else-if="certMaterials.realname.length" class="cert-material-thumbs">
             <div v-for="material in certMaterials.realname" :key="material.objectKey" class="cert-material-thumb">
-              <a v-if="material.signedUrl" :href="material.signedUrl" target="_blank" rel="noopener">
+              <a v-if="materialSrc(material)" :href="materialSrc(material)" target="_blank" rel="noopener">
                 <img
                   v-if="!certMaterialErrors[material.objectKey]"
-                  :src="material.signedUrl"
+                  :src="materialSrc(material)"
                   :alt="material.label"
                   @error="markCertMaterialError(material.objectKey)"
                 />
-                <div v-else class="cert-material-missing">图片加载失败</div>
+                <div v-else class="cert-material-missing">材料加载失败</div>
               </a>
-              <div v-else class="cert-material-missing">签名 URL 生成失败</div>
+              <div v-else class="cert-material-missing">材料读取地址缺失</div>
               <div class="cert-material-foot">
                 <span>{{ material.label }}</span>
                 <button type="button" @click="removeCertMaterial('realname', material.objectKey)">删除</button>
@@ -826,16 +831,16 @@ watch(() => app.currentCommunityId, () => {
           <div v-if="certMaterialsLoading.owner" class="cert-material-hint">正在加载认证材料…</div>
           <div v-else-if="certMaterials.owner.length" class="cert-material-thumbs">
             <div v-for="material in certMaterials.owner" :key="material.objectKey" class="cert-material-thumb">
-              <a v-if="material.signedUrl" :href="material.signedUrl" target="_blank" rel="noopener">
+              <a v-if="materialSrc(material)" :href="materialSrc(material)" target="_blank" rel="noopener">
                 <img
                   v-if="!certMaterialErrors[material.objectKey]"
-                  :src="material.signedUrl"
+                  :src="materialSrc(material)"
                   :alt="material.label"
                   @error="markCertMaterialError(material.objectKey)"
                 />
-                <div v-else class="cert-material-missing">图片加载失败</div>
+                <div v-else class="cert-material-missing">材料加载失败</div>
               </a>
-              <div v-else class="cert-material-missing">签名 URL 生成失败</div>
+              <div v-else class="cert-material-missing">材料读取地址缺失</div>
               <div class="cert-material-foot">
                 <span>{{ material.label }}</span>
                 <button type="button" @click="removeCertMaterial('owner', material.objectKey)">删除</button>

@@ -65,10 +65,10 @@ uni-app x 的 H5 产物由 HBuilderX 编译，Linux 容器内没有对应编译�
 ```bash
 docker build -t neighinn-mobile ./mobile
 docker run -d --name neighinn-mobile --network host \
-  -e NGINX_PORT=5191 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 neighinn-mobile
+  -e NGINX_PORT=80 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 neighinn-mobile
 ```
 
-访问 `http://<服务器IP>:5191`。nginx 会把 `/api/`（含 WebSocket `/api/v1/ws`）反代到 5193。完整部署步骤见根目录 `DEPLOY.md`。
+访问 `http://<服务器IP>`（80 端口可省略）。nginx 会把 `/api/`（含 WebSocket `/api/v1/ws`）反代到 5193。完整部署步骤见根目录 `DEPLOY.md`。
 
 ## Mock 与真实接口
 
@@ -78,7 +78,7 @@ docker run -d --name neighinn-mobile --network host \
   - Web 预览 / 微信开发者工具：`127.0.0.1`；
   - Android 模拟器：`10.0.2.2`；
   - 真机：电脑局域网 IP（如 `192.168.1.100`），同时把 `web/backend/.env` 的 `APP_HOST` 改为 `0.0.0.0`。
-- 后端 `CORS_ORIGINS` 必须放行移动端 H5 端口 `5191`，否则浏览器预检会被拒绝；开发环境已用 `CORS_ORIGIN_REGEX` 放宽本机/私网任意端口（详见 `web/backend/README.md`）。
+- 开发环境直连 5193 时，后端 `CORS_ORIGINS` 需放行 H5 开发端口 `5191`；Docker 部署走同源 `/api` 反代，不需要额外 CORS。开发环境已用 `CORS_ORIGIN_REGEX` 放宽本机/私网任意端口（详见 `web/backend/README.md`）。
 - 开发环境验证码会常驻显示在登录页验证码输入框下方，并输出到后端日志（手机号脱敏）；生产环境不返回验证码。
 - 切换到 staging/prod：修改 `CURRENT_ENV`，并把 `mock` 设为 `false`，替换 `baseUrl` / `wsUrl`。
 - 首次进入 App 默认停在登录页；开发环境验证码演示码为 `123456`。登录意图不会自动建号，未注册手机号会提示去注册；注册成功后进入新人引导。

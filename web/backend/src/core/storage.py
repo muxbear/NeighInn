@@ -4,6 +4,7 @@ import logging
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from minio import Minio
@@ -68,18 +69,17 @@ def presign_download(object_key: str, bucket: str | None = None, minutes: int = 
 PUBLIC_MEDIA_URL_TTL_MINUTES = 60 * 24 * 7
 
 
-def public_media_url(object_key: str | None,
-                     minutes: int = PUBLIC_MEDIA_URL_TTL_MINUTES) -> str:
-    """对象键 → 公共桶可访问 URL；已是 HTTP(S) 地址时原样返回。
+def public_media_url(object_key: str | None) -> str:
+    """对象键 → 客户端可直接加载的公开媒体地址。
 
-    移动端发布时提交对象键，读取时必须签名成人可访问的 URL，
-    否则 ``<image>`` 会把对象键当相对路径请求 404。
+    公开桶同样走统一服务端的同源代理（``/api/v1/media/<key>``）：签名 URL 以
+    ``MINIO_ENDPOINT`` 为主机，H5/管理端在别的机器上访问时无法解析
+    ``127.0.0.1:5206`` 之类的内部地址，图片必然加载失败。
     """
     key = str(object_key or "").strip()
     if not key:
         return ""
-    if key.startswith(("http://", "https://")):
+    if key.startswith(("http://", "https://", "data:", "blob:")):
         return key
-    return presign_download(
-        key, settings.minio_bucket_public, minutes=minutes
-    ) or key
+    base = (settings.public_media_base_url or "").rstrip("/")
+    return f"{base}/api/v1/media/{quote(key, safe='/')}"

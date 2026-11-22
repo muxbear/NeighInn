@@ -7,7 +7,8 @@ from datetime import datetime
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
+from minio.error import S3Error
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
 from starlette.concurrency import run_in_threadpool
@@ -50,6 +51,7 @@ from src.db.models import (
     Certification,
     Community,
     Dispute,
+    FileObject,
     Item,
     LedgerEntry,
     Order,
@@ -227,6 +229,7 @@ async def _cert_row(db: DbSession, cert: Certification) -> dict:
         "identityLabel": IDENTITY_MAP.get(cert.identity, cert.identity),
         "status": cert.status,
         "rejectCount": cert.reject_count,
+        "materialsCount": len(cert.materials or []),
         "rejectReason": cert.reject_reason,
         "traceId": cert.trace_id,
         "version": cert.version,
@@ -252,6 +255,7 @@ async def _cert_detail(db: DbSession, cert: Certification) -> dict:
     row["materials"] = [
         {
             "objectKey": key,
+            "url": f"/api/v1/admin/certifications/{cert.id}/materials/{index}",
             "signedUrl": presign_download(key),
             "label": labels[index] if index < len(labels) else f"补充材料 {index + 1}",
         }
@@ -1183,6 +1187,59 @@ async def certification_detail(certification_id: int, admin: CurrentAdmin, db: D
         raise ApiError(ERR_NOT_FOUND, "审核单不存在", 404)
     await _assert_cert_scope(db, admin, cert)
     return ok(await _cert_detail(db, cert))
+
+
+_CERT_MATERIAL_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "webp": "image/webp", "pdf": "application/pdf",
+}
+
+
+@router.get("/certifications/{certification_id}/materials/{index}",
+            dependencies=[AuditPerm])
+async def certification_material(certification_id: int, index: int,
+                                 admin: CurrentAdmin, db: DbSession):
+    """按索引流式返回认证材料字节（私有桶，仅审核权限可读）。
+
+    审核人浏览器不必能解析 MinIO 主机：图片经 /api 同源代理由后端读出，
+    避免签名 URL 绑定 127.0.0.1 等服务器内部地址导致后台破图。
+    """
+    cert = await _get_cert_or_404(db, certification_id)
+    await _assert_cert_scope(db, admin, cert)
+    materials = [key for key in (cert.materials or []) if key]
+    if index < 0 or index >= len(materials):
+        raise ApiError(ERR_NOT_FOUND, "认证材料不存在", 404)
+    object_key = materials[index]
+
+    record = await db.scalar(
+        select(FileObject).where(FileObject.object_key == object_key))
+    bucket = record.bucket if record else settings.minio_bucket_private
+    suffix = object_key.rsplit(".", 1)[-1].lower() if "." in object_key else ""
+    media_type = (record.content_type if record and record.content_type else "") or \
+        _CERT_MATERIAL_MIME.get(suffix, "application/octet-stream")
+
+    client = get_minio()
+    if client is None:
+        raise ApiError(ERR_DEPENDENCY, "对象存储未配置，暂无法查看材料", 503)
+    upstream = None
+    try:
+        upstream = await run_in_threadpool(client.get_object, bucket, object_key)
+        data = await run_in_threadpool(upstream.read)
+    except S3Error as exc:
+        logger.warning("读取认证材料失败 %s/%s：%s", bucket, object_key, exc)
+        raise ApiError(ERR_NOT_FOUND, "认证材料不存在或已归档", 404) from exc
+    except Exception as exc:  # 网络/连接类异常统一降级为依赖不可用
+        logger.warning("认证材料读取异常 %s/%s：%s", bucket, object_key, exc)
+        raise ApiError(ERR_DEPENDENCY, "认证材料读取失败，请稍后重试", 503) from exc
+    finally:
+        if upstream is not None:
+            await run_in_threadpool(upstream.close)
+            await run_in_threadpool(upstream.release_conn)
+
+    return Response(
+        content=data, media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 class RejectIn(BaseModel):

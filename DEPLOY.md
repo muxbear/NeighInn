@@ -37,7 +37,7 @@ docker compose -f docker-compose.prod.yml --profile mobile up -d --build
 | 入口 | 地址 |
 | --- | --- |
 | Web 管理端 | `http://<服务器IP>:5192` |
-| 移动端 H5 | `http://<服务器IP>:5191` |
+| 移动端 H5 | `http://<服务器IP>`（80 端口） |
 | 统一服务端 API | `http://<服务器IP>:5193/api/v1` |
 | 管理端 API | `http://<服务器IP>:5193/api/v1/admin` |
 | 健康检查 | `http://<服务器IP>:5193/health/live`、`/health/ready` |
@@ -59,7 +59,7 @@ docker run -d --name neighinn-admin-web --network host \
 # 移动端 H5
 docker build -t neighinn-mobile ./mobile
 docker run -d --name neighinn-mobile --network host \
-  -e NGINX_PORT=5191 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 \
+  -e NGINX_PORT=80 -e BACKEND_UPSTREAM=http://127.0.0.1:5193 \
   --restart unless-stopped neighinn-mobile
 ```
 
@@ -83,9 +83,9 @@ uni-app x 的 H5 产物由 HBuilderX 编译，Linux 容器内没有对应编译�
 
 ## 5. 重要注意事项
 
-- **HTTPS**：管理端会话 Cookie 的 `Secure` 属性默认按实际访问协议自动判定（经 HTTPS 反向代理访问时带 `Secure`，纯 HTTP 访问时不带），也可用 `SESSION_COOKIE_SECURE=true|false` 强制覆盖。建议在 5191/5192 前加 Nginx/Caddy 做 TLS 终止（移动端 H5 的定位、相机等浏览器能力也要求安全上下文）；纯 HTTP 部署虽然可以登录，但会话凭据会明文传输，仅建议内网/临时联调使用。
+- **HTTPS**：管理端会话 Cookie 的 `Secure` 属性默认按实际访问协议自动判定（经 HTTPS 反向代理访问时带 `Secure`，纯 HTTP 访问时不带），也可用 `SESSION_COOKIE_SECURE=true|false` 强制覆盖。建议在 80/5192 前加 Nginx/Caddy 做 TLS 终止（移动端 H5 的定位、相机等浏览器能力也要求安全上下文）；纯 HTTP 部署虽然可以登录，但会话凭据会明文传输，仅建议内网/临时联调使用。
 - **MinIO 预签名 URL**：`.env.prod` 中 `MINIO_ENDPOINT=127.0.0.1:5206` 只适用于部署机本机访问。若浏览器或移动端从其他机器访问，必须改成客户端可达的公网 IP/域名（建议 HTTPS 与同源反向代理），否则图片和认证材料 URL 无法加载；HTTPS 页面还必须把 `MINIO_SECURE` 设为 `true` 并配置有效证书，否则会被浏览器混合内容策略拦截。
-- **外层反向代理**：若在 5191/5192 前再加 Nginx/Caddy 做 TLS，请为 `/api/v1/ws` 保留 `Upgrade`/`Connection` 头，否则 IM/订单推送的 WebSocket 无法建立。
+- **外层反向代理**：若在 80/5192 前再加 Nginx/Caddy 做 TLS，请为 `/api/v1/ws` 保留 `Upgrade`/`Connection` 头，否则 IM/订单推送的 WebSocket 无法建立。
 - **CORS**：管理端与 H5 都通过 nginx 同源反代 `/api`，通常不会触发 CORS。若使用独立域名的 H5 直连后端，请把来源追加到 `CORS_ORIGINS`。
 - **数据库账号**：`.env.prod` 按所给信息使用 `postgres` 账号；正式上线建议为应用创建仅拥有 `neighinn_prod` 权限的独立账号，并同步更新 `DATABASE_URL`。
 - **SECRET_KEY**：用于 JWT 与敏感字段加密。若生产库是从开发库迁移而来，必须沿用迁移前的 `SECRET_KEY`，否则已加密的身份证号/姓名等字段将无法解密；全新库则可使用 `.env.prod` 中新生成的值，并在上线后妥善保管。

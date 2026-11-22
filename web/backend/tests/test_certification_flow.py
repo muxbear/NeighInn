@@ -467,3 +467,64 @@ async def test_admin_write_requires_csrf(client):
     resp = await client.post(f"{ADMIN_BASE}/certifications/{cert_id}/approve")
     assert resp.status_code == 403
     assert resp.json()["code"] == 40301
+
+
+class _FakeMaterialObject:
+    """模拟 MinIO get_object 返回的可读对象（只需 read/close/release_conn）。"""
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def close(self) -> None:
+        return None
+
+    def release_conn(self) -> None:
+        return None
+
+
+class _FakeMinio:
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def get_object(self, bucket: str, key: str) -> _FakeMaterialObject:
+        from src.core.config import settings
+
+        assert bucket == settings.minio_bucket_private
+        return _FakeMaterialObject(self._payload)
+
+
+@pytest.mark.asyncio
+async def test_certification_material_streamed_through_api(client, monkeypatch):
+    """审核页材料由后端同源返回，不依赖浏览器能访问 MinIO 主机。
+
+    回归：签名 URL 以 MINIO_ENDPOINT（如 127.0.0.1:5206）为主机，
+    审核人从外网访问后台时图片必然加载失败。
+    """
+    result = await register_user(client)
+    await submit_owner_proof(client, result["token"], community_id=1)
+    csrf = await admin_login(client)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    # 列表页“N 份”不再恒为 0
+    assert proof["materialsCount"] == 2
+
+    detail = (await client.get(
+        f"{ADMIN_BASE}/certifications/{proof['id']}")).json()["data"]
+    assert len(detail["materials"]) == 2
+    assert detail["materials"][0]["url"] == (
+        f"/api/v1/admin/certifications/{proof['id']}/materials/0")
+
+    payload = b"\xff\xd8\xff\xe0fake-jpeg-bytes"
+    monkeypatch.setattr(
+        "src.api.admin.residents.get_minio", lambda: _FakeMinio(payload))
+    resp = await client.get(detail["materials"][0]["url"])
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("image/jpeg")
+    assert resp.content == payload
+
+    # 越界索引返回 404，不泄漏其它对象
+    resp = await client.get(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/materials/9")
+    assert resp.status_code == 404

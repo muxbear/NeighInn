@@ -49,6 +49,54 @@ function parseUploadResponse(statusCode: number, raw: any): { body: any; ok: boo
   }
 }
 
+/** fetch 的网络级失败（DNS/断网/blob 失效）统一转成可读的 ApiError。 */
+async function fetchOrApiError(
+  input: string,
+  init: RequestInit | undefined,
+  message: string,
+): Promise<Response> {
+  try {
+    return await fetch(input, init)
+  } catch {
+    throw new ApiError(50000, message)
+  }
+}
+
+// 单文件上限 10MB（服务端 MAX_IMAGE_UPLOAD_BYTES）。华为/iPhone 原图常见 8–20MB，
+// H5 的 sizeType:'compressed' 不生效，这里在浏览器端先等比缩放再上传。
+const IMAGE_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024
+const IMAGE_SHRINK_TARGET_BYTES = 3 * 1024 * 1024
+
+async function shrinkImageForUpload(blob: Blob, scene: UploadScene): Promise<Blob> {
+  if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return blob
+  if (!blob.type.startsWith('image/') || blob.type === 'image/gif') return blob
+  if (blob.size <= IMAGE_SHRINK_TARGET_BYTES) return blob
+  // 认证材料要能看清证件号，保留更高分辨率；物品图/生活图 1600px 足够。
+  const isCert = scene === 'REALNAME_ID' || scene === 'OWNER_PROOF'
+  const maxSide = isCert ? 2400 : 1600
+  const quality = isCert ? 0.9 : 0.82
+  try {
+    const bitmap = await createImageBitmap(blob)
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return blob
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    if (typeof bitmap.close === 'function') bitmap.close()
+    const resized = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/jpeg', quality)
+    })
+    // 压缩后反而更大（小图或已高度压缩）时用原图。
+    return resized && resized.size > 0 && resized.size < blob.size ? resized : blob
+  } catch {
+    return blob
+  }
+}
+
 function uploadError(statusCode: number, body: any): ApiError {
   return new ApiError(
     Number(body?.code) || 50000,
@@ -95,36 +143,48 @@ export function useUpload() {
       // H5 的 uni.uploadFile 对 blob: 临时地址会提交 0 字节文件，
       // 改用 fetch + FormData 上传；App/小程序仍使用 uni.uploadFile。
       if (isH5Runtime()) {
-        const source = await fetch(path)
+        const source = await fetchOrApiError(
+          path, undefined, '照片已失效，请重新选择照片后提交')
         if (!source.ok) {
           throw new ApiError(40001, '图片读取失败，请重新选择')
         }
-        const blob = await source.blob()
-        if (!blob.size) {
+        const raw = await source.blob()
+        if (!raw.size) {
           throw new ApiError(40001, '图片内容为空，请重新选择')
+        }
+        const blob = await shrinkImageForUpload(raw, scene)
+        if (blob.size > IMAGE_UPLOAD_LIMIT_BYTES) {
+          throw new ApiError(41301, '照片超过 10MB，请重新选择较小的照片')
         }
         const fileName = `upload-${Date.now()}${extensionOf(blob.type || contentTypeOf(path))}`
         const form = new FormData()
         form.append('scene', scene)
         form.append('file', blob, fileName)
-        const response = await fetch(uploadUrl, {
+        const response = await fetchOrApiError(
+          uploadUrl,
+          {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
             'X-Idempotency-Key': idempotencyKey,
           },
           body: form,
-        })
+          },
+          '网络异常，照片上传失败，请检查网络后重试',
+        )
         const { body, ok } = parseUploadResponse(response.status, await response.text())
         if (!ok) throw uploadError(response.status, body)
         progress.value = 100
         return String(body?.data?.objectKey ?? '')
       }
 
+      // App/小程序：uni.uploadFile 直接读本地路径，先压缩一遍，避免原图超过 10MB 被服务端拒绝。
+      const isCertScene = scene === 'REALNAME_ID' || scene === 'OWNER_PROOF'
+      const uploadPath = await compressImage(path, isCertScene ? 92 : 80)
       return await new Promise<string>((resolve, reject) => {
         const task = uni.uploadFile({
           url: uploadUrl,
-          filePath: path,
+          filePath: uploadPath,
           name: 'file',
           header: {
             Authorization: `Bearer ${token}`,

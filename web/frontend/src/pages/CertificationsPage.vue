@@ -121,6 +121,11 @@ function isImageMaterial(objectKey: string): boolean {
   return /\.(jpe?g|png|webp)(\?|$)/i.test(objectKey || '')
 }
 
+/** 材料读取地址：优先后端同源代理（不依赖浏览器访问 MinIO 主机），回退签名 URL。 */
+function materialSrc(material: any): string {
+  return material?.url || material?.signedUrl || ''
+}
+
 async function refreshAfterAction() {
   drawerOpen.value = false
   await Promise.all([load(), loadSummary()])
@@ -194,38 +199,55 @@ watch(() => app.currentCommunityId, () => {
         <button v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }"
           @click="activeTab = tab.key; page = 1; load()">{{ tab.label }}</button>
       </div>
-      <div class="table-search"><Search :size="17" /><input v-model="query" placeholder="搜索申请人或追踪号…" @keyup.enter="page = 1; load()" /></div>
+      <div class="table-search">
+        <Search :size="17" /><input v-model="query" placeholder="搜索申请人或追踪号…" @keyup.enter="page = 1; load()" />
+      </div>
       <div class="toolbar-actions">
         <button @click="cycleTypeFilter">
-          <Filter :size="16" />{{ typeFilterLabel }}<ChevronDown :size="14" />
+          <Filter :size="16" />{{ typeFilterLabel }}
+          <ChevronDown :size="14" />
         </button>
-        <button class="primary-button" @click="load"><ClipboardCheck :size="16" />刷新队列</button>
+        <button class="primary-button" @click="load">
+          <ClipboardCheck :size="16" />刷新队列
+        </button>
       </div>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>申请人</th><th>类型</th><th>目标小区</th><th>材料</th><th>驳回次数</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead>
+        <thead>
+          <tr>
+            <th>申请人</th>
+            <th>类型</th>
+            <th>目标小区</th>
+            <th>材料</th>
+            <th>驳回次数</th>
+            <th>状态</th>
+            <th>提交时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.id">
-            <td><div class="primary-cell"><span class="row-icon">{{ row.userName.charAt(0) }}</span><div><strong>{{ row.userName }}</strong><em>{{ row.userPhone }}</em></div></div></td>
+            <td>
+              <div class="primary-cell"><span class="row-icon">{{ row.userName.charAt(0) }}</span>
+                <div><strong>{{ row.userName }}</strong><em>{{ row.userPhone }}</em></div>
+              </div>
+            </td>
             <td>{{ row.typeLabel }}</td>
             <td>{{ row.communityName }}</td>
             <td>{{ row.materialsCount ?? (row.materials?.length || 0) }} 份</td>
             <td>{{ row.rejectCount || 0 }}</td>
-            <td><StatusBadge :value="row.status" /></td>
+            <td>
+              <StatusBadge :value="row.status" />
+            </td>
             <td>{{ row.submittedAt }}</td>
             <td>
               <div class="row-actions">
                 <button class="row-icon-button" aria-label="查看认证详情" data-tip="查看详情" @click="open(row, 'view')">
                   <Eye :size="15" />
                 </button>
-                <button
-                  v-if="row.statusCode === 'PENDING'"
-                  class="row-icon-button"
-                  aria-label="审核认证申请"
-                  data-tip="审核"
-                  @click="open(row, 'audit')"
-                >
+                <button v-if="row.statusCode === 'PENDING'" class="row-icon-button" aria-label="审核认证申请" data-tip="审核"
+                  @click="open(row, 'audit')">
                   <ClipboardCheck :size="15" />
                 </button>
               </div>
@@ -235,21 +257,22 @@ watch(() => app.currentCommunityId, () => {
       </table>
       <EmptyState v-if="!rows.length" title="暂无待审核申请" description="队列已清空，可切换状态查看历史" />
     </div>
-    <div class="pagination"><span>共 {{ total }} 条记录</span><div><button :disabled="page <= 1" @click="page--; load()">上一页</button><button class="current">{{ page }}</button><button @click="page++; load()">下一页</button></div></div>
+    <div class="pagination"><span>共 {{ total }} 条记录</span>
+      <div><button :disabled="page <= 1" @click="page--; load()">上一页</button><button class="current">{{ page
+          }}</button><button @click="page++; load()">下一页</button></div>
+    </div>
   </section>
 
-  <NiDrawer
-    :open="drawerOpen"
-    :title="selected ? `${selected.typeLabel} · ${selected.user?.nickname || ''}` : '认证详情'"
-    :eyebrow="drawerMode === 'audit' ? '住户认证审核' : '住户认证详情'"
-    @close="drawerOpen = false"
-  >
+  <NiDrawer :open="drawerOpen" :title="selected ? `${selected.typeLabel} · ${selected.user?.nickname || ''}` : '认证详情'"
+    :eyebrow="drawerMode === 'audit' ? '住户认证审核' : '住户认证详情'" @close="drawerOpen = false">
     <template v-if="selected">
       <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
         <ShieldCheck :size="18" style="color: #6852c5" />
         <div style="flex: 1">
-          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">{{ selected.typeLabel }} / 目标小区</span>
-          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ selected.community?.name || '实名认证（不绑定小区）' }}</strong>
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">{{ selected.typeLabel }} /
+            目标小区</span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ selected.community?.name
+            || '实名认证（不绑定小区）' }}</strong>
         </div>
         <StatusBadge :value="mapStatus(selected.status)" />
       </div>
@@ -257,31 +280,30 @@ watch(() => app.currentCommunityId, () => {
       <div class="form-grid">
         <label><span>申请人</span><input :value="selected.user?.nickname || '—'" disabled /></label>
         <label><span>手机号（脱敏）</span><input :value="selected.user?.phone || '—'" disabled /></label>
-        <label><span>身份类型</span><input :value="selected.identity === 'owner' ? '业主' : selected.identity === 'tenant' ? '租户' : selected.identity === 'family' ? '家属' : selected.identity === 'business' ? '商务人员' : '—'" disabled /></label>
+        <label><span>身份类型</span><input
+            :value="selected.identity === 'owner' ? '业主' : selected.identity === 'tenant' ? '租户' : selected.identity === 'family' ? '家属' : selected.identity === 'business' ? '商务人员' : '—'"
+            disabled /></label>
         <label><span>追踪号</span><input :value="selected.traceId || '—'" disabled /></label>
         <label><span>提交时间</span><input :value="fmtDateTime(selected.submittedAt)" disabled /></label>
-        <label><span>最近审核时间</span><input :value="selected.reviewedAt ? fmtDateTime(selected.reviewedAt) : '尚未审核'" disabled /></label>
+        <label><span>最近审核时间</span><input :value="selected.reviewedAt ? fmtDateTime(selected.reviewedAt) : '尚未审核'"
+            disabled /></label>
         <label><span>驳回次数</span><input :value="String(selected.rejectCount || 0)" disabled /></label>
       </div>
-      <template v-if="selected.rejectReason">
-        <h4 class="section-title" style="margin-top: 20px">最近驳回原因</h4>
-        <p style="margin: 0; color: #a3525b; font-size: var(--font-size-body); line-height: 1.7; white-space: pre-wrap">{{ selected.rejectReason }}</p>
-      </template>
       <h4 class="section-title" style="margin-top: 20px">材料（私有桶签名 URL，10 分钟时效）</h4>
       <div class="material-grid">
         <a v-for="(material, index) in selected.materials || []" :key="material.objectKey"
-          :href="material.signedUrl || undefined" target="_blank" rel="noopener"
-          class="material-card" :class="{ 'material-card--disabled': !material.signedUrl }">
-          <img v-if="material.signedUrl && isImageMaterial(material.objectKey)" class="material-thumb"
-            :src="material.signedUrl" :alt="materialLabel(index)" />
+          :href="materialSrc(material) || undefined" target="_blank" rel="noopener" class="material-card"
+          :class="{ 'material-card--disabled': !materialSrc(material) }">
+          <img v-if="materialSrc(material) && isImageMaterial(material.objectKey)" class="material-thumb"
+            :src="materialSrc(material)" :alt="materialLabel(index)" />
           <FileImage v-else :size="15" />
           <span>{{ materialLabel(index) }}</span>
         </a>
         <p v-if="!(selected.materials || []).length" style="color: #988da2; font-size: var(--font-size-body)">无材料</p>
       </div>
-      <p v-if="(selected.materials || []).some((material: any) => !material.signedUrl)"
+      <p v-if="(selected.materials || []).some((material: any) => !materialSrc(material))"
         style="margin-top: 8px; color: #c08a35; font-size: var(--font-size-caption)">
-        部分材料签名 URL 生成失败，请确认 MinIO 已启动且对象存在。
+        部分材料读取地址缺失，请确认对象存储已配置且对象存在。
       </p>
       <div v-if="selected.type === 'OWNER_PROOF'" class="community-selector-card"
         style="min-height: 52px; padding: 9px 12px; margin-top: 12px; margin-bottom: 0">
@@ -295,8 +317,11 @@ watch(() => app.currentCommunityId, () => {
       </div>
       <template v-if="canAuditSelected">
         <h4 class="section-title" style="margin-top: 20px">审核操作</h4>
-        <label class="full" style="display: block"><span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">驳回原因（驳回必填，≥10 字，将通知申请人）</span>
-          <textarea v-model="rejectReason" placeholder="例如：房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄" style="width: 100%; min-height: 72px" /></label>
+        <label class="full" style="display: block"><span
+            style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">驳回原因（驳回必填，≥10
+            字，将通知申请人）</span>
+          <textarea v-model="rejectReason" placeholder="例如：房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄"
+            style="width: 100%; min-height: 72px" /></label>
       </template>
       <p v-else class="cert-readonly-note">
         该申请当前状态为「{{ mapStatus(selected.status) }}」，仅可查看历史信息，不能再次审核。
@@ -307,7 +332,8 @@ watch(() => app.currentCommunityId, () => {
       <template v-if="canAuditSelected">
         <button @click="requestMaterials">要求补充材料</button>
         <button @click="reject" style="color: #c0392b">驳回</button>
-        <button v-if="auth.hasPermission('community:resident:audit')" class="primary-button" @click="approve">通过并绑定</button>
+        <button v-if="auth.hasPermission('community:resident:audit')" class="primary-button"
+          @click="approve">通过并绑定</button>
       </template>
       <template v-else>
         <button @click="drawerOpen = false">关闭</button>
@@ -318,5 +344,13 @@ watch(() => app.currentCommunityId, () => {
 </template>
 
 <style scoped>
-.cert-readonly-note { margin: 18px 0 0; padding: 9px 11px; border-radius: 8px; color: #7a7482; background: #f7f5fa; font-size: var(--font-size-caption); line-height: 1.6; }
+.cert-readonly-note {
+  margin: 18px 0 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  color: #7a7482;
+  background: #f7f5fa;
+  font-size: var(--font-size-caption);
+  line-height: 1.6;
+}
 </style>

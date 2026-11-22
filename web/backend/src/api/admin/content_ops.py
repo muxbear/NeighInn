@@ -22,6 +22,7 @@ from src.core.responses import (
 )
 from src.core.storage import public_media_url
 from src.db.models import (
+    AdminUser,
     Broadcast,
     Community,
     Favorite,
@@ -90,7 +91,14 @@ TONE_BY_TYPE = {
 
 async def _broadcast_row(db: DbSession, broadcast: Broadcast) -> dict:
     community = await db.get(Community, broadcast.community_id)
-    author = await db.get(User, broadcast.author_id) if broadcast.author_id else None
+    # 喇叭由管理员发布，author_id 存的是 admin_user.id；历史数据可能指向平台用户。
+    author = await db.get(AdminUser, broadcast.author_id) if broadcast.author_id else None
+    owner_name = ""
+    if author is not None:
+        owner_name = author.real_name or author.username
+    elif broadcast.author_id:
+        user = await db.get(User, broadcast.author_id)
+        owner_name = user.nickname if user else ""
     now = utcnow()
     scheduled_at = ensure_utc(broadcast.scheduled_at)
     expires_at = ensure_utc(broadcast.expires_at)
@@ -109,7 +117,7 @@ async def _broadcast_row(db: DbSession, broadcast: Broadcast) -> dict:
         "type": broadcast.type, "typeLabel": type_label, "category": type_label,
         "status": broadcast.status, "effectiveStatus": effective_status,
         "important": broadcast.important,
-        "owner": author.nickname if author else "社区运营",
+        "owner": owner_name or "社区运营",
         "performance": f"{broadcast.response_count} 次互动",
         "content": broadcast.content, "media": broadcast.media or [],
         "responseCount": broadcast.response_count,

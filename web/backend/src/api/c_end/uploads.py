@@ -6,9 +6,12 @@ import logging
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile
+from minio.error import S3Error
+from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
+from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
 from src.core.responses import (
     ERR_DEPENDENCY,
@@ -154,3 +157,61 @@ async def complete_upload(user: CurrentUser, db: DbSession):
     from src.core.responses import not_implemented
 
     raise not_implemented("POST /uploads/complete")
+
+
+# ---------------------------------------------------------------- 公开媒体同源代理
+
+# 公开桶对象键只允许这些前缀；认证材料在私有桶，永不从这里出。
+PUBLIC_MEDIA_PREFIXES = ("uploads/",)
+_PUBLIC_MEDIA_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "webp": "image/webp", "gif": "image/gif", "mp4": "video/mp4",
+    "mov": "video/quicktime", "webm": "video/webm",
+}
+
+
+@router.get("/media/{object_key:path}")
+async def public_media(object_key: str, db: DbSession):
+    """公开媒体（物品图/生活动态）同源代理。
+
+    签名 URL 以 ``MINIO_ENDPOINT`` 为主机，H5/管理端换机器访问时无法解析
+    ``127.0.0.1:5206`` 这类内部地址；公开图改由后端读流返回，客户端只访问
+    当前页面的同源 /api 路径。
+    """
+    key = object_key.lstrip("/")
+    segments = key.split("/")
+    if not key.startswith(PUBLIC_MEDIA_PREFIXES) or any(
+            part in ("", ".", "..") for part in segments):
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404)
+
+    record = await db.scalar(
+        select(FileObject).where(FileObject.object_key == key))
+    if record is not None and record.visibility != "public":
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404)
+
+    client = get_minio()
+    if client is None:
+        raise ApiError(ERR_DEPENDENCY, "对象存储未配置，暂无法访问文件", 503)
+    upstream = None
+    try:
+        upstream = await run_in_threadpool(
+            client.get_object, settings.minio_bucket_public, key)
+        data = await run_in_threadpool(upstream.read)
+    except S3Error as exc:
+        logger.warning("公开媒体不存在 %s：%s", key, exc)
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404) from exc
+    except Exception as exc:  # 网络/连接异常降级为依赖不可用
+        logger.warning("公开媒体读取异常 %s：%s", key, exc)
+        raise ApiError(ERR_DEPENDENCY, "文件读取失败，请稍后重试", 503) from exc
+    finally:
+        if upstream is not None:
+            await run_in_threadpool(upstream.close)
+            await run_in_threadpool(upstream.release_conn)
+
+    media_type = (record.content_type if record and record.content_type else "") or \
+        _PUBLIC_MEDIA_MIME.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+    # 键名含 uuid，内容不会变，可长缓存。
+    return Response(content=data, media_type=media_type, headers={
+        "Cache-Control": "public, max-age=604800",
+        "Content-Disposition": "inline",
+    })
