@@ -12,7 +12,7 @@
 ## 仓库结构
 
 ```
-NeighInn‌/                          # 根目录名末尾含 U+200C
+NeighInn/                           # 仓库根目录（部署机上为 /opt/soft/NeighInn）
 ├── .claude/                        # settings.local.json 含密钥，勿提交
 ├── .gitignore                      # 忽略密钥、依赖与构建产物
 ├── CLAUDE.md
