@@ -836,12 +836,18 @@ let saveTimer: any = null
 
 /** 住户认证状态 → 面向用户的阻断原因文案。 */
 function ownerBlockedText(status: AuthStatusResult | null): string {
-  const owner = String(status?.owner ?? '')
+  // /auth/status 的 owner 是对象 {status, rejectReason, ...}，老 mock 可能是字符串。
+  const ownerNode: any = (status as any)?.owner
+  const owner = typeof ownerNode === 'string' ? ownerNode : String(ownerNode?.status ?? '')
+  const rejectReason = String(
+    (status as any)?.rejectReason ?? ownerNode?.rejectReason ?? '',
+  ).trim()
   if (owner === 'PENDING') return '你的住户认证正在审核中，审核通过后即可发布。'
   if (owner === 'SUPPLEMENT') return '住户认证还需补充材料，请到认证中心补齐后发布。'
   if (owner === 'REJECTED') {
-    const reason = String(status?.rejectReason ?? '').trim()
-    return reason ? `住户认证未通过：${reason}，请修改后重新提交。` : '住户认证未通过，请修改材料后重新提交。'
+    return rejectReason
+      ? `住户认证未通过：${rejectReason}，请修改后重新提交。`
+      : '住户认证未通过，请修改材料后重新提交。'
   }
   if (owner === 'FROZEN' || owner === 'REVOKED') return '住户认证已失效，请联系物业或管理员处理后再发布。'
   if (status?.realnameVerified && !status?.ownerVerified) {
@@ -945,7 +951,9 @@ watch(
     if (editingId.value) return
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
-      setStorage(STORAGE_KEYS.draftItem, { ...draft })
+      // 只持久化可长期访问的图片地址；blob: 刷新后即失效，存了反而导致提交报 "Failed to fetch"。
+      const persistableImages = (draft.images ?? []).filter((url) => /^https?:\/\//.test(String(url)))
+      setStorage(STORAGE_KEYS.draftItem, { ...draft, images: persistableImages })
     }, 1000)
   },
   { deep: true },
@@ -960,8 +968,14 @@ function restoreDraft(): void {
   // 兼容历史草稿：旧版类目/成色与服务端枚举不一致，直接提交会被校验拒绝。
   if (saved.category && !ITEM_CATEGORIES.includes(saved.category)) saved.category = ''
   if (saved.condition && !ITEM_CONDITIONS.includes(saved.condition)) saved.condition = ''
+  // blob: 本地临时地址在页面刷新后已失效，恢复过来只会在提交时 fetch 失败。
+  const savedImages = Array.isArray(saved.images) ? saved.images : []
+  const aliveImages = savedImages.filter((url) => /^https?:\/\//.test(String(url)))
+  saved.images = aliveImages
   Object.assign(draft, saved)
-  showToast('已恢复上次未完成的草稿')
+  showToast(aliveImages.length < savedImages.length
+    ? '草稿中的照片已失效，请重新选择照片'
+    : '已恢复上次未完成的草稿')
 }
 
 function onPriceInput(event: any): void {

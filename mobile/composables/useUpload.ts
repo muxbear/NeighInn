@@ -49,6 +49,19 @@ function parseUploadResponse(statusCode: number, raw: any): { body: any; ok: boo
   }
 }
 
+/** fetch 的网络级失败（DNS/断网/blob 失效）统一转成可读的 ApiError。 */
+async function fetchOrApiError(
+  input: string,
+  init: RequestInit | undefined,
+  message: string,
+): Promise<Response> {
+  try {
+    return await fetch(input, init)
+  } catch {
+    throw new ApiError(50000, message)
+  }
+}
+
 function uploadError(statusCode: number, body: any): ApiError {
   return new ApiError(
     Number(body?.code) || 50000,
@@ -95,7 +108,8 @@ export function useUpload() {
       // H5 的 uni.uploadFile 对 blob: 临时地址会提交 0 字节文件，
       // 改用 fetch + FormData 上传；App/小程序仍使用 uni.uploadFile。
       if (isH5Runtime()) {
-        const source = await fetch(path)
+        const source = await fetchOrApiError(
+          path, undefined, '照片已失效，请重新选择照片后提交')
         if (!source.ok) {
           throw new ApiError(40001, '图片读取失败，请重新选择')
         }
@@ -107,14 +121,18 @@ export function useUpload() {
         const form = new FormData()
         form.append('scene', scene)
         form.append('file', blob, fileName)
-        const response = await fetch(uploadUrl, {
+        const response = await fetchOrApiError(
+          uploadUrl,
+          {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
             'X-Idempotency-Key': idempotencyKey,
           },
           body: form,
-        })
+          },
+          '网络异常，照片上传失败，请检查网络后重试',
+        )
         const { body, ok } = parseUploadResponse(response.status, await response.text())
         if (!ok) throw uploadError(response.status, body)
         progress.value = 100
