@@ -9,12 +9,17 @@ from __future__ import annotations
 import secrets
 import string
 
-from sqlalchemy import select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.responses import ERR_BIZ_RULE, ERR_CONFLICT, ApiError
 from src.core.security import decrypt_field, encrypt_field, hmac_index
-from src.db.models import AdminUser, PlatformUser, Resident
+from src.db.models import (
+    AdminUser,
+    PlatformUser,
+    Resident,
+    admin_user_communities,
+)
 
 PASSWORD_GROUPS = (
     string.ascii_uppercase,
@@ -90,10 +95,40 @@ async def ensure_platform_user_for_resident(
     return user, True
 
 
+async def add_admin_community_scope(
+    db: AsyncSession, admin_id: int, community_id: int
+) -> None:
+    """确保管理员的数据范围包含指定社区（已存在时保持幂等）。"""
+    exists = await db.scalar(
+        select(admin_user_communities.c.community_id).where(
+            admin_user_communities.c.admin_user_id == admin_id,
+            admin_user_communities.c.community_id == community_id,
+        )
+    )
+    if exists is not None:
+        return
+    await db.execute(insert(admin_user_communities).values(
+        admin_user_id=admin_id, community_id=community_id))
+
+
+async def remove_admin_community_scope(
+    db: AsyncSession, admin_id: int, community_id: int
+) -> None:
+    await db.execute(delete(admin_user_communities).where(
+        admin_user_communities.c.admin_user_id == admin_id,
+        admin_user_communities.c.community_id == community_id,
+    ))
+
+
 async def bind_admin_to_resident(
     db: AsyncSession, admin_row: AdminUser, resident: Resident
 ) -> tuple[PlatformUser, bool]:
-    """把后台账号绑定到住户及其平台账号；返回 (平台账号, 是否新建)。"""
+    """把后台账号绑定到住户及其平台账号；返回 (平台账号, 是否新建)。
+
+    同时把住户所在社区写入 ``admin_user_communities``：手工账号默认不再在
+    表单里选择「可访问社区」，OWN_COMMUNITY 角色只有绑定住户后才有本社区。
+    改绑其他住户时移除原住户社区，避免残留越权范围。
+    """
     if resident.status != "ACTIVE":
         raise ApiError(ERR_BIZ_RULE, "住户已停用或已离开，不能绑定", 422)
 
@@ -110,9 +145,24 @@ async def bind_admin_to_resident(
     if existing:
         raise ApiError(ERR_CONFLICT, "该住户已绑定其他后台账号", 409)
 
+    previous = (await db.get(Resident, admin_row.resident_id)
+                if admin_row.resident_id else None)
     admin_row.platform_user_id = user.id
     admin_row.resident_id = resident.id
+    if previous and previous.community_id != resident.community_id:
+        await remove_admin_community_scope(db, admin_row.id, previous.community_id)
+    await add_admin_community_scope(db, admin_row.id, resident.community_id)
     return user, created
+
+
+async def unbind_admin_from_resident(db: AsyncSession, admin_row: AdminUser) -> None:
+    """解除后台账号与住户的关联，并移除原住户社区的数据范围。"""
+    previous = (await db.get(Resident, admin_row.resident_id)
+                if admin_row.resident_id else None)
+    if previous:
+        await remove_admin_community_scope(db, admin_row.id, previous.community_id)
+    admin_row.platform_user_id = None
+    admin_row.resident_id = None
 
 
 async def next_admin_username(db: AsyncSession, user_id: int) -> str:

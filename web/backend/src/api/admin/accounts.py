@@ -33,7 +33,10 @@ from src.db.models import (
     role_permissions,
 )
 from src.db.models.common import ensure_utc, utcnow
-from src.services.admin_account_service import bind_admin_to_resident
+from src.services.admin_account_service import (
+    bind_admin_to_resident,
+    unbind_admin_from_resident,
+)
 
 router = APIRouter(tags=["admin:system:accounts"])
 
@@ -427,9 +430,17 @@ async def _assign_roles_and_communities(db: AsyncSession, row: AdminUser,
     if role_ids:
         await db.execute(insert(admin_user_roles), [
             {"admin_user_id": row.id, "role_id": rid} for rid in role_ids])
-    if community_ids:
+    # 绑定住户的账号始终可访问住户所在社区：表单已不再单独编辑「可访问社区」，
+    # 若只保存空集合，OWN_COMMUNITY 角色会因数据范围为空而查不到任何小区。
+    effective_communities = {int(cid) for cid in community_ids}
+    if row.resident_id:
+        resident = await db.get(Resident, row.resident_id)
+        if resident:
+            effective_communities.add(resident.community_id)
+    if effective_communities:
         await db.execute(insert(admin_user_communities), [
-            {"admin_user_id": row.id, "community_id": cid} for cid in community_ids])
+            {"admin_user_id": row.id, "community_id": cid}
+            for cid in sorted(effective_communities)])
 
 
 @router.put("/admin-users/{admin_id}", dependencies=[AdminUserManagePerm])
@@ -474,8 +485,7 @@ async def update_admin_user(admin_id: int, payload: AdminUserIn,
                     raise ApiError(ERR_BIZ_RULE, "账号手机号与住户档案不一致", 422)
                 await bind_admin_to_resident(db, row, resident)
             else:
-                row.platform_user_id = None
-                row.resident_id = None
+                await unbind_admin_from_resident(db, row)
         await _assign_roles_and_communities(db, row, payload.roleIds, payload.communityIds)
     row.real_name = payload.realName.strip() or row.real_name
     row.email = payload.email
@@ -525,8 +535,7 @@ async def link_admin_user_resident(admin_id: int, payload: ResidentLinkIn,
         await bind_admin_to_resident(db, row, resident)
         action, message = "admin-user.bind-resident", "住户已关联"
     else:
-        row.platform_user_id = None
-        row.resident_id = None
+        await unbind_admin_from_resident(db, row)
         action, message = "admin-user.unbind-resident", "已解除住户关联"
     await write_audit(db, request, actor=admin, action=action,
                       resource_type="admin_user", resource_id=row.id,

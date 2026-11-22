@@ -342,6 +342,76 @@ async def test_admin_user_link_resident_dedicated_endpoint(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_link_resident_backfills_community_scope(client, db_session):
+    """手工账号未配置可访问社区时，关联住户后自动获得住户所在社区。"""
+    csrf = await admin_login(client)
+    resp = await client.post(f"{ADMIN_BASE}/residents",
+                             json=_resident_payload(name="范围回填住户", phone="13700008888"),
+                             headers=csrf)
+    assert resp.status_code == 200, resp.text
+    resident_id = int(resp.json()["data"]["id"])
+
+    # 表单不再维护「可访问社区」，新建时 communityIds 为空。
+    created = await client.post(f"{ADMIN_BASE}/admin-users", json={
+        "username": "scope_backfill_staff",
+        "password": "Staff@2026abc",
+        "realName": "范围回填员工",
+        "phone": "",
+        "roleIds": [await _role_id(db_session)],
+        "communityIds": [],
+    }, headers=csrf)
+    assert created.status_code == 200, created.text
+    account = created.json()["data"]
+    assert account["communityIds"] == []
+
+    linked = await client.put(f"{ADMIN_BASE}/admin-users/{account['id']}/resident",
+                              json={"residentId": resident_id}, headers=csrf)
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["data"]["communityIds"] == ["1"]
+
+    # 数据范围立即生效：以该账号登录后小区检索能命中本社区，而不是返回空列表。
+    await client.post(f"{ADMIN_BASE}/auth/logout", headers=admin_headers(client))
+    staff_headers = await admin_login(client, "scope_backfill_staff", "Staff@2026abc")
+    listing = await client.get(f"{ADMIN_BASE}/communities",
+                               params={"page": 1, "pageSize": 20}, headers=staff_headers)
+    assert listing.status_code == 200, listing.text
+    assert [item["id"] for item in listing.json()["data"]["items"]] == ["1"]
+    await client.post(f"{ADMIN_BASE}/auth/logout", headers=admin_headers(client))
+
+    # 解除关联后移除由住户带来的社区范围。
+    csrf = await admin_login(client)
+    unlinked = await client.put(f"{ADMIN_BASE}/admin-users/{account['id']}/resident",
+                                json={"residentId": None}, headers=csrf)
+    assert unlinked.status_code == 200, unlinked.text
+    assert unlinked.json()["data"]["communityIds"] == []
+
+
+@pytest.mark.asyncio
+async def test_create_admin_with_resident_defaults_community_scope(client, db_session):
+    """创建账号时直接关联住户，也应写入住户所在社区的数据范围。"""
+    csrf = await admin_login(client)
+    resp = await client.post(f"{ADMIN_BASE}/residents",
+                             json=_resident_payload(name="创建即关联住户", phone="13700007788"),
+                             headers=csrf)
+    assert resp.status_code == 200, resp.text
+    resident_id = int(resp.json()["data"]["id"])
+
+    created = await client.post(f"{ADMIN_BASE}/admin-users", json={
+        "username": "create_with_resident",
+        "password": "Staff@2026abc",
+        "realName": "创建即关联员工",
+        "phone": "",
+        "residentId": resident_id,
+        "roleIds": [await _role_id(db_session)],
+        "communityIds": [],
+    }, headers=csrf)
+    assert created.status_code == 200, created.text
+    account = created.json()["data"]
+    assert account["residentId"] == str(resident_id)
+    assert account["communityIds"] == ["1"]
+
+
+@pytest.mark.asyncio
 async def test_community_admin_sees_only_own_community(client, db_session):
     csrf = await admin_login(client)
     resp = await client.post(f"{ADMIN_BASE}/residents",
