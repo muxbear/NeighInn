@@ -80,7 +80,8 @@ logger = logging.getLogger(__name__)
 
 AuditPerm = Depends(require_permission("community:resident:audit"))
 
-IDENTITY_MAP = {"owner": "业主", "tenant": "租户", "family": "家属", "business": "商务人员"}
+IDENTITY_MAP = {"owner": "业主", "tenant": "租户", "family": "家属", "business": "商务人员",
+                "staff": "教职工", "student": "学生"}
 TYPE_LABEL = {"REALNAME": "实名认证", "OWNER_PROOF": "住户认证"}
 
 # 档案编辑沿用页面中文标签，服务端统一转换为领域编码（SRS 8.3 统一契约）。
@@ -962,7 +963,8 @@ CERT_MATERIAL_EXT = {
     "image/webp": ".webp", "application/pdf": ".pdf",
 }
 RESIDENT_CERT_LABEL = {"REALNAME": "身份认证", "OWNER_PROOF": "业主认证"}
-IDENTITY_CODES = {"业主": "owner", "租户": "tenant", "家属": "family", "商务人员": "business"}
+IDENTITY_CODES = {"业主": "owner", "租户": "tenant", "家属": "family", "商务人员": "business",
+                  "教职工": "staff", "学生": "student"}
 
 
 def _normalize_cert_type(raw: str) -> str:

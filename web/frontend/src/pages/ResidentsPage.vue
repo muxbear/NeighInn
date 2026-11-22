@@ -63,7 +63,7 @@ const loginUrl = computed(() => `${window.location.origin}/login`)
 
 const AVATAR_TONES = ['violet', 'blue', 'green', 'orange', 'plum', 'teal']
 
-const tabs = ['全部人员', '业主', '家属', '租户', '商务人员']
+const tabs = ['全部人员', '业主', '家属', '租户', '商务人员', '教职工', '学生']
 const community = computed(() => app.currentCommunity)
 const summaryCards = computed(() => [
   { label: '全部人员', value: summary.value.total, icon: Users, tone: 'violet' },
@@ -772,7 +772,7 @@ watch(() => app.currentCommunityId, () => {
       <label><span>性别</span><select v-model="form.gender"><option>男</option><option>女</option></select></label>
       <label><span>手机号</span><input v-model="form.phone" placeholder="请输入手机号" /></label>
       <label><span>邮箱</span><input v-model="form.email" maxlength="128" placeholder="选填" /></label>
-      <label><span>身份类型</span><select v-model="form.identity"><option>业主</option><option>家属</option><option>租户</option><option>商务人员</option></select></label>
+      <label><span>身份类型</span><select v-model="form.identity"><option>业主</option><option>家属</option><option>租户</option><option>商务人员</option><option>教职工</option><option>学生</option></select></label>
       <label><span>房屋 / 商铺</span><input v-model="form.building" placeholder="例如：8 栋 1 单元 902" /></label>
       <label><span>与房屋关系</span><input v-model="form.relationship" placeholder="如：房屋产权人" /></label>
       <label><span>加入时间</span><input v-model="form.joinedAt" type="date" /></label>

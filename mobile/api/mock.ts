@@ -821,7 +821,7 @@ async function route(
     if (!state.communities.some((item) => item.id === target.id)) {
       state.communities.push({
         ...target,
-        role: body.identity === 'owner' ? '业主' : body.identity === 'tenant' ? '租户' : '家属',
+        role: body.identity === 'owner' ? '业主' : body.identity === 'tenant' ? '租户' : body.identity === 'family' ? '家属' : body.identity === 'staff' ? '教职工' : body.identity === 'student' ? '学生' : '家属',
         status: '审核中',
       })
     }

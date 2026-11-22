@@ -129,6 +129,8 @@ export const IDENTITY_OPTIONS = [
   { key: 'owner', label: '业主', desc: '房产证 / 购房合同' },
   { key: 'tenant', label: '租户', desc: '租赁合同 / 缴费记录' },
   { key: 'family', label: '家属', desc: '户口本 / 亲属关系证明' },
+  { key: 'staff', label: '教职工', desc: '工作证 / 在职证明' },
+  { key: 'student', label: '学生', desc: '学生证 / 学籍证明' },
 ] as const
 
 export const AVATAR_PRESET_LABELS: Record<string, string> = {

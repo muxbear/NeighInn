@@ -47,9 +47,16 @@ const IDENTITY_OPTIONS = [
   { value: 'tenant', label: '租户' },
   { value: 'family', label: '家属' },
   { value: 'business', label: '商务人员' },
+  { value: 'staff', label: '教职工' },
+  { value: 'student', label: '学生' },
 ]
 const IDENTITY_CODE_BY_LABEL: Record<string, string> = {
   业主: 'owner', 租户: 'tenant', 家属: 'family', 商务人员: 'business',
+  教职工: 'staff', 学生: 'student',
+}
+const IDENTITY_LABEL_BY_CODE: Record<string, string> = {
+  owner: '业主', tenant: '租户', family: '家属', business: '商务人员',
+  staff: '教职工', student: '学生',
 }
 
 // 新增认证：选择本小区认证未通过的住户，上传材料后直接人工认证。
@@ -453,7 +460,7 @@ watch(() => app.currentCommunityId, () => {
         <label><span>申请人</span><input :value="selected.user?.nickname || '—'" disabled /></label>
         <label><span>手机号（脱敏）</span><input :value="selected.user?.phone || '—'" disabled /></label>
         <label><span>身份类型</span><input
-            :value="selected.identity === 'owner' ? '业主' : selected.identity === 'tenant' ? '租户' : selected.identity === 'family' ? '家属' : selected.identity === 'business' ? '商务人员' : '—'"
+            :value="IDENTITY_LABEL_BY_CODE[selected.identity] || '—'"
             disabled /></label>
         <label><span>追踪号</span><input :value="selected.traceId || '—'" disabled /></label>
         <label><span>提交时间</span><input :value="fmtDateTime(selected.submittedAt)" disabled /></label>

@@ -179,6 +179,8 @@ async def summary(admin: CurrentAdmin, db: DbSession,
     tenant = identity_counts.get("租户", 0)
     family = identity_counts.get("家属", 0)
     business = identity_counts.get("商务人员", 0)
+    staff = identity_counts.get("教职工", 0)
+    student = identity_counts.get("学生", 0)
 
     todos = await _todos(db, admin, cid)
 
@@ -202,7 +204,8 @@ async def summary(admin: CurrentAdmin, db: DbSession,
         },
         "distribution": {
             "owner": owner, "tenant": tenant, "family": family, "business": business,
-            "total": owner + tenant + family + business,
+            "staff": staff, "student": student,
+            "total": owner + tenant + family + business + staff + student,
         },
         "todos": todos,
     })

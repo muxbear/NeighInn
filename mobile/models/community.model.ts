@@ -7,7 +7,9 @@ export interface CommunitySummary {
   serviceCount: number
 }
 
-export type CommunityRole = '业主' | '租户' | '家属'
+export type CommunityRole = '业主' | '租户' | '家属' | '教职工' | '学生'
+/** 认证申报身份编码（与后端 identity 字段一致） */
+export type CommunityIdentity = 'owner' | 'tenant' | 'family' | 'staff' | 'student'
 export type CommunityVerifyStatus = '已认证' | '审核中' | '已驳回'
 
 /** 行政区划节点：省份/直辖市 → 地市 → 区/县 → 街道 */
@@ -47,7 +49,7 @@ export interface CommunityBinding {
 
 export interface CommunityApplyPayload {
   communityId: string
-  identity: 'owner' | 'tenant' | 'family'
+  identity: CommunityIdentity
   building?: string
   images: string[]
 }

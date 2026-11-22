@@ -1,3 +1,5 @@
+import type { CommunityIdentity } from './community.model'
+
 export type AuthStatus =
   | 'NOT_LOGIN'
   | 'LOGGED_IN_UNVERIFIED'
@@ -109,6 +111,6 @@ export interface RealnamePayload {
 
 export interface OwnerProofPayload {
   communityId: string
-  identity: 'owner' | 'tenant' | 'family'
+  identity: CommunityIdentity
   images: string[]
 }
