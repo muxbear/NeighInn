@@ -21,6 +21,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/communication/notification-tasks', name: 'tasks', component: () => import('@/pages/NotificationTasksPage.vue'), meta: { title: '通知任务', permission: 'communication:task:view' } },
   { path: '/community-management/maintenance', name: 'maintenance', component: () => import('@/pages/MaintenancePage.vue'), meta: { title: '社区运维', permission: 'community:maintenance:view' } },
   { path: '/community-management/residents', name: 'residents', component: () => import('@/pages/ResidentsPage.vue'), meta: { title: '社区业主', permission: 'community:resident:view' } },
+  { path: '/community-management/admins', name: 'community-admins', component: () => import('@/pages/CommunityAdminsPage.vue'), meta: { title: '社区管理员', permission: 'system:admin-user:view' } },
   { path: '/system/users', name: 'users', component: () => import('@/pages/UsersPage.vue'), meta: { title: '用户管理', permission: 'system:admin-user:view' } },
   { path: '/system/roles', name: 'roles', component: () => import('@/pages/RolesPage.vue'), meta: { title: '角色权限', permission: 'system:role:view' } },
   { path: '/system/resources', name: 'resources', component: () => import('@/pages/ResourcesPage.vue'), meta: { title: '资源管理', permission: 'system:resource:view' } },

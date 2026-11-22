@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   SlidersHorizontal,
+  UserCog,
   UserRound,
   Users,
   Wallet,
@@ -59,6 +60,8 @@ export const figmaNavGroups: NavGroup[] = [
     items: [
       { id: 'community-maintenance', label: '社区运维', route: '/community-management/maintenance', icon: Map, permission: 'community:maintenance:view' },
       { id: 'community-residents', label: '社区业主', route: '/community-management/residents', icon: UserRound, permission: 'community:resident:view' },
+      // 社区管理员复用后台账号查看权限：本页需要读取 /admin-users 才能为账号分配社区。
+      { id: 'community-admins', label: '社区管理员', route: '/community-management/admins', icon: UserCog, permission: 'system:admin-user:view' },
       { id: 'community-verification', label: '住户认证', route: '/governance/verification', icon: ShieldCheck, permission: 'community:resident:audit' },
     ],
   },
