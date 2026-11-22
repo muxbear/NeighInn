@@ -44,13 +44,29 @@ export const dashboardApi = {
 
 // 区划为低频变更数据：省级节点缓存到 sessionStorage，子级缓存在内存；
 // 后端同时按父节点做 10 分钟进程内缓存，页面按需分级加载。
-const REGION_ROOTS_CACHE_KEY = 'ni_admin_region_roots_v2'
-const REGION_TREE_CACHE_KEY = 'ni_admin_region_tree_v2'
-const REGION_CHILDREN_CACHE_PREFIX = 'ni_admin_region_children_v2_'
+// 注意：区划种子重新导入后必须递增下面的 vN 版本号，否则已打开过页面的浏览器
+// 会在 12 小时内继续使用旧树（典型症状：选择某些省份后地市下拉框为空/禁用）。
+const REGION_ROOTS_CACHE_KEY = 'ni_admin_region_roots_v3'
+const REGION_TREE_CACHE_KEY = 'ni_admin_region_tree_v3'
+const REGION_CHILDREN_CACHE_PREFIX = 'ni_admin_region_children_v3_'
 const REGION_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 let regionRootsMemory: any[] | null = null
 let regionTreeMemory: any[] | null = null
 const regionChildrenMemory = new Map<string, any[]>()
+
+// 升级时清理旧版区划缓存：旧树可能缺少下级区划，且大对象会挤占 sessionStorage 配额。
+try {
+  for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = sessionStorage.key(index)
+    if (key?.startsWith('ni_admin_region_roots_v2')
+        || key?.startsWith('ni_admin_region_tree_v2')
+        || key?.startsWith('ni_admin_region_children_v2_')) {
+      sessionStorage.removeItem(key)
+    }
+  }
+} catch {
+  // sessionStorage 不可用时忽略
+}
 
 function readCachedRegionRoots(): any[] | null {
   try {

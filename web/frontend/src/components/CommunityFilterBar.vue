@@ -243,21 +243,21 @@ watch(() => app.communities.length, async () => {
       <ChevronRight class="community-filter-arrow" :size="14" />
       <label class="community-filter-field">
         <select v-model="cityId" aria-label="地市" :disabled="!cityNodes.length" @change="onCityChange">
-          <option value="">{{ cityNodes.length ? '全部地市' : '请先选择省份' }}</option>
+          <option value="">{{ cityNodes.length ? '全部地市' : (provinceId ? '该省份暂无地市数据' : '请先选择省份') }}</option>
           <option v-for="city in cityNodes" :key="city.id" :value="String(city.id)">{{ city.name }}</option>
         </select>
       </label>
       <ChevronRight class="community-filter-arrow" :size="14" />
       <label class="community-filter-field">
         <select v-model="districtId" aria-label="区/县" :disabled="!districtNodes.length" @change="onDistrictChange">
-          <option value="">{{ districtNodes.length ? '全部区县' : '请先选择地市' }}</option>
+          <option value="">{{ districtNodes.length ? '全部区县' : (cityId ? '该地市暂无区县数据' : '请先选择地市') }}</option>
           <option v-for="district in districtNodes" :key="district.id" :value="String(district.id)">{{ district.name }}</option>
         </select>
       </label>
       <ChevronRight class="community-filter-arrow" :size="14" />
       <label class="community-filter-field">
         <select v-model="streetId" aria-label="街道" :disabled="!streetNodes.length" @change="onStreetChange">
-          <option value="">{{ streetNodes.length ? '全部街道' : '请先选择区县' }}</option>
+          <option value="">{{ streetNodes.length ? '全部街道' : (districtId ? '该区县暂无街道数据' : '请先选择区县') }}</option>
           <option v-for="street in streetNodes" :key="street.id" :value="String(street.id)">{{ street.name }}</option>
         </select>
       </label>

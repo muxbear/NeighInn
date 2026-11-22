@@ -10,7 +10,7 @@
 # 用法：
 #   ./deploy.sh backend     # 统一服务端（web/backend，端口 5193）
 #   ./deploy.sh frontend    # Web 管理端（web/frontend，端口 5192）
-#   ./deploy.sh mobile      # 移动端 H5（mobile，端口 5191）
+#   ./deploy.sh mobile      # 移动端 H5（mobile，端口 80）
 #   ./deploy.sh backend --no-cache   # 不使用 Docker 构建缓存
 #
 # 生产配置：
@@ -20,8 +20,8 @@
 #   uni-app x 的 H5 产物只能由 HBuilderX 编译，Linux 服务器无法从源码构建。
 #   请先在 HBuilderX 中将 mobile/config/env.ts 的 CURRENT_ENV 改为 'docker'，
 #   发行到 Web，然后把产物放到以下任一目录，再运行本脚本：
-#     /opt/soft/neighinn/artifacts/mobile-h5
-#     /opt/soft/neighinn/NeighInn/mobile/unpackage/dist/build/web
+#     /opt/soft/NeighInn/artifacts/mobile-h5
+#     /opt/soft/NeighInn/mobile/unpackage/dist/build/web
 #   也可用环境变量 MOBILE_H5_DIST=/path/to/dist 指定产物目录。
 #
 # 可选配置：
@@ -41,9 +41,18 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 REPO_URL="git@github.com:muxbear/NeighInn.git"
-REPO_DIR="${BASE_DIR}/NeighInn"
 BRANCH="main"
-COMPOSE_FILE="${REPO_DIR}/docker-compose.prod.yml"
+
+# 兼容两种布局：
+#   A（当前）：deploy/ 位于仓库内部 → 仓库根即 BASE_DIR，编排文件在同目录
+#   B（旧）：deploy/ 与仓库 NeighInn/ 同级 → 仓库在 ${BASE_DIR}/NeighInn
+if [ -f "${SCRIPT_DIR}/docker-compose.prod.yml" ]; then
+    REPO_DIR="$BASE_DIR"
+    COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.prod.yml"
+else
+    REPO_DIR="${BASE_DIR}/NeighInn"
+    COMPOSE_FILE="${REPO_DIR}/docker-compose.prod.yml"
+fi
 ENV_FILE="${REPO_DIR}/web/backend/.env.prod"
 MOBILE_ARTIFACT_DIR="${BASE_DIR}/artifacts/mobile-h5"
 LOG_DIR="${BASE_DIR}/logs"
@@ -69,7 +78,7 @@ usage() {
 
   backend    构建并部署统一服务端（web/backend，端口 5193）
   frontend   构建并部署 Web 管理端（web/frontend，端口 5192）
-  mobile     构建并部署移动端 H5（mobile，端口 5191；需预编译产物）
+  mobile     构建并部署移动端 H5（mobile，端口 80；需预编译产物）
 
 选项:
   --no-cache  构建镜像时不使用 Docker 层缓存
@@ -372,9 +381,9 @@ prepare_mobile_artifacts() {
     local candidates=()
     [ -n "${MOBILE_H5_DIST:-}" ] && candidates+=("$MOBILE_H5_DIST")
     candidates+=(
-        "$MOBILE_ARTIFACT_DIR"
         "${REPO_DIR}/mobile/unpackage/dist/build/web"
         "${REPO_DIR}/mobile/unpackage/dist/build/h5"
+        "$MOBILE_ARTIFACT_DIR"
     )
 
     local src="" candidate
@@ -482,8 +491,8 @@ test_frontend() {
 
 test_mobile() {
     local failed=0
-    test_static_site 5191 "移动端 H5" "入口: http://<服务器IP>:5191" || failed=1
-    test_api_proxy 5191 "移动端 H5" || failed=1
+    test_static_site 80 "移动端 H5" "入口: http://<服务器IP>" || failed=1
+    test_api_proxy 80 "移动端 H5" || failed=1
     return "$failed"
 }
 
@@ -508,7 +517,7 @@ show_status() {
             log_info "访问入口: http://${ip}:5192"
             ;;
         mobile)
-            log_info "访问入口: http://${ip}:5191"
+            log_info "访问入口: http://${ip}"
             ;;
     esac
 }

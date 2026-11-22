@@ -13,6 +13,11 @@ Thumbs.db
 # 后端本地日志（LOG_TO_FILE=true 时生成）
 web/backend/logs/
 
+# 部署脚本运行产物（logs/、并发锁、构建上下文）
+logs/
+.deploy.lock
+deploy/.build/
+
 # claude
 .claude/
 
