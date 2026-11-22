@@ -11,6 +11,14 @@
       </view>
     </view>
 
+    <view v-if="publishingBlocked" class="publish__blocked" @click="goAuthCenter">
+      <view class="publish__blocked-copy">
+        <text class="publish__blocked-title">暂不能发布</text>
+        <text class="publish__blocked-desc">{{ publishBlockReason }}</text>
+      </view>
+      <text class="publish__blocked-action">去认证</text>
+    </view>
+
     <view v-if="!editingId" class="publish__mode">
       <view class="publish__mode-tabs">
         <view
@@ -670,10 +678,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import type { ItemDraft, LifeMediaType, ServiceKind, TradeType } from '../../models'
+import type { AuthStatusResult, ItemDraft, LifeMediaType, ServiceKind, TradeType } from '../../models'
 import { useAppStore } from '../../stores/app.store'
 import { useToast } from '../../composables/useToast'
 import { useUpload } from '../../composables/useUpload'
+import { authService } from '../../services/auth.service'
 import { itemService } from '../../services/item.service'
 import { lifeService } from '../../services/life.service'
 import { serviceService } from '../../services/service.service'
@@ -687,7 +696,7 @@ import {
 import { getStorage, removeStorage, setStorage } from '../../utils/storage'
 import { validateItemDraft } from '../../utils/validator'
 import { chooseImages } from '../../utils/image'
-import { APP_INFO } from '../../config/env'
+import { APP_INFO, env } from '../../config/env'
 
 const appStore = useAppStore()
 const { toast, showToast } = useToast()
@@ -698,6 +707,11 @@ const step = ref(1)
 const stepLabels = ['物品信息', '确认发布', '审核上架']
 const submitting = ref(false)
 const editingId = ref('')
+// 发布前置校验（BR-02）：未通过住户认证的账号无法发布物品/生活/互助。
+// 进入页面即提示并给出去认证入口，避免用户填完 3 步才在提交时被服务端 403 拦下。
+const publishingBlocked = ref(false)
+const publishBlockReason = ref('')
+const eligibilityChecked = ref(false)
 const headerKicker = computed(() => {
   if (editingId.value) return '修改后需要重新质检'
   if (mode.value === 'life') return '记录身边真实生活'
@@ -820,6 +834,57 @@ const SERVICE_ICON_BY_CATEGORY: Record<string, string> = {
 
 let saveTimer: any = null
 
+/** 住户认证状态 → 面向用户的阻断原因文案。 */
+function ownerBlockedText(status: AuthStatusResult | null): string {
+  const owner = String(status?.owner ?? '')
+  if (owner === 'PENDING') return '你的住户认证正在审核中，审核通过后即可发布。'
+  if (owner === 'SUPPLEMENT') return '住户认证还需补充材料，请到认证中心补齐后发布。'
+  if (owner === 'REJECTED') {
+    const reason = String(status?.rejectReason ?? '').trim()
+    return reason ? `住户认证未通过：${reason}，请修改后重新提交。` : '住户认证未通过，请修改材料后重新提交。'
+  }
+  if (owner === 'FROZEN' || owner === 'REVOKED') return '住户认证已失效，请联系物业或管理员处理后再发布。'
+  if (status?.realnameVerified && !status?.ownerVerified) {
+    return '实名认证已通过，还需完成住户认证（房产或居住证明）才能发布。'
+  }
+  return '发布需要先完成实名认证与住户认证，认证通过后即可发布。'
+}
+
+/** 进入发布页/点击提交时的发布资格校验；网络异常不阻断，交给服务端兜底。 */
+async function checkPublishEligibility(force = false): Promise<boolean> {
+  // Mock 环境不做拦截，避免本地演示链路被假数据卡住。
+  if (env.mock) return true
+  if (eligibilityChecked.value && !force) return !publishingBlocked.value
+  eligibilityChecked.value = true
+  try {
+    const status = await authService.getStatus()
+    publishingBlocked.value = !status.ownerVerified
+    publishBlockReason.value = publishingBlocked.value ? ownerBlockedText(status) : ''
+  } catch {
+    publishingBlocked.value = false
+    publishBlockReason.value = ''
+  }
+  return !publishingBlocked.value
+}
+
+function goAuthCenter(): void {
+  uni.navigateTo({ url: '/pages/auth/center' })
+}
+
+/** 未认证提示弹窗：去认证 / 返回上一页。 */
+function promptPublishEligibility(): void {
+  uni.showModal({
+    title: '暂不能发布',
+    content: `${publishBlockReason.value}是否前往认证中心？`,
+    confirmText: '去认证',
+    cancelText: '返回',
+    success: (res: any) => {
+      if (res?.confirm) goAuthCenter()
+      else onCancel()
+    },
+  })
+}
+
 onLoad(async (options: any) => {
   if (options?.mode === 'life') mode.value = 'life'
   if (options?.mode === 'service') {
@@ -832,6 +897,11 @@ onLoad(async (options: any) => {
     editingId.value = editId
     mode.value = 'item'
     await loadItemForEdit(editId)
+  }
+  const eligible = await checkPublishEligibility()
+  if (!eligible) {
+    // 等页面转场结束再弹窗，避免遮罩闪一下就被覆盖。
+    setTimeout(promptPublishEligibility, 300)
   }
 })
 
@@ -1076,6 +1146,10 @@ async function resolveImageKeys(): Promise<string[]> {
 
 async function submitItem(): Promise<void> {
   if (submitting.value) return
+  if (!(await checkPublishEligibility())) {
+    promptPublishEligibility()
+    return
+  }
   const validation = validateItemDraft({ ...draft })
   if (!validation.valid) {
     showToast(Object.values(validation.errors)[0], 'alert')
@@ -1151,6 +1225,10 @@ async function pickServiceImages(): Promise<void> {
 
 async function submitLife(): Promise<void> {
   if (lifeSubmitting.value) return
+  if (!(await checkPublishEligibility())) {
+    promptPublishEligibility()
+    return
+  }
   if (lifeMediaType.value === 'video' && !lifeVideo.value) {
     showToast('请先选择视频', 'alert')
     return
@@ -1206,6 +1284,10 @@ function validateServiceDraft(): string {
 
 async function submitService(): Promise<void> {
   if (serviceSubmitting.value) return
+  if (!(await checkPublishEligibility())) {
+    promptPublishEligibility()
+    return
+  }
   const validationError = validateServiceDraft()
   if (validationError) {
     showToast(validationError, 'alert')
@@ -2014,5 +2096,33 @@ function openPublishRule(): void {
   font-size: $ni-font-8;
   line-height: 14px;
   color: #8f7344;
+}
+.publish__blocked {
+  flex-direction: row;
+  align-items: center;
+  margin: 0 16px 12px;
+  padding: 12px 14px;
+  border-radius: $ni-radius-12;
+  background-color: #fff4e5;
+}
+.publish__blocked-copy {
+  flex: 1;
+}
+.publish__blocked-title {
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: #9a5b00;
+}
+.publish__blocked-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  line-height: 15px;
+  color: #9a6a2a;
+}
+.publish__blocked-action {
+  margin-left: 10px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: #b26a00;
 }
 </style>
