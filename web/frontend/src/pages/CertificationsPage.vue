@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronDown, ClipboardCheck, Eye, FileImage, Filter, Search, ShieldCheck } from 'lucide-vue-next'
+import { ChevronDown, ClipboardCheck, Eye, FileImage, Filter, Plus, Search, ShieldCheck } from 'lucide-vue-next'
 import { certificationsApi } from '@/api'
 import { fmtDateTime, mapStatus } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
@@ -26,7 +26,7 @@ const typeFilter = ref('')
 const query = ref('')
 const selected = ref<any>(null)
 const drawerOpen = ref(false)
-// 查看 / 审核双模式：非待审核记录只能查看，避免误触状态机返回 422。
+// 查看 / 审核双模式：待审核、已驳回、待补充均可进入审核；已通过/冻结/撤销只读。
 const drawerMode = ref<'audit' | 'view'>('audit')
 const rejectReason = ref('')
 const loading = ref(false)
@@ -38,6 +38,33 @@ const summaryData = ref({
   todayReviewed: 0,
   oldestPendingAt: 0,
 })
+
+// 驳回 / 待补充的审核单也允许复核：住户无法自行重提或线下已补验材料时，
+// 管理员核对后可恢复认证，不再被「仅可查看」卡住。
+const REAUDITABLE = new Set(['PENDING', 'REJECTED', 'SUPPLEMENT'])
+const IDENTITY_OPTIONS = [
+  { value: 'owner', label: '业主' },
+  { value: 'tenant', label: '租户' },
+  { value: 'family', label: '家属' },
+  { value: 'business', label: '商务人员' },
+]
+const IDENTITY_CODE_BY_LABEL: Record<string, string> = {
+  业主: 'owner', 租户: 'tenant', 家属: 'family', 商务人员: 'business',
+}
+
+// 新增认证：选择本小区认证未通过的住户，上传材料后直接人工认证。
+const manualOpen = ref(false)
+const manualType = ref<'OWNER_PROOF' | 'REALNAME'>('OWNER_PROOF')
+const manualKeyword = ref('')
+const manualLoading = ref(false)
+const manualCandidates = ref<any[]>([])
+const manualSelected = ref<any>(null)
+const manualIdentity = ref('owner')
+const manualNote = ref('')
+const manualMaterials = ref<any[]>([])
+const manualMaterialsLoading = ref(false)
+const manualUploading = ref(false)
+const manualSubmitting = ref(false)
 
 const tabs = [
   { key: 'PENDING', label: '待审核' },
@@ -53,7 +80,9 @@ const typeFilterLabel = computed(() => {
   return '全部类型'
 })
 const canAuditSelected = computed(() =>
-  drawerMode.value === 'audit' && selected.value?.status === 'PENDING')
+  drawerMode.value === 'audit' && REAUDITABLE.has(selected.value?.status))
+const selectedIsPending = computed(() => selected.value?.status === 'PENDING')
+const manualCommunityName = computed(() => app.currentCommunity?.name || '当前小区')
 
 async function loadSummary() {
   try {
@@ -91,8 +120,8 @@ async function open(rowOrId: any, mode: 'audit' | 'view' = 'audit') {
   try {
     const detail = await certificationsApi.detail(id)
     selected.value = detail
-    // 已通过/驳回/待补充等历史记录不允许再次审核，自动降级为只读查看。
-    drawerMode.value = mode === 'audit' && detail?.status === 'PENDING' ? 'audit' : 'view'
+    // 已通过/冻结/撤销的记录不允许再次审核，自动降级为只读查看。
+    drawerMode.value = mode === 'audit' && REAUDITABLE.has(detail?.status) ? 'audit' : 'view'
     rejectReason.value = ''
     drawerOpen.value = true
   } catch (exc: any) {
@@ -133,7 +162,12 @@ async function refreshAfterAction() {
 }
 
 async function approve() {
-  if (!(await confirm({ title: '通过认证申请', message: '确认通过该认证申请？通过后账号将与小区强绑定。', confirmText: '确认通过' }))) return
+  const message = selected.value?.type === 'REALNAME'
+    ? '确认通过该实名认证申请？通过后账号实名状态将更新为已认证。'
+    : selected.value?.status === 'PENDING'
+      ? '确认通过该认证申请？通过后账号将与小区强绑定。'
+      : '该申请此前未通过，确认复核通过并恢复认证？通过后账号将与小区强绑定。'
+  if (!(await confirm({ title: '通过认证申请', message, confirmText: '确认通过' }))) return
   try {
     await certificationsApi.approve(selected.value.id)
     app.showToast('已通过并通知申请人')
@@ -169,6 +203,136 @@ async function requestMaterials() {
   }
 }
 
+// ---------------------------------------------------------------- 新增认证（人工认证）
+
+function openManual() {
+  manualOpen.value = true
+  manualSelected.value = null
+  manualMaterials.value = []
+  manualNote.value = ''
+  manualKeyword.value = ''
+  manualType.value = 'OWNER_PROOF'
+  manualIdentity.value = 'owner'
+  loadCandidates()
+}
+
+function closeManual() {
+  if (manualSubmitting.value) return
+  manualOpen.value = false
+}
+
+async function loadCandidates() {
+  manualLoading.value = true
+  try {
+    manualCandidates.value = (await certificationsApi.candidates({
+      communityId: app.currentCommunityId,
+      type: manualType.value,
+      keyword: manualKeyword.value.trim() || undefined,
+      limit: 30,
+    })) || []
+  } catch (exc: any) {
+    manualCandidates.value = []
+    app.showToast(exc?.message || '可认证住户加载失败')
+  } finally {
+    manualLoading.value = false
+  }
+}
+
+async function switchManualType(type: 'OWNER_PROOF' | 'REALNAME') {
+  if (manualType.value === type) return
+  manualType.value = type
+  manualSelected.value = null
+  manualMaterials.value = []
+  await loadCandidates()
+}
+
+async function selectCandidate(row: any) {
+  if (row.eligible === false) {
+    app.showToast(row.eligibleReason || '该住户暂不可认证')
+    return
+  }
+  manualSelected.value = row
+  manualIdentity.value = IDENTITY_CODE_BY_LABEL[row.identity] || 'owner'
+  manualMaterials.value = []
+  await loadManualMaterials()
+}
+
+async function loadManualMaterials() {
+  if (!manualSelected.value) return
+  manualMaterialsLoading.value = true
+  try {
+    const data = await certificationsApi.materials(manualSelected.value.id, manualType.value)
+    manualMaterials.value = data?.materials || []
+  } catch (exc: any) {
+    manualMaterials.value = []
+    app.showToast(exc?.message || '认证材料加载失败')
+  } finally {
+    manualMaterialsLoading.value = false
+  }
+}
+
+async function onManualMaterialSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !manualSelected.value) return
+  manualUploading.value = true
+  try {
+    const data = await certificationsApi.uploadMaterial(
+      manualSelected.value.id, manualType.value, file)
+    manualMaterials.value = data?.materials || []
+    app.showToast('认证材料已上传')
+  } catch (exc: any) {
+    app.showToast(exc?.message || '认证材料上传失败')
+  } finally {
+    manualUploading.value = false
+  }
+}
+
+async function removeManualMaterial(objectKey: string) {
+  if (!manualSelected.value) return
+  if (!(await confirm({
+    title: '删除认证材料',
+    message: '确定删除该认证材料吗？对象文件将保留在私有桶供审计追溯。',
+    confirmText: '确认删除',
+    danger: true,
+  }))) return
+  try {
+    const data = await certificationsApi.removeMaterial(
+      manualSelected.value.id, manualType.value, objectKey)
+    manualMaterials.value = data?.materials || []
+    app.showToast('认证材料已删除')
+  } catch (exc: any) {
+    app.showToast(exc?.message || '删除失败')
+  }
+}
+
+async function submitManualVerify() {
+  if (!manualSelected.value || manualSubmitting.value) return
+  const typeLabel = manualType.value === 'OWNER_PROOF' ? '住户认证' : '身份认证'
+  if (!(await confirm({
+    title: `确认${typeLabel}通过`,
+    message: manualType.value === 'OWNER_PROOF'
+      ? `确认将「${manualSelected.value.name}」的住户认证置为已认证并绑定「${manualCommunityName.value}」？请确保已核对相关证件原件。`
+      : `确认将「${manualSelected.value.name}」的身份认证（实名）置为已认证？请确保已核对身份证件。`,
+    confirmText: '确认通过',
+  }))) return
+  manualSubmitting.value = true
+  try {
+    await certificationsApi.verifyResident(manualSelected.value.id, manualType.value, {
+      identity: manualType.value === 'OWNER_PROOF' ? manualIdentity.value : undefined,
+      note: manualNote.value.trim(),
+    })
+    app.showToast(`${typeLabel}已通过`)
+    manualOpen.value = false
+    await refreshAfterAction()
+  } catch (exc: any) {
+    app.showToast(exc?.message || '认证失败')
+  } finally {
+    manualSubmitting.value = false
+  }
+}
+
 onMounted(async () => {
   if (route.query.status) activeTab.value = String(route.query.status)
   if (route.query.type) typeFilter.value = String(route.query.type)
@@ -180,6 +344,11 @@ onMounted(async () => {
 watch(() => app.currentCommunityId, () => {
   page.value = 1
   Promise.all([loadSummary(), load()])
+  if (manualOpen.value) {
+    manualSelected.value = null
+    manualMaterials.value = []
+    loadCandidates()
+  }
 })
 </script>
 
@@ -207,8 +376,11 @@ watch(() => app.currentCommunityId, () => {
           <Filter :size="16" />{{ typeFilterLabel }}
           <ChevronDown :size="14" />
         </button>
-        <button class="primary-button" @click="load">
+        <button @click="load">
           <ClipboardCheck :size="16" />刷新队列
+        </button>
+        <button v-if="auth.hasPermission('community:resident:audit')" class="primary-button" @click="openManual">
+          <Plus :size="16" />新增认证
         </button>
       </div>
     </div>
@@ -246,8 +418,8 @@ watch(() => app.currentCommunityId, () => {
                 <button class="row-icon-button" aria-label="查看认证详情" data-tip="查看详情" @click="open(row, 'view')">
                   <Eye :size="15" />
                 </button>
-                <button v-if="row.statusCode === 'PENDING'" class="row-icon-button" aria-label="审核认证申请" data-tip="审核"
-                  @click="open(row, 'audit')">
+                <button v-if="REAUDITABLE.has(row.statusCode)" class="row-icon-button"
+                  aria-label="审核认证申请" data-tip="审核" @click="open(row, 'audit')">
                   <ClipboardCheck :size="15" />
                 </button>
               </div>
@@ -288,6 +460,12 @@ watch(() => app.currentCommunityId, () => {
         <label><span>最近审核时间</span><input :value="selected.reviewedAt ? fmtDateTime(selected.reviewedAt) : '尚未审核'"
             disabled /></label>
         <label><span>驳回次数</span><input :value="String(selected.rejectCount || 0)" disabled /></label>
+        <label v-if="selected.status === 'REJECTED'" class="full"><span>上次驳回原因</span>
+          <textarea :value="selected.rejectReason || '—'" disabled />
+        </label>
+        <label v-else-if="selected.status === 'SUPPLEMENT'" class="full"><span>补充材料说明</span>
+          <textarea :value="selected.reviewNote || '—'" disabled />
+        </label>
       </div>
       <h4 class="section-title" style="margin-top: 20px">材料（私有桶签名 URL，10 分钟时效）</h4>
       <div class="material-grid">
@@ -317,34 +495,139 @@ watch(() => app.currentCommunityId, () => {
       </div>
       <template v-if="canAuditSelected">
         <h4 class="section-title" style="margin-top: 20px">审核操作</h4>
-        <label class="full" style="display: block"><span
+        <label v-if="selectedIsPending" class="full" style="display: block"><span
             style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">驳回原因（驳回必填，≥10
             字，将通知申请人）</span>
           <textarea v-model="rejectReason" placeholder="例如：房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄"
             style="width: 100%; min-height: 72px" /></label>
+        <p v-else class="cert-reviewable-note">
+          该申请当前为「{{ mapStatus(selected.status) }}」。线下补验材料后可直接「认证通过」；
+          如需住户补充材料，请让住户在移动端重新提交，新材料会进入待审核队列。
+        </p>
       </template>
       <p v-else class="cert-readonly-note">
-        该申请当前状态为「{{ mapStatus(selected.status) }}」，仅可查看历史信息，不能再次审核。
-        <template v-if="selected.status === 'PENDING'">如需处理，请点击下方「进入审核」。</template>
+        该申请当前状态为「{{ mapStatus(selected.status) }}」，仅可查看历史信息。
+        <template v-if="selected?.status === 'FROZEN'">如需恢复认证，请在「社区业主」页调整认证状态。</template>
+        <template v-else-if="selected?.status === 'REVOKED'">认证已撤销，需住户重新提交认证材料。</template>
+        <template v-else>该状态不支持再次审核。</template>
       </p>
     </template>
     <template #footer>
       <template v-if="canAuditSelected">
-        <button @click="requestMaterials">要求补充材料</button>
-        <button @click="reject" style="color: #c0392b">驳回</button>
+        <template v-if="selectedIsPending">
+          <button @click="requestMaterials">要求补充材料</button>
+          <button @click="reject" style="color: #c0392b">驳回</button>
+        </template>
         <button v-if="auth.hasPermission('community:resident:audit')" class="primary-button"
-          @click="approve">通过并绑定</button>
+          @click="approve">{{ selectedIsPending ? '通过并绑定' : '认证通过' }}</button>
       </template>
       <template v-else>
         <button @click="drawerOpen = false">关闭</button>
-        <button v-if="selected?.status === 'PENDING'" class="primary-button" @click="drawerMode = 'audit'">进入审核</button>
+        <button v-if="REAUDITABLE.has(selected?.status)" class="primary-button"
+          @click="drawerMode = 'audit'">进入审核</button>
       </template>
+    </template>
+  </NiDrawer>
+
+  <!-- 新增认证：未通过住户（未提交 / 待审核 / 待补充 / 已驳回）可由后台人工认证 -->
+  <NiDrawer :open="manualOpen" title="新增认证" eyebrow="住户身份认证" @close="closeManual">
+    <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+      <ShieldCheck :size="18" style="color: #6852c5" />
+      <div style="flex: 1">
+        <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">认证归属小区</span>
+        <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ manualCommunityName }}</strong>
+      </div>
+    </div>
+
+    <h4 class="section-title">1. 选择认证类型与住户</h4>
+    <div class="manual-type-tabs">
+      <button :class="{ active: manualType === 'OWNER_PROOF' }" @click="switchManualType('OWNER_PROOF')">住户认证</button>
+      <button :class="{ active: manualType === 'REALNAME' }" @click="switchManualType('REALNAME')">身份认证（实名）</button>
+    </div>
+    <div class="table-search" style="width: 100%; margin-bottom: 10px">
+      <Search :size="17" />
+      <input v-model="manualKeyword" placeholder="搜索姓名、昵称或房屋…" @keyup.enter="loadCandidates" />
+      <button v-if="manualKeyword" class="manual-search-clear" @click="manualKeyword = ''; loadCandidates()">清空</button>
+    </div>
+    <div class="manual-candidate-list">
+      <div v-if="manualLoading" class="manual-hint">正在加载可认证住户…</div>
+      <button v-for="row in manualCandidates" :key="row.id" type="button"
+        :class="['manual-candidate', { selected: manualSelected?.id === row.id, disabled: row.eligible === false }]"
+        :disabled="row.eligible === false" @click="selectCandidate(row)">
+        <span class="manual-candidate-avatar">{{ (row.nickname || row.name || '?').charAt(0) }}</span>
+        <span class="manual-candidate-main">
+          <strong>{{ row.name || row.nickname }}</strong>
+          <em>{{ row.identity }} · {{ row.building || '未填写房屋' }} · {{ row.phone || '无手机号' }}</em>
+        </span>
+        <span class="manual-candidate-state">
+          <StatusBadge :value="row.certificationStatusLabel || mapStatus(row.certificationStatus)" />
+          <em v-if="row.eligible === false" class="manual-ineligible">{{ row.eligibleReason }}</em>
+        </span>
+      </button>
+      <EmptyState v-if="!manualLoading && !manualCandidates.length" title="未找到可认证住户"
+        description="请切换认证类型、调整搜索词，或确认所选小区" />
+    </div>
+
+    <template v-if="manualSelected">
+      <h4 class="section-title" style="margin-top: 20px">2. 认证信息</h4>
+      <div class="form-grid">
+        <label><span>住户</span><input :value="manualSelected.name || manualSelected.nickname" disabled /></label>
+        <label><span>手机号（脱敏）</span><input :value="manualSelected.phone || '—'" disabled /></label>
+        <label><span>房屋 / 商铺</span><input :value="manualSelected.building || '—'" disabled /></label>
+        <label v-if="manualType === 'OWNER_PROOF'"><span>身份类型</span>
+          <select v-model="manualIdentity">
+            <option v-for="option in IDENTITY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label><span>当前状态</span><input :value="mapStatus(manualSelected.certificationStatus)" disabled /></label>
+        <label class="full"><span>审核说明（可选，写入审计记录）</span>
+          <textarea v-model="manualNote" maxlength="500"
+            placeholder="例如：已线下核验房产证原件及业主身份证，材料与住户信息一致" />
+        </label>
+      </div>
+
+      <h4 class="section-title" style="margin-top: 20px">3. 认证材料（可选，建议上传）</h4>
+      <div class="cert-material-block">
+        <div v-if="manualMaterialsLoading" class="cert-material-hint">正在加载认证材料…</div>
+        <div v-else-if="manualMaterials.length" class="cert-material-thumbs">
+          <div v-for="material in manualMaterials" :key="material.objectKey" class="cert-material-thumb">
+            <a v-if="materialSrc(material)" :href="materialSrc(material)" target="_blank" rel="noopener">
+              <img v-if="isImageMaterial(material.objectKey)" :src="materialSrc(material)" :alt="material.label" />
+              <div v-else class="cert-material-missing">点击查看材料</div>
+            </a>
+            <div v-else class="cert-material-missing">材料读取地址缺失</div>
+            <div class="cert-material-foot">
+              <span>{{ material.label }}</span>
+              <button type="button" @click="removeManualMaterial(material.objectKey)">删除</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="cert-material-hint">暂无认证材料，可直接认证或上传留档</div>
+        <label class="cert-material-upload">
+          <input type="file" :accept="manualType === 'OWNER_PROOF'
+            ? 'image/jpeg,image/png,image/webp,application/pdf'
+            : 'image/jpeg,image/png,image/webp'"
+            @change="onManualMaterialSelected" />
+          <span>{{ manualUploading ? '上传中…' : '上传认证材料' }}</span>
+        </label>
+      </div>
+      <p class="cert-reviewable-note" style="margin-top: 12px">
+        确认通过后，住户认证会绑定到「{{ manualCommunityName }}」；已驳回、待补充的记录将复用原审核单并流转为已认证。
+        请确保已核对证件原件或照片，操作将写入审计日志并通知住户。
+      </p>
+    </template>
+    <template #footer>
+      <button :disabled="manualSubmitting" @click="closeManual">取消</button>
+      <button class="primary-button" :disabled="!manualSelected || manualSubmitting" @click="submitManualVerify">
+        {{ manualSubmitting ? '提交中…' : '认证通过' }}
+      </button>
     </template>
   </NiDrawer>
 </template>
 
 <style scoped>
-.cert-readonly-note {
+.cert-readonly-note,
+.cert-reviewable-note {
   margin: 18px 0 0;
   padding: 9px 11px;
   border-radius: 8px;
@@ -352,5 +635,141 @@ watch(() => app.currentCommunityId, () => {
   background: #f7f5fa;
   font-size: var(--font-size-caption);
   line-height: 1.6;
+}
+
+.cert-reviewable-note {
+  margin-top: 12px;
+  color: #7d6a3f;
+  background: #fdf7e9;
+}
+
+.manual-type-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 10px;
+  border: 1px solid #e7e3ed;
+  border-radius: 9px;
+  background: #f8f6fa;
+}
+
+.manual-type-tabs button {
+  flex: 1;
+  height: 32px;
+  border: 0;
+  border-radius: 7px;
+  color: #7a7482;
+  background: transparent;
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
+
+.manual-type-tabs button.active {
+  color: #5a45b5;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(111, 89, 212, .12);
+  font-weight: 600;
+}
+
+.manual-search-clear {
+  flex: 0 0 auto;
+  color: #7c6bc4;
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.manual-candidate-list {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #e7e3ed;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.manual-candidate {
+  width: 100%;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid #f1eef5;
+  color: #4a4552;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.manual-candidate:last-child { border-bottom: 0; }
+.manual-candidate:hover:not(.disabled) { background: #fbf9ff; }
+
+.manual-candidate.selected {
+  background: #f3effd;
+  box-shadow: inset 3px 0 0 #6f59d4;
+}
+
+.manual-candidate.disabled {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+.manual-candidate-avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(135deg, #8b76e0, #6f59d4);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+}
+
+.manual-candidate-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.manual-candidate-main strong {
+  overflow: hidden;
+  color: #4a4552;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-candidate-main em {
+  overflow: hidden;
+  color: #938d9c;
+  font-size: var(--font-size-caption);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-candidate-state {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.manual-ineligible {
+  color: #c08a35;
+  font-size: var(--font-size-caption);
+  font-style: normal;
+}
+
+.manual-hint {
+  padding: 24px 12px;
+  color: #9b96a3;
+  font-size: var(--font-size-caption);
+  text-align: center;
 }
 </style>

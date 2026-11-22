@@ -497,6 +497,149 @@ class _FakeMinio:
 
 
 @pytest.mark.asyncio
+async def test_rejected_certification_can_be_reapproved(client):
+    """已驳回的审核单可在「住户认证」页复核通过。
+
+    场景：住户无法自行重新提交，或线下已补验纸质材料；管理员核对后
+    应能直接恢复认证，而不是被“不能再次审核”卡住。
+    """
+    result = await register_user(client)
+    await submit_owner_proof(client, result["token"], community_id=1)
+    csrf = await admin_login(client)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+
+    reason = "房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄"
+    reject = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/reject",
+        json={"reason": reason}, headers=csrf)
+    assert reject.status_code == 200, reject.text
+
+    approve = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+    assert approve.status_code == 200, approve.text
+    assert approve.json()["data"]["status"] == "VERIFIED"
+    assert approve.json()["data"]["rejectReason"] == ""
+
+    status = (await client.get(f"{C_BASE}/auth/status",
+                               headers=bearer(result["token"]))).json()["data"]
+    assert status["status"] == "VERIFIED_OWNER"
+    assert status["ownerVerified"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_manual_certification_for_unverified_resident(client, db_session):
+    """未提交住户认证的住户，可由后台在「住户认证」页直接人工认证。"""
+    account = await register_user(client)
+    await client.post(
+        f"{C_BASE}/auth/register/complete",
+        json={"nickname": "邻居丙", "intentCommunityId": 1},
+        headers=bearer(account["token"]),
+    )
+    csrf = await admin_login(client)
+
+    candidates = (await client.get(
+        f"{ADMIN_BASE}/certifications/candidates",
+        params={"type": "OWNER_PROOF", "communityId": 1}, headers=csrf,
+    )).json()["data"]
+    target = next(item for item in candidates
+                  if item["userId"] == account["profile"]["id"])
+    assert target["eligible"] is True
+    assert target["certificationStatus"] == "UNVERIFIED"
+
+    resp = await client.post(
+        f"{ADMIN_BASE}/residents/{target['id']}/certifications/OWNER_PROOF/verify",
+        json={"identity": "owner", "note": "已线下核验房产证及身份证原件"},
+        headers=csrf)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["status"] == "VERIFIED"
+    assert data["type"] == "OWNER_PROOF"
+    assert data["community"]["id"] == "1"
+
+    status = (await client.get(f"{C_BASE}/auth/status",
+                               headers=bearer(account["token"]))).json()["data"]
+    assert status["status"] == "VERIFIED_OWNER"
+    assert status["ownerVerified"] is True
+
+    resident = await db_session.get(Resident, int(target["id"]))
+    await db_session.refresh(resident)
+    assert resident.certification_status == "VERIFIED"
+    assert resident.certification_no.startswith("YZ")
+    assert resident.identity_type == "业主"
+
+    # 已认证住户不再出现在人工认证候选列表
+    again = (await client.get(
+        f"{ADMIN_BASE}/certifications/candidates",
+        params={"type": "OWNER_PROOF", "communityId": 1}, headers=csrf,
+    )).json()["data"]
+    assert all(item["id"] != target["id"] for item in again)
+
+    audit = await db_session.scalar(select(AuditLog).where(
+        AuditLog.action == "certification.owner_proof.manual-verify"))
+    assert audit is not None
+    assert audit.after_snapshot["note"] == "已线下核验房产证及身份证原件"
+
+
+@pytest.mark.asyncio
+async def test_admin_manual_certification_reuses_rejected_cert(client, db_session):
+    """人工认证复用最近一张驳回审核单，不重复生成审核记录。"""
+    account = await register_user(client)
+    await client.post(
+        f"{C_BASE}/auth/register/complete",
+        json={"nickname": "邻居戊", "intentCommunityId": 1},
+        headers=bearer(account["token"]),
+    )
+    await submit_owner_proof(client, account["token"], community_id=1)
+    csrf = await admin_login(client)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/reject",
+        json={"reason": "证明材料与申请人信息不一致，请补充产权证明"}, headers=csrf)
+
+    resident = await db_session.scalar(select(Resident).where(
+        Resident.user_id == int(account["profile"]["id"])))
+    resp = await client.post(
+        f"{ADMIN_BASE}/residents/{resident.id}/certifications/OWNER_PROOF/verify",
+        json={"note": "线下复核产权证明后通过"}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["id"] == proof["id"]
+    assert resp.json()["data"]["status"] == "VERIFIED"
+
+    await db_session.refresh(resident)
+    assert resident.certification_status == "VERIFIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_manual_realname_verification(client):
+    """身份认证（实名）同样支持后台人工认证。"""
+    account = await register_user(client)
+    await client.post(
+        f"{C_BASE}/auth/register/complete",
+        json={"nickname": "邻居丁", "intentCommunityId": 1},
+        headers=bearer(account["token"]),
+    )
+    csrf = await admin_login(client)
+
+    candidates = (await client.get(
+        f"{ADMIN_BASE}/certifications/candidates",
+        params={"type": "REALNAME", "communityId": 1}, headers=csrf,
+    )).json()["data"]
+    target = next(item for item in candidates
+                  if item["userId"] == account["profile"]["id"])
+
+    resp = await client.post(
+        f"{ADMIN_BASE}/residents/{target['id']}/certifications/REALNAME/verify",
+        json={"note": "线下核验身份证原件"}, headers=csrf)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["type"] == "REALNAME"
+
+    status = (await client.get(f"{C_BASE}/auth/status",
+                               headers=bearer(account["token"]))).json()["data"]
+    assert status["realnameVerified"] is True
+    assert status["ownerVerified"] is False
+
+
+@pytest.mark.asyncio
 async def test_certification_material_streamed_through_api(client, monkeypatch):
     """审核页材料由后端同源返回，不依赖浏览器能访问 MinIO 主机。
 

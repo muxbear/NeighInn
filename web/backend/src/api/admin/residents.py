@@ -79,7 +79,6 @@ router = APIRouter(tags=["admin:residents"])
 logger = logging.getLogger(__name__)
 
 AuditPerm = Depends(require_permission("community:resident:audit"))
-ResidentUpdatePerm = Depends(require_permission("community:resident:update"))
 
 IDENTITY_MAP = {"owner": "业主", "tenant": "租户", "family": "家属", "business": "商务人员"}
 TYPE_LABEL = {"REALNAME": "实名认证", "OWNER_PROOF": "住户认证"}
@@ -231,6 +230,7 @@ async def _cert_row(db: DbSession, cert: Certification) -> dict:
         "rejectCount": cert.reject_count,
         "materialsCount": len(cert.materials or []),
         "rejectReason": cert.reject_reason,
+        "reviewNote": cert.review_note,
         "traceId": cert.trace_id,
         "version": cert.version,
         "submittedAt": int(cert.submitted_at.timestamp() * 1000) if cert.submitted_at else 0,
@@ -305,6 +305,35 @@ async def _latest_cert(db: DbSession, user_id: int, cert_type: str) -> Certifica
         .order_by(Certification.submitted_at.desc(), Certification.id.desc())
         .limit(1)
     )
+
+
+async def _latest_resident_cert(db: DbSession, resident: Resident,
+                                cert_type: str) -> Certification | None:
+    """住户维度的最近一张认证单。
+
+    住户认证（OWNER_PROOF）与小区强绑定，必须按住户当前小区匹配审核单，
+    避免「社区业主」页维护材料时把本小区材料挂到其他小区的历史认证单上；
+    实名认证（REALNAME）不绑定小区，取该账号最近一张。
+    """
+    if not resident.user_id:
+        return None
+    stmt = select(Certification).where(
+        Certification.user_id == resident.user_id,
+        Certification.type == cert_type,
+    )
+    order = (Certification.submitted_at.desc(), Certification.id.desc())
+    if cert_type == "OWNER_PROOF":
+        # 优先复用仍在审核中的申请（可能是在其他小区提交的），既避免重复待办，
+        # 也避免与「同用户同类型唯一待审」索引冲突；没有时再取本小区最近一张。
+        cert = await db.scalar(
+            stmt.where(Certification.status.in_(["PENDING", "SUPPLEMENT"]))
+            .order_by(*order).limit(1))
+        if cert is not None:
+            return cert
+        return await db.scalar(
+            stmt.where(Certification.community_id == resident.community_id)
+            .order_by(*order).limit(1))
+    return await db.scalar(stmt.order_by(*order).limit(1))
 
 
 async def _sync_latest_cert_status(db: DbSession, user_id: int | None,
@@ -967,7 +996,7 @@ async def _get_or_create_resident_cert(db: DbSession, resident: Resident,
     """取最近一张认证单；没有时补建一张，便于后台直接维护历史人员的证件材料。"""
     if not resident.user_id:
         raise ApiError(ERR_PARAM, "该人员档案未绑定账号，无法维护认证材料", 400)
-    cert = await _latest_cert(db, resident.user_id, cert_type)
+    cert = await _latest_resident_cert(db, resident, cert_type)
     if cert is not None:
         return cert
     user = await db.get(User, resident.user_id)
@@ -991,13 +1020,14 @@ async def _get_or_create_resident_cert(db: DbSession, resident: Resident,
 
 
 @router.get("/residents/{resident_id}/certifications/{cert_type}/materials",
-            dependencies=[ResidentUpdatePerm])
+            dependencies=[Depends(require_any_permission(
+                "community:resident:update", "community:resident:audit"))])
 async def resident_cert_materials(resident_id: int, cert_type: str,
                                   admin: CurrentAdmin, db: DbSession):
     resident = await _get_resident_or_404(db, resident_id)
     await resolve_community_scope(db, admin, resident.community_id)
     cert_type = _normalize_cert_type(cert_type)
-    cert = await _latest_cert(db, resident.user_id, cert_type) if resident.user_id else None
+    cert = await _latest_resident_cert(db, resident, cert_type)
     if cert is None:
         return ok({
             "id": "", "type": cert_type, "typeLabel": RESIDENT_CERT_LABEL[cert_type],
@@ -1007,7 +1037,8 @@ async def resident_cert_materials(resident_id: int, cert_type: str,
 
 
 @router.post("/residents/{resident_id}/certifications/{cert_type}/materials",
-             dependencies=[ResidentUpdatePerm])
+             dependencies=[Depends(require_any_permission(
+                 "community:resident:update", "community:resident:audit"))])
 async def upload_resident_cert_material(resident_id: int, cert_type: str, request: Request,
                                         admin: CurrentAdmin, db: DbSession,
                                         file: Annotated[UploadFile, File()]):
@@ -1057,7 +1088,8 @@ async def upload_resident_cert_material(resident_id: int, cert_type: str, reques
 
 
 @router.delete("/residents/{resident_id}/certifications/{cert_type}/materials",
-               dependencies=[ResidentUpdatePerm])
+               dependencies=[Depends(require_any_permission(
+                   "community:resident:update", "community:resident:audit"))])
 async def delete_resident_cert_material(resident_id: int, cert_type: str, request: Request,
                                         admin: CurrentAdmin, db: DbSession,
                                         objectKey: str = Query(...)):
@@ -1065,7 +1097,7 @@ async def delete_resident_cert_material(resident_id: int, cert_type: str, reques
     resident = await _get_resident_or_404(db, resident_id)
     await resolve_community_scope(db, admin, resident.community_id)
     cert_type = _normalize_cert_type(cert_type)
-    cert = await _latest_cert(db, resident.user_id, cert_type) if resident.user_id else None
+    cert = await _latest_resident_cert(db, resident, cert_type)
     if cert is None:
         raise ApiError(ERR_NOT_FOUND, "该人员暂无认证材料", 404)
     before = list(cert.materials or [])
@@ -1077,6 +1109,132 @@ async def delete_resident_cert_material(resident_id: int, cert_type: str, reques
                       before={"materials": before}, after={"materials": cert.materials})
     await db.commit()
     return ok(await _cert_detail(db, cert), "认证材料已删除")
+
+
+class ResidentCertVerifyIn(BaseModel):
+    identity: str | None = None
+    note: str = ""
+
+
+def _advance_cert_to_verified(cert: Certification) -> None:
+    """把审核单迁移到已认证。
+
+    驳回 / 待补充 / 未认证的审核单需先回到待审核再通过，保证状态机链路完整；
+    已冻结走「社区业主」页解冻，已撤销为终态，需住户重新提交材料，避免
+    通过本入口绕过风控恢复认证。
+    """
+    if cert.status == E.CertificationStatus.FROZEN:
+        raise ApiError(
+            ERR_BIZ_RULE, "该认证已冻结，请先在「社区业主」页调整认证状态", 422)
+    if cert.status == E.CertificationStatus.REVOKED:
+        raise ApiError(ERR_BIZ_RULE, "该认证已被撤销，需住户重新提交认证材料", 422)
+    if cert.status in (
+        E.CertificationStatus.REJECTED,
+        E.CertificationStatus.SUPPLEMENT,
+        E.CertificationStatus.UNVERIFIED,
+    ):
+        cert.status = certification_sm.fire(cert.status, E.CertificationStatus.PENDING)
+    cert.status = certification_sm.fire(cert.status, E.CertificationStatus.VERIFIED)
+
+
+@router.post("/residents/{resident_id}/certifications/{cert_type}/verify",
+             dependencies=[AuditPerm])
+async def verify_resident_certification(resident_id: int, cert_type: str,
+                                        payload: ResidentCertVerifyIn, request: Request,
+                                        admin: CurrentAdmin, db: DbSession):
+    """后台人工认证（住户认证 / 身份认证）。
+
+    覆盖未提交、待审核、待补充、已驳回等未通过场景：管理员核对材料或线下
+    证件后可在「住户认证」页直接认证通过。已有审核单复用并补齐状态流转，
+    没有审核单时补建一张，确保认证材料与审计链路完整。
+    """
+    resident = await _get_resident_or_404(db, resident_id)
+    await resolve_community_scope(db, admin, resident.community_id)
+    cert_type = _normalize_cert_type(cert_type)
+    if resident.status != "ACTIVE":
+        raise ApiError(ERR_BIZ_RULE, "该住户已停用或已离开，不能发起认证", 422)
+    if not resident.user_id:
+        raise ApiError(ERR_BIZ_RULE, "该住户未绑定移动端账号，无法发起认证", 422)
+    user = await db.get(User, resident.user_id)
+    if user is None or user.status != "ACTIVE":
+        raise ApiError(ERR_BIZ_RULE, "该住户的移动端账号不可用，无法发起认证", 422)
+
+    identity: str | None = None
+    if cert_type == "OWNER_PROOF":
+        raw_identity = (payload.identity or "").strip()
+        identity = (_normalize_choice(raw_identity, IDENTITY_ALIASES, "身份类型")
+                    if raw_identity
+                    else IDENTITY_CODES.get(resident.identity_type, "owner"))
+    note = payload.note.strip()
+    if len(note) > 500:
+        raise ApiError(ERR_PARAM, "审核说明最多 500 字", 400)
+
+    idem = await guard_idempotency(db, request, {
+        "residentId": resident_id, "type": cert_type,
+        "identity": identity, "note": note,
+    })
+    if idem and idem.status == "COMPLETED":
+        return ok(idem.response_json["data"], "认证已通过")
+
+    cert = await _latest_resident_cert(db, resident, cert_type)
+    if cert is None:
+        cert = Certification(
+            user_id=resident.user_id,
+            resident_id=resident.id,
+            community_id=resident.community_id if cert_type == "OWNER_PROOF" else None,
+            type=cert_type,
+            identity=identity or "owner",
+            materials=[],
+            status=E.CertificationStatus.UNVERIFIED,
+            submitted_at=utcnow(),
+            trace_id=uuid4().hex[:16],
+        )
+        db.add(cert)
+        await db.flush()
+    else:
+        if cert.status == E.CertificationStatus.VERIFIED:
+            raise ApiError(ERR_BIZ_RULE, "该认证已通过，无需重复认证", 422)
+        cert.resident_id = resident.id
+        if cert_type == "OWNER_PROOF":
+            cert.community_id = resident.community_id
+        if identity:
+            cert.identity = identity
+
+    before_status = cert.status
+    _advance_cert_to_verified(cert)
+    cert.reviewer_id = admin.id
+    cert.reviewed_at = utcnow()
+    cert.reject_reason = ""
+    cert.review_note = note[:500]
+
+    if cert_type == "OWNER_PROOF":
+        resident.identity_type = IDENTITY_MAP.get(identity or "owner", resident.identity_type)
+        resident.certification_status = E.CertificationStatus.VERIFIED
+        resident.certification_no = resident.certification_no or f"YZ{cert.id:08d}"
+        resident.joined_at = resident.joined_at or utcnow()
+    else:
+        user.realname_status = E.CertificationStatus.VERIFIED
+
+    await notify_user(
+        db, cert.user_id, category="COMMUNITY", title="认证审核通过",
+        description=("住户认证已通过，已绑定小区" if cert_type == "OWNER_PROOF"
+                     else "实名认证已通过"),
+        icon="shield", tag="认证", route={"type": "certification"},
+    )
+    await write_audit(
+        db, request, actor=admin, action=f"certification.{cert_type.lower()}.manual-verify",
+        resource_type="certification", resource_id=cert.id,
+        before={"status": before_status, "residentId": resident.id},
+        after={"status": cert.status, "identity": identity, "note": note},
+    )
+    await write_outbox(db, event_type="CertificationApproved",
+                       aggregate_type="certification", aggregate_id=cert.id,
+                       payload={"type": cert_type, "userId": cert.user_id,
+                                "communityId": cert.community_id, "manual": True})
+    data = await _cert_row(db, cert)
+    await complete_idempotency(db, idem, data)
+    await db.commit()
+    return ok(data, "认证已通过")
 
 
 # ---------------------------------------------------------------- 认证审核队列（W02）
@@ -1178,6 +1336,88 @@ async def certification_summary(
         "todayReviewed": today_reviewed,
         "oldestPendingAt": int(oldest.timestamp() * 1000) if oldest else 0,
     })
+
+
+@router.get("/certifications/candidates", dependencies=[AuditPerm])
+async def certification_candidates(
+    admin: CurrentAdmin, db: DbSession,
+    type: str = Query(default="OWNER_PROOF"),
+    communityId: int | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    limit: int = Query(default=30, ge=1, le=50),
+):
+    """人工认证候选住户（住户认证页「新增认证」）。
+
+    返回当前数据范围内认证尚未通过、可人工发起认证的住户；已冻结/已撤销
+    需走解冻或重新提交流程，不在此入口出现。未绑定移动端账号的档案仍展示，
+    但标记为不可认证，避免管理员反复检索却找不到原因。
+    """
+    cert_type = _normalize_cert_type(type)
+    scope = await resolve_community_scope(db, admin, communityId)
+    if isinstance(scope, set) and not scope:
+        return ok([])
+    stmt = (
+        select(Resident, User)
+        .outerjoin(User, Resident.user_id == User.id)
+        .where(Resident.status == "ACTIVE")
+    )
+    if isinstance(scope, int):
+        stmt = stmt.where(Resident.community_id == scope)
+    elif isinstance(scope, set):
+        stmt = stmt.where(Resident.community_id.in_(scope))
+    if cert_type == "OWNER_PROOF":
+        stmt = stmt.where(Resident.certification_status.notin_(
+            ["VERIFIED", "FROZEN", "REVOKED"]))
+    else:
+        stmt = stmt.where(
+            Resident.user_id.is_not(None),
+            User.realname_status.notin_(["VERIFIED", "FROZEN", "REVOKED"]),
+        )
+    keyword = (keyword or "").strip()
+    if keyword:
+        stmt = stmt.where(or_(
+            Resident.name.ilike(f"%{keyword}%"),
+            Resident.building.ilike(f"%{keyword}%"),
+            User.nickname.ilike(f"%{keyword}%"),
+        ))
+    rows = (await db.execute(
+        stmt.order_by(Resident.id.desc()).limit(limit))).all()
+    community_ids = {resident.community_id for resident, _ in rows}
+    community_names = dict((await db.execute(
+        select(Community.id, Community.name)
+        .where(Community.id.in_(community_ids)))).all()) if community_ids else {}
+    result = []
+    for resident, user in rows:
+        if resident.user_id is None or user is None:
+            eligible, reason = False, "未绑定移动端账号"
+        elif user.status != "ACTIVE":
+            eligible, reason = False, "移动端账号已冻结或注销"
+        else:
+            eligible, reason = True, ""
+        current_status = (
+            resident.certification_status if cert_type == "OWNER_PROOF"
+            else (user.realname_status if user else "UNVERIFIED")
+        ) or "UNVERIFIED"
+        phone = decrypt_field(resident.phone_enc)
+        if not phone and user is not None:
+            phone = decrypt_field(user.phone_enc)
+        result.append({
+            "id": str(resident.id),
+            "userId": str(resident.user_id) if resident.user_id else "",
+            "name": resident.name,
+            "nickname": user.nickname if user else "",
+            "phone": mask_phone(phone) if phone else "",
+            "identity": resident.identity_type,
+            "building": resident.building,
+            "communityId": str(resident.community_id),
+            "communityName": community_names.get(resident.community_id, ""),
+            "certificationStatus": current_status,
+            "certificationStatusLabel": CERT_STATUS_LABEL.get(
+                current_status, current_status),
+            "eligible": eligible,
+            "eligibleReason": reason,
+        })
+    return ok(result)
 
 
 @router.get("/certifications/{certification_id}", dependencies=[AuditPerm])
@@ -1283,7 +1523,11 @@ async def approve_certification(
     certification_id: int, request: Request, admin: CurrentAdmin, db: DbSession,
 ):
     """W02-02 通过：业主证明通过后账号与小区强绑定（BR-02）；实名通过更新实名状态。
-    审核动作写审计（W01-03），并向申请人发送站内通知（M01-04）。"""
+    审核动作写审计（W01-03），并向申请人发送站内通知（M01-04）。
+
+    已驳回/待补充的审核单也允许复核通过（住户无法重新提交或线下材料已补验），
+    状态先回到待审核再通过；已冻结/已撤销仍走各自专门流程。
+    """
     cert = await _get_cert_or_404(db, certification_id)
     await _assert_cert_scope(db, admin, cert)
     idem = await guard_idempotency(db, request, {"id": certification_id, "action": "approve"})
@@ -1291,7 +1535,8 @@ async def approve_certification(
         return ok(idem.response_json["data"])
 
     before = {"status": cert.status}
-    cert.status = certification_sm.fire(cert.status, E.CertificationStatus.VERIFIED)
+    _advance_cert_to_verified(cert)
+    cert.reject_reason = ""
     cert.reviewer_id = admin.id
     cert.reviewed_at = utcnow()
 

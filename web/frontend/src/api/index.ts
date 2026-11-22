@@ -356,6 +356,12 @@ export const certificationsApi = {
   approve: (id: number | string) => http.post<any, any>(`/certifications/${id}/approve`, {}),
   reject: (id: number | string, reason: string) => http.post<any, any>(`/certifications/${id}/reject`, { reason }),
   requestMaterials: (id: number | string, note: string) => http.post<any, any>(`/certifications/${id}/request-materials`, { note }),
+  /** 人工认证候选住户：认证未通过且可发起审核的住户。 */
+  candidates: (params: Dict = {}) => http.get<any, any>('/certifications/candidates', { params }),
+  /** 后台人工认证（住户认证 / 身份认证），支持未提交、待补充、已驳回等状态。 */
+  verifyResident: (residentId: number | string, type: 'REALNAME' | 'OWNER_PROOF',
+                   payload: { identity?: string; note?: string }) =>
+    http.post<any, any>(`/residents/${residentId}/certifications/${type}/verify`, payload),
   freezeResident: (residentId: number | string) => http.post<any, any>(`/residents/${residentId}/freeze`, {}),
   unfreezeResident: (residentId: number | string) => http.post<any, any>(`/residents/${residentId}/unfreeze`, {}),
   materials: (residentId: number | string, type: 'REALNAME' | 'OWNER_PROOF') =>

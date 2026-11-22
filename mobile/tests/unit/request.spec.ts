@@ -20,6 +20,30 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('request query params', () => {
+  it('drops undefined and null GET params before calling uni.request', async () => {
+    let captured: any = null
+    vi.stubGlobal('uni', {
+      getStorageSync: () => '',
+      setStorageSync: () => undefined,
+      removeStorageSync: () => undefined,
+      request: (options: any) => {
+        captured = options
+        options.success({ statusCode: 200, data: { code: 0, message: 'ok', data: { items: [] } } })
+      },
+    })
+
+    await request({
+      url: '/conversations/1/messages',
+      method: 'GET',
+      // H5 会把 undefined/null 序列化成空字符串，后端 int 参数会因此 422
+      data: { beforeSeq: undefined, afterSeq: null, limit: 30 },
+    })
+
+    expect(captured.data).toEqual({ limit: 30 })
+  })
+})
+
 describe('request error handling', () => {
   it('surfaces the service message for non-2xx responses', async () => {
     stubUniResponse(400, {

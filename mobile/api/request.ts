@@ -72,6 +72,21 @@ function parseResponseBody(raw: any): any {
   }
 }
 
+/**
+ * 剔除 GET 查询参数中的 undefined / null。
+ * H5 的 uni.request 会把它们序列化成空字符串（如 `beforeSeq=`），
+ * FastAPI 对 `int | None` 收到空字符串会返回 422（40001 参数校验失败）。
+ */
+function cleanQueryParams(data?: Record<string, any>): Record<string, any> | undefined {
+  if (!data) return data
+  const cleaned: Record<string, any> = {}
+  Object.keys(data).forEach((key) => {
+    const value = data[key]
+    if (value !== undefined && value !== null) cleaned[key] = value
+  })
+  return cleaned
+}
+
 function unwrap<T>(response: any, traceId: string): T {
   const status = response?.statusCode ?? 0
   const body = parseResponseBody(response?.data)
@@ -122,6 +137,7 @@ export function redirectToLogin(): void {
 
 async function mockOrReal<T>(options: RequestOptions, skipRefresh = false): Promise<T> {
   const method = options.method ?? 'GET'
+  const data = method === 'GET' ? cleanQueryParams(options.data) : options.data
   const headers = buildHeaders(options)
   const traceId = headers['X-Trace-Id']
   const startedAt = Date.now()
@@ -134,7 +150,7 @@ async function mockOrReal<T>(options: RequestOptions, skipRefresh = false): Prom
       result = await mockRequest<T>({
         url: options.url,
         method,
-        data: options.data,
+        data,
         headers,
       })
     } else {
@@ -142,7 +158,7 @@ async function mockOrReal<T>(options: RequestOptions, skipRefresh = false): Prom
         uni.request({
           url: `${env.baseUrl}${options.url}`,
           method,
-          data: options.data,
+          data,
           header: headers,
           timeout: options.timeout ?? env.requestTimeout,
           success: (response: any) => {
