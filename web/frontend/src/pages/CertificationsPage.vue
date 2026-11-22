@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronDown, ClipboardCheck, FileImage, Filter, Search, ShieldCheck } from 'lucide-vue-next'
+import { ChevronDown, ClipboardCheck, Eye, FileImage, Filter, Search, ShieldCheck } from 'lucide-vue-next'
 import { certificationsApi } from '@/api'
+import { fmtDateTime, mapStatus } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useTodoStore } from '@/stores/todos'
@@ -10,6 +11,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NiDrawer from '@/components/NiDrawer.vue'
+import CommunityFilterBar from '@/components/CommunityFilterBar.vue'
 
 const route = useRoute()
 const app = useAppStore()
@@ -24,6 +26,8 @@ const typeFilter = ref('')
 const query = ref('')
 const selected = ref<any>(null)
 const drawerOpen = ref(false)
+// 查看 / 审核双模式：非待审核记录只能查看，避免误触状态机返回 422。
+const drawerMode = ref<'audit' | 'view'>('audit')
 const rejectReason = ref('')
 const loading = ref(false)
 const summaryData = ref({
@@ -48,10 +52,12 @@ const typeFilterLabel = computed(() => {
   if (typeFilter.value === 'OWNER_PROOF') return '仅住户认证'
   return '全部类型'
 })
+const canAuditSelected = computed(() =>
+  drawerMode.value === 'audit' && selected.value?.status === 'PENDING')
 
 async function loadSummary() {
   try {
-    summaryData.value = await certificationsApi.summary()
+    summaryData.value = await certificationsApi.summary({ communityId: app.currentCommunityId })
   } catch {
     // 统计失败不阻塞列表，页面仍可审核。
   }
@@ -60,7 +66,11 @@ async function loadSummary() {
 async function load() {
   loading.value = true
   try {
-    const params: any = { page: page.value, pageSize: 20 }
+    const params: any = {
+      communityId: app.currentCommunityId,
+      page: page.value,
+      pageSize: 20,
+    }
     if (activeTab.value) params.status = activeTab.value
     if (typeFilter.value) params.type = typeFilter.value
     if (query.value) params.keyword = query.value
@@ -74,11 +84,15 @@ async function load() {
   }
 }
 
-async function open(rowOrId: any) {
+/** @param mode view=只读查看；audit=进入审核（仅待审核状态有效）。 */
+async function open(rowOrId: any, mode: 'audit' | 'view' = 'audit') {
   const id = typeof rowOrId === 'object' ? rowOrId.id : rowOrId
   if (!id) return
   try {
-    selected.value = await certificationsApi.detail(id)
+    const detail = await certificationsApi.detail(id)
+    selected.value = detail
+    // 已通过/驳回/待补充等历史记录不允许再次审核，自动降级为只读查看。
+    drawerMode.value = mode === 'audit' && detail?.status === 'PENDING' ? 'audit' : 'view'
     rejectReason.value = ''
     drawerOpen.value = true
   } catch (exc: any) {
@@ -156,9 +170,17 @@ onMounted(async () => {
   await Promise.all([loadSummary(), load()])
   if (route.query.certId) await open(route.query.certId)
 })
+
+// 与社区运营 / 社区业主一致：顶部筛选切换小区后重置分页并刷新队列与统计。
+watch(() => app.currentCommunityId, () => {
+  page.value = 1
+  Promise.all([loadSummary(), load()])
+})
 </script>
 
 <template>
+  <CommunityFilterBar scope-note="认证队列仅展示所选小区" />
+
   <section class="summary-row">
     <div><span>待审核</span><strong>{{ summaryData.pending }}</strong><em class="warn">目标 SLA ≤ 24h</em></div>
     <div><span>实名认证待审</span><strong>{{ summaryData.pendingRealname }}</strong><em>独立审核</em></div>
@@ -192,7 +214,22 @@ onMounted(async () => {
             <td>{{ row.rejectCount || 0 }}</td>
             <td><StatusBadge :value="row.status" /></td>
             <td>{{ row.submittedAt }}</td>
-            <td><button class="row-action" @click="open(row)">审核</button></td>
+            <td>
+              <div class="row-actions">
+                <button class="row-icon-button" aria-label="查看认证详情" data-tip="查看详情" @click="open(row, 'view')">
+                  <Eye :size="15" />
+                </button>
+                <button
+                  v-if="row.statusCode === 'PENDING'"
+                  class="row-icon-button"
+                  aria-label="审核认证申请"
+                  data-tip="审核"
+                  @click="open(row, 'audit')"
+                >
+                  <ClipboardCheck :size="15" />
+                </button>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -201,23 +238,35 @@ onMounted(async () => {
     <div class="pagination"><span>共 {{ total }} 条记录</span><div><button :disabled="page <= 1" @click="page--; load()">上一页</button><button class="current">{{ page }}</button><button @click="page++; load()">下一页</button></div></div>
   </section>
 
-  <NiDrawer :open="drawerOpen" :title="selected ? `${selected.typeLabel} · ${selected.user?.nickname || ''}` : '审核详情'" eyebrow="住户认证" @close="drawerOpen = false">
+  <NiDrawer
+    :open="drawerOpen"
+    :title="selected ? `${selected.typeLabel} · ${selected.user?.nickname || ''}` : '认证详情'"
+    :eyebrow="drawerMode === 'audit' ? '住户认证审核' : '住户认证详情'"
+    @close="drawerOpen = false"
+  >
     <template v-if="selected">
       <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
         <ShieldCheck :size="18" style="color: #6852c5" />
         <div style="flex: 1">
-          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">目标小区 / 状态</span>
-          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ selected.community?.name || '实名认证' }}</strong>
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">{{ selected.typeLabel }} / 目标小区</span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ selected.community?.name || '实名认证（不绑定小区）' }}</strong>
         </div>
-        <StatusBadge :value="selected.status" />
+        <StatusBadge :value="mapStatus(selected.status)" />
       </div>
       <h4 class="section-title">申请信息</h4>
       <div class="form-grid">
-        <label><span>申请人</span><input :value="selected.user?.nickname" disabled /></label>
-        <label><span>手机号（脱敏）</span><input :value="selected.user?.phone" disabled /></label>
-        <label><span>身份类型</span><input :value="selected.identity === 'owner' ? '业主' : selected.identity === 'tenant' ? '租户' : selected.identity === 'family' ? '家属' : '—'" disabled /></label>
-        <label><span>追踪号</span><input :value="selected.traceId" disabled /></label>
+        <label><span>申请人</span><input :value="selected.user?.nickname || '—'" disabled /></label>
+        <label><span>手机号（脱敏）</span><input :value="selected.user?.phone || '—'" disabled /></label>
+        <label><span>身份类型</span><input :value="selected.identity === 'owner' ? '业主' : selected.identity === 'tenant' ? '租户' : selected.identity === 'family' ? '家属' : selected.identity === 'business' ? '商务人员' : '—'" disabled /></label>
+        <label><span>追踪号</span><input :value="selected.traceId || '—'" disabled /></label>
+        <label><span>提交时间</span><input :value="fmtDateTime(selected.submittedAt)" disabled /></label>
+        <label><span>最近审核时间</span><input :value="selected.reviewedAt ? fmtDateTime(selected.reviewedAt) : '尚未审核'" disabled /></label>
+        <label><span>驳回次数</span><input :value="String(selected.rejectCount || 0)" disabled /></label>
       </div>
+      <template v-if="selected.rejectReason">
+        <h4 class="section-title" style="margin-top: 20px">最近驳回原因</h4>
+        <p style="margin: 0; color: #a3525b; font-size: var(--font-size-body); line-height: 1.7; white-space: pre-wrap">{{ selected.rejectReason }}</p>
+      </template>
       <h4 class="section-title" style="margin-top: 20px">材料（私有桶签名 URL，10 分钟时效）</h4>
       <div class="material-grid">
         <a v-for="(material, index) in selected.materials || []" :key="material.objectKey"
@@ -240,18 +289,34 @@ onMounted(async () => {
         <div style="flex: 1">
           <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">申请人实名状态</span>
           <strong style="display: block; color: #554761; font-size: var(--font-size-body)">
-            {{ selected.realnameStatus === 'VERIFIED' ? '已实名认证' : '尚未完成实名认证（不影响本次住户认证审批）' }}
+            {{ selected.user?.realnameStatus === 'VERIFIED' ? '已实名认证' : '尚未完成实名认证（不影响本次住户认证审批）' }}
           </strong>
         </div>
       </div>
-      <h4 class="section-title" style="margin-top: 20px">审核操作</h4>
-      <label class="full" style="display: block"><span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">驳回原因（驳回必填，≥10 字，将通知申请人）</span>
-        <textarea v-model="rejectReason" placeholder="例如：房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄" style="width: 100%; min-height: 72px" /></label>
+      <template v-if="canAuditSelected">
+        <h4 class="section-title" style="margin-top: 20px">审核操作</h4>
+        <label class="full" style="display: block"><span style="display: block; font-size: var(--font-size-body); color: #958b9f; margin-bottom: 4px">驳回原因（驳回必填，≥10 字，将通知申请人）</span>
+          <textarea v-model="rejectReason" placeholder="例如：房产证照片模糊无法辨认产权人信息，请在自然光下重新拍摄" style="width: 100%; min-height: 72px" /></label>
+      </template>
+      <p v-else class="cert-readonly-note">
+        该申请当前状态为「{{ mapStatus(selected.status) }}」，仅可查看历史信息，不能再次审核。
+        <template v-if="selected.status === 'PENDING'">如需处理，请点击下方「进入审核」。</template>
+      </p>
     </template>
     <template #footer>
-      <button @click="requestMaterials">要求补充材料</button>
-      <button @click="reject" style="color: #c0392b">驳回</button>
-      <button v-if="auth.hasPermission('community:resident:audit')" class="primary-button" @click="approve">通过并绑定</button>
+      <template v-if="canAuditSelected">
+        <button @click="requestMaterials">要求补充材料</button>
+        <button @click="reject" style="color: #c0392b">驳回</button>
+        <button v-if="auth.hasPermission('community:resident:audit')" class="primary-button" @click="approve">通过并绑定</button>
+      </template>
+      <template v-else>
+        <button @click="drawerOpen = false">关闭</button>
+        <button v-if="selected?.status === 'PENDING'" class="primary-button" @click="drawerMode = 'audit'">进入审核</button>
+      </template>
     </template>
   </NiDrawer>
 </template>
+
+<style scoped>
+.cert-readonly-note { margin: 18px 0 0; padding: 9px 11px; border-radius: 8px; color: #7a7482; background: #f7f5fa; font-size: var(--font-size-caption); line-height: 1.6; }
+</style>

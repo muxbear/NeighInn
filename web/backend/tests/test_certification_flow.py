@@ -395,6 +395,59 @@ async def test_revoke_certification(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_certification_queue_scoped_by_community(client):
+    """后台认证队列按小区过滤：业主认证按目标小区，实名认证按申请人档案归属。
+
+    实名认证单本身不绑定 community_id，选择小区后必须通过住户档案归属，
+    否则「实名认证待审」会被整体过滤为空（顶部小区筛选上线后的回归保障）。
+    """
+    first = await register_user(client, "13900004444")
+    await client.post(
+        f"{C_BASE}/auth/register/complete",
+        json={"nickname": "邻居甲", "intentCommunityId": 1},
+        headers=bearer(first["token"]),
+    )
+    await client.post(
+        f"{C_BASE}/auth/realname",
+        json={"frontImage": "certs/f1.jpg", "backImage": "certs/b1.jpg"},
+        headers=bearer(first["token"]),
+    )
+    await submit_owner_proof(client, first["token"], community_id=1)
+
+    second = await register_user(client, "13900005555")
+    await client.post(
+        f"{C_BASE}/auth/register/complete",
+        json={"nickname": "邻居乙", "intentCommunityId": 2},
+        headers=bearer(second["token"]),
+    )
+    await client.post(
+        f"{C_BASE}/auth/realname",
+        json={"frontImage": "certs/f2.jpg", "backImage": "certs/b2.jpg"},
+        headers=bearer(second["token"]),
+    )
+    await submit_owner_proof(client, second["token"], community_id=2)
+
+    csrf = await admin_login(client)
+
+    async def queue_names(params: dict) -> set[str]:
+        resp = await client.get(f"{ADMIN_BASE}/certifications", params=params, headers=csrf)
+        assert resp.status_code == 200, resp.text
+        return {item["user"]["nickname"] for item in resp.json()["data"]["items"]}
+
+    assert await queue_names({"status": "PENDING", "type": "REALNAME", "communityId": 1}) == {"邻居甲"}
+    assert await queue_names({"status": "PENDING", "type": "OWNER_PROOF", "communityId": 1}) == {"邻居甲"}
+    assert await queue_names({"status": "PENDING", "type": "REALNAME", "communityId": 2}) == {"邻居乙"}
+    assert await queue_names({"status": "PENDING", "type": "OWNER_PROOF", "communityId": 2}) == {"邻居乙"}
+
+    summary = (await client.get(
+        f"{ADMIN_BASE}/certifications/summary",
+        params={"communityId": 1}, headers=csrf,
+    )).json()["data"]
+    assert summary["pendingRealname"] == 1
+    assert summary["pendingOwner"] == 1
+
+
+@pytest.mark.asyncio
 async def test_admin_endpoints_require_auth(client):
     resp = await client.get(f"{ADMIN_BASE}/certifications")
     assert resp.status_code == 401

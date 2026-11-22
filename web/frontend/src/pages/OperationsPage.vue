@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArchiveX, CircleX, Coffee, HandHeart, Megaphone, Pencil, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Trash2, Upload, X } from 'lucide-vue-next'
+import { ArchiveX, CircleX, Coffee, Eye, HandHeart, Megaphone, Pencil, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Trash2, Upload, X } from 'lucide-vue-next'
 import { filesApi, operationsApi } from '@/api'
-import { mapTradeType } from '@/api/compat'
+import { fmtDateTime, mapStatus, mapTradeType } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useNavBadgeStore } from '@/stores/navBadges'
@@ -634,6 +634,118 @@ async function submitReview() {
     reviewSubmitting.value = false
   }
 }
+
+/** 只读查看：四类内容共用，按模块加载详情（不改变任何业务状态）。 */
+const viewOpen = ref(false)
+const viewTarget = ref<any>(null)
+const viewDetail = ref<any>(null)
+const viewAudit = ref<any>(null)
+const viewResponses = ref<any[]>([])
+const viewLoading = ref(false)
+const HELP_RESPONSE_STATUS: Record<string, string> = {
+  PENDING: '待处理', ACCEPTED: '已选中', REJECTED: '未选中',
+}
+
+async function openView(row: any) {
+  if (!row?.id) return
+  viewTarget.value = row
+  viewDetail.value = null
+  viewAudit.value = null
+  viewResponses.value = []
+  viewOpen.value = true
+  viewLoading.value = true
+  try {
+    if (module.value === 'broadcast') {
+      viewDetail.value = await operationsApi.broadcastDetail(row.id)
+    } else if (module.value === 'items') {
+      const detail = await operationsApi.itemDetail(row.id)
+      viewDetail.value = detail
+      viewAudit.value = detail?.audits?.[0] || null
+    } else if (module.value === 'help') {
+      const [detail, responses] = await Promise.all([
+        operationsApi.helpDetail(row.id),
+        operationsApi.helpResponses(row.id).catch(() => []),
+      ])
+      viewDetail.value = detail
+      viewResponses.value = Array.isArray(responses) ? responses : []
+    } else {
+      viewDetail.value = await operationsApi.lifeDetail(row.id)
+    }
+  } catch (exc: any) {
+    app.showToast(exc?.message || '详情加载失败')
+  } finally {
+    viewLoading.value = false
+  }
+}
+
+function editFromView(): void {
+  const target = viewTarget.value
+  if (!target || !canEditRow(target)) return
+  viewOpen.value = false
+  editRow(target)
+}
+
+const viewStatus = computed(() => {
+  const detail = viewDetail.value || viewTarget.value
+  if (!detail) return '—'
+  const raw = module.value === 'broadcast'
+    ? (detail.effectiveStatus || detail.status)
+    : detail.status
+  return mapStatus(raw)
+})
+
+const viewOwner = computed(() => {
+  const detail = viewDetail.value || viewTarget.value || {}
+  return detail.owner || detail.seller || detail.author || detail.requester || '—'
+})
+
+const viewCategoryLine = computed(() => {
+  const detail = viewDetail.value || viewTarget.value || {}
+  if (module.value === 'items') {
+    return `${detail.category || '未分类'} · ${detail.condition || '未标成色'}`
+  }
+  if (module.value === 'help') {
+    return [detail.kindLabel, detail.category].filter(Boolean).join(' · ') || '—'
+  }
+  return detail.typeLabel || detail.category || '—'
+})
+
+const viewUpdatedAt = computed(() => {
+  const detail = viewDetail.value || viewTarget.value || {}
+  if (!detail.updatedAt) return '—'
+  return typeof detail.updatedAt === 'number' ? fmtDateTime(detail.updatedAt) : String(detail.updatedAt)
+})
+
+function isVideoMediaUrl(url: string): boolean {
+  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url || '')
+}
+
+/** 统一媒体视图：物品返回对象列表，互助/生活返回 URL 列表，喇叭历史数据可能只有对象键。 */
+const viewMedia = computed(() => {
+  const detail = viewDetail.value
+  if (!detail) return [] as Array<{ url: string; video: boolean }>
+  if (module.value === 'items') {
+    return (detail.media || [])
+      .filter((media: any) => media?.url)
+      .map((media: any) => ({
+        url: media.url,
+        video: media.mediaType === 'VIDEO' || isVideoMediaUrl(media.url),
+      }))
+  }
+  const urls = (detail.media || []).filter((url: string) => /^(https?:\/\/|data:|blob:)/.test(url || ''))
+  return urls.map((url: string) => ({
+    url,
+    video: isVideoMediaUrl(url) || (detail.mediaType === 'VIDEO' && urls.length === 1),
+  }))
+})
+
+const viewLifeStats = computed(() => {
+  const stats = viewDetail.value?.stats || {}
+  return {
+    views: Number(stats.views || 0).toLocaleString('zh-CN'),
+    likes: Number(stats.likes || 0).toLocaleString('zh-CN'),
+  }
+})
 
 const offlineOpen = ref(false)
 const offlineTarget = ref<any>(null)
@@ -1514,6 +1626,9 @@ watch(() => route.fullPath, () => {
   helpKind.value = '全部'
   query.value = ''
   page.value = 1
+  // 切换模块时关闭上一个模块的查看抽屉，避免展示错位数据。
+  viewOpen.value = false
+  viewTarget.value = null
   applyRouteTab()
   load()
 })
@@ -1585,7 +1700,10 @@ watch(() => app.currentCommunityId, () => {
             <td>
               <div class="operation-content-cell">
                 <span :class="config.tone"><component :is="config.icon" :size="16" /></span>
-                <div><strong :title="row.title">{{ row.title }}</strong><em :title="row.subtitle">{{ row.code }} · {{ row.subtitle }}</em></div>
+                <div>
+                  <button type="button" class="operation-title-link" :title="row.title" @click="openView(row)">{{ row.title }}</button>
+                  <em :title="row.subtitle">{{ row.code }} · {{ row.subtitle }}</em>
+                </div>
               </div>
             </td>
             <td><span class="cell-ellipsis md" :title="row.owner">{{ row.owner }}</span></td>
@@ -1595,6 +1713,9 @@ watch(() => app.currentCommunityId, () => {
             <td>{{ row.updatedAt }}</td>
             <td>
               <div class="row-actions">
+                <button class="row-icon-button" aria-label="查看详情" data-tip="查看详情" @click="openView(row)">
+                  <Eye :size="15" />
+                </button>
                 <button v-if="canPrimaryAction(row)" class="row-icon-button" :aria-label="rowActionLabel(row)" :data-tip="rowActionLabel(row)" @click="review(row)">
                   <component :is="rowActionIcon(row)" :size="15" />
                 </button>
@@ -1607,7 +1728,6 @@ watch(() => app.currentCommunityId, () => {
                 <button v-if="canDeleteRow(row)" class="row-icon-button danger" :aria-label="rowDeleteLabel()" :data-tip="rowDeleteLabel()" @click="confirmDelete(row)">
                   <Trash2 :size="15" />
                 </button>
-                <span v-if="!canPrimaryAction(row) && !canOffline(row) && !canEditRow(row) && !canDeleteRow(row)" class="cell-ellipsis sm">—</span>
               </div>
             </td>
           </tr>
@@ -2354,4 +2474,167 @@ watch(() => app.currentCommunityId, () => {
     </template>
   </NiDrawer>
 
+  <NiDrawer
+    :open="viewOpen"
+    :title="viewTarget ? `查看详情 · ${viewTarget.title}` : '查看详情'"
+    :eyebrow="config.title"
+    @close="viewOpen = false"
+  >
+    <template v-if="viewTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 16px">
+        <component :is="config.icon" :size="18" style="color: #6852c5" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">
+            {{ viewDetail?.code || viewTarget.code }} ·
+            {{ viewDetail?.communityName || viewTarget.communityName || app.currentCommunity?.name || '未选择小区' }} ·
+            {{ viewOwner }}
+          </span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">{{ viewDetail?.title || viewTarget.title }}</strong>
+        </div>
+        <StatusBadge :value="viewStatus" />
+      </div>
+
+      <p v-if="viewLoading" class="view-muted">正在加载详情…</p>
+      <template v-else>
+        <h4 class="section-title">基本信息</h4>
+        <div class="form-grid">
+          <label><span>所属小区</span><input :value="viewDetail?.communityName || viewTarget.communityName || '—'" disabled /></label>
+          <label><span>{{ module === 'items' ? '卖家' : module === 'life' ? '作者' : '发布人 / 来源' }}</span><input :value="viewOwner" disabled /></label>
+          <label><span>{{ module === 'items' ? '分类 / 成色' : module === 'help' ? '类型 / 分类' : '内容分类' }}</span><input :value="viewCategoryLine" disabled /></label>
+          <label><span>更新时间</span><input :value="viewUpdatedAt" disabled /></label>
+        </div>
+
+        <template v-if="module === 'items'">
+          <h4 class="section-title" style="margin-top: 20px">物品信息</h4>
+          <div class="form-grid">
+            <label><span>交易方式</span><input :value="mapTradeType(viewDetail?.tradeType)" disabled /></label>
+            <label><span>价格</span><input :value="viewDetail?.price || '—'" disabled /></label>
+            <label><span>热门推荐位</span><input :value="viewDetail?.recommended ? '是' : '否'" disabled /></label>
+            <label><span>媒体数量</span><input :value="`${viewDetail?.media?.length || 0} 个`" disabled /></label>
+            <label v-if="viewDetail?.tradeType === 'BARTER'" class="full">
+              <span>期望交换的物品</span><input :value="viewDetail?.barterExpect || '—'" disabled />
+            </label>
+            <label v-if="viewDetail?.rejectReason" class="full">
+              <span>驳回 / 下架原因</span><input :value="viewDetail.rejectReason" disabled />
+            </label>
+          </div>
+          <h4 class="section-title" style="margin-top: 20px">质量说明</h4>
+          <p class="view-text">{{ viewDetail?.qualityDesc || viewDetail?.description || '—' }}</p>
+        </template>
+
+        <template v-else-if="module === 'broadcast'">
+          <h4 class="section-title" style="margin-top: 20px">播报信息</h4>
+          <div class="form-grid">
+            <label><span>生效时间</span><input :value="fmtDateTime(viewDetail?.scheduledAt || viewDetail?.publishedAt)" disabled /></label>
+            <label><span>失效时间</span><input :value="fmtDateTime(viewDetail?.expiresAt)" disabled /></label>
+            <label><span>重要喇叭</span><input :value="viewDetail?.important ? '是（移动端优先展示）' : '否'" disabled /></label>
+            <label><span>累计互动</span><input :value="`${viewDetail?.responseCount ?? 0} 次`" disabled /></label>
+          </div>
+          <h4 class="section-title" style="margin-top: 20px">播报正文</h4>
+          <p class="view-text">{{ viewDetail?.content || viewDetail?.subtitle || '—' }}</p>
+        </template>
+
+        <template v-else-if="module === 'help'">
+          <h4 class="section-title" style="margin-top: 20px">互助信息</h4>
+          <div class="form-grid">
+            <label><span>发布类型</span><input :value="viewDetail?.kindLabel || viewTarget.kindLabel || '—'" disabled /></label>
+            <label><span>分类</span><input :value="viewDetail?.category || '—'" disabled /></label>
+            <label><span>{{ viewDetail?.kindCode === 'OFFER' ? '可服务时间' : '期望时间' }}</span><input :value="viewDetail?.expectedTime || '—'" disabled /></label>
+            <label><span>地点 / 服务范围</span><input :value="viewDetail?.location || '—'" disabled /></label>
+            <label><span>酬谢 / 收费方式</span><input :value="viewDetail?.reward || '—'" disabled /></label>
+            <label><span>紧急程度</span><input :value="viewDetail?.urgent ? '紧急' : '普通'" disabled /></label>
+            <label><span>撮合帮手</span><input :value="viewDetail?.matchedHelper || '尚未撮合'" disabled /></label>
+            <label><span>关闭原因</span><input :value="viewDetail?.closedReason || '—'" disabled /></label>
+          </div>
+          <h4 class="section-title" style="margin-top: 20px">详细说明</h4>
+          <p class="view-text">{{ viewDetail?.description || '—' }}</p>
+          <h4 class="section-title" style="margin-top: 20px">邻居响应（{{ viewResponses.length }}）</h4>
+          <div v-if="viewResponses.length" class="operation-response-list">
+            <div v-for="response in viewResponses" :key="response.id" class="operation-response-item">
+              <div>
+                <strong>{{ response.responder || '邻居' }}</strong>
+                <em>{{ HELP_RESPONSE_STATUS[response.status] || response.status }}</em>
+                <time>{{ fmtDateTime(response.createdAt) }}</time>
+              </div>
+              <span>{{ response.message || '未留言' }}</span>
+            </div>
+          </div>
+          <p v-else class="view-muted">暂无邻居响应</p>
+        </template>
+
+        <template v-else>
+          <h4 class="section-title" style="margin-top: 20px">正文内容</h4>
+          <p class="view-text">{{ viewDetail?.description || '—' }}</p>
+          <h4 class="section-title" style="margin-top: 20px">内容表现</h4>
+          <div class="form-grid">
+            <label><span>累计浏览</span><input :value="viewLifeStats.views" disabled /></label>
+            <label><span>点赞 / 收藏</span><input :value="viewLifeStats.likes" disabled /></label>
+          </div>
+        </template>
+
+        <h4 v-if="viewMedia.length" class="section-title" style="margin-top: 20px">图片 / 视频</h4>
+        <div v-if="viewMedia.length" class="view-media-grid">
+          <template v-for="(media, index) in viewMedia" :key="`${media.url}-${index}`">
+            <video v-if="media.video" :src="media.url" controls preload="metadata" />
+            <a v-else :href="media.url" target="_blank" rel="noopener">
+              <img :src="media.url" alt="内容图片" />
+            </a>
+          </template>
+        </div>
+        <p v-else-if="viewDetail?.media?.length" class="view-muted">
+          该内容包含 {{ viewDetail.media.length }} 个媒体文件（暂不支持预览）
+        </p>
+
+        <template v-if="module === 'items'">
+          <h4 class="section-title" style="margin-top: 20px">AI 质检报告</h4>
+          <template v-if="viewAudit">
+            <div class="form-grid">
+              <label><span>总体结论</span><input :value="viewAudit.overall || '—'" disabled /></label>
+              <label><span>置信度</span><input :value="`${Math.round(Number(viewAudit.confidence || 0) * 100)}%`" disabled /></label>
+            </div>
+            <div class="operation-audit-dimensions">
+              <div v-for="dimension in viewAudit.dimensions || []" :key="dimension.name">
+                <strong>{{ dimension.name }}</strong>
+                <span>{{ dimension.score ?? (dimension.pass === false ? '未通过' : '通过') }}</span>
+                <em>{{ (dimension.issues || dimension.conflicts || dimension.labels || []).join('；') || dimension.value || '正常' }}</em>
+              </div>
+            </div>
+            <p v-if="viewAudit.risks?.length" class="view-risk">风险：{{ viewAudit.risks.join('；') }}</p>
+            <p v-if="viewAudit.suggestions?.length" class="view-muted">改进建议：{{ viewAudit.suggestions.join('；') }}</p>
+          </template>
+          <p v-else class="view-muted">暂无 AI 质检记录</p>
+        </template>
+
+        <p class="view-readonly-note">当前为只读查看，不会改变内容状态；如需处理请使用列表中的审核、编辑或下架操作。</p>
+      </template>
+    </template>
+    <template #footer>
+      <button @click="viewOpen = false">关闭</button>
+      <button v-if="viewTarget && canEditRow(viewTarget)" class="primary-button" @click="editFromView">编辑</button>
+    </template>
+  </NiDrawer>
+
 </template>
+
+<style scoped>
+.operation-title-link { display: block; max-width: 100%; padding: 0; overflow: hidden; border: 0; color: #47424e; background: none; font-family: inherit; font-size: var(--font-size-body); font-weight: 600; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.operation-title-link:hover { color: #6f59d4; }
+.operation-title-link:focus-visible { outline: 2px solid #8d7ce0; outline-offset: 2px; border-radius: 3px; }
+.view-text { margin: 0; color: #554761; font-size: var(--font-size-body); line-height: 1.7; white-space: pre-wrap; }
+.view-muted { margin: 0; color: #988da2; font-size: var(--font-size-body); }
+.view-risk { margin: 8px 0 0; color: #c08a35; font-size: var(--font-size-caption); }
+.view-media-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.view-media-grid img, .view-media-grid video { width: 96px; height: 96px; object-fit: cover; border: 1px solid #ebe9ef; border-radius: 8px; }
+.operation-audit-dimensions { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.operation-audit-dimensions > div { display: flex; align-items: baseline; gap: 10px; color: #554761; font-size: var(--font-size-body); }
+.operation-audit-dimensions strong { min-width: 84px; }
+.operation-audit-dimensions em { color: #958b9f; font-style: normal; }
+.operation-response-list { display: flex; flex-direction: column; gap: 8px; }
+.operation-response-item { padding: 9px 11px; border: 1px solid #ebe9ef; border-radius: 9px; background: #faf9fb; }
+.operation-response-item > div { display: flex; align-items: center; gap: 8px; }
+.operation-response-item strong { color: #4b4752; font-size: var(--font-size-body); }
+.operation-response-item em { padding: 1px 6px; border-radius: 5px; color: #6f59d4; background: #f1edfc; font-size: var(--font-size-caption); font-style: normal; }
+.operation-response-item time { margin-left: auto; color: #9d98a4; font-size: var(--font-size-caption); }
+.operation-response-item > span { display: block; margin-top: 4px; color: #716c78; font-size: var(--font-size-body); line-height: 1.6; }
+.view-readonly-note { margin: 18px 0 0; padding: 9px 11px; border-radius: 8px; color: #7a7482; background: #f7f5fa; font-size: var(--font-size-caption); line-height: 1.6; }
+</style>

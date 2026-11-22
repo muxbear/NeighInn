@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from starlette.concurrency import run_in_threadpool
 
 from src.api.utils import paginate
@@ -1077,6 +1077,30 @@ async def delete_resident_cert_material(resident_id: int, cert_type: str, reques
 
 # ---------------------------------------------------------------- 认证审核队列（W02）
 
+def _cert_community_conditions(scope: int | None | set[int]) -> list:
+    """认证审核单的社区过滤条件。
+
+    住户认证（OWNER_PROOF）直接按 ``community_id`` 归属；实名认证（REALNAME）
+    不绑定小区，按申请人是否在该社区存在住户档案归属。这样后台选择小区后，
+    住户认证按目标小区收窄，同时不会把该小区住户的实名认证队列整体过滤为空。
+    调用方需自行处理空集合（返回空列表），本函数对空集合不生成恒假条件。
+    """
+    if scope is None:
+        return []
+    community_ids = [scope] if isinstance(scope, int) else list(scope)
+    if not community_ids:
+        return []
+    resident_user_ids = select(Resident.user_id).where(
+        Resident.community_id.in_(community_ids),
+        Resident.user_id.is_not(None),
+    )
+    return [or_(
+        Certification.community_id.in_(community_ids),
+        and_(Certification.type == "REALNAME",
+             Certification.user_id.in_(resident_user_ids)),
+    )]
+
+
 @router.get("/certifications", dependencies=[AuditPerm])
 async def list_certifications(
     admin: CurrentAdmin, db: DbSession,
@@ -1087,13 +1111,9 @@ async def list_certifications(
     page: int = Query(default=1), pageSize: int = Query(default=20),
 ):
     scope = await resolve_community_scope(db, admin, communityId)
-    stmt = select(Certification)
-    if isinstance(scope, int):
-        stmt = stmt.where(Certification.community_id == scope)
-    elif isinstance(scope, set):
-        if not scope:
-            return paginated([], page, pageSize, 0)
-        stmt = stmt.where(Certification.community_id.in_(scope))
+    if isinstance(scope, set) and not scope:
+        return paginated([], page, pageSize, 0)
+    stmt = select(Certification).where(*_cert_community_conditions(scope))
     if type:
         stmt = stmt.where(Certification.type == type)
     if status:
@@ -1122,16 +1142,12 @@ async def certification_summary(
     communityId: int | None = Query(default=None),
 ):
     scope = await resolve_community_scope(db, admin, communityId)
-    base_conditions = []
-    if isinstance(scope, int):
-        base_conditions.append(Certification.community_id == scope)
-    elif isinstance(scope, set):
-        if not scope:
-            return ok({
-                "pending": 0, "pendingRealname": 0, "pendingOwner": 0,
-                "supplement": 0, "todayReviewed": 0, "oldestPendingAt": 0,
-            })
-        base_conditions.append(Certification.community_id.in_(scope))
+    if isinstance(scope, set) and not scope:
+        return ok({
+            "pending": 0, "pendingRealname": 0, "pendingOwner": 0,
+            "supplement": 0, "todayReviewed": 0, "oldestPendingAt": 0,
+        })
+    base_conditions = _cert_community_conditions(scope)
 
     async def _count(*conditions) -> int:
         return int((await db.scalar(
@@ -1185,12 +1201,23 @@ async def _get_cert_or_404(db: DbSession, certification_id: int) -> Certificatio
 
 
 async def _assert_cert_scope(db: DbSession, admin: AdminUser, cert: Certification) -> None:
-    if cert.community_id is None:
-        allowed = await allowed_community_ids(db, admin)
-        if allowed is not None:
-            raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
+    if cert.community_id is not None:
+        await resolve_community_scope(db, admin, cert.community_id)
         return
-    await resolve_community_scope(db, admin, cert.community_id)
+    allowed = await allowed_community_ids(db, admin)
+    if allowed is None:
+        return
+    # 实名认证不绑定小区：申请人在允许社区内有住户档案时，社区管理员可查看/审核。
+    if cert.type == "REALNAME" and cert.user_id and allowed:
+        in_scope = await db.scalar(
+            select(Resident.id).where(
+                Resident.user_id == cert.user_id,
+                Resident.community_id.in_(list(allowed)),
+            ).limit(1)
+        )
+        if in_scope is not None:
+            return
+    raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
 
 
 @router.post("/certifications/{certification_id}/approve",
@@ -1341,11 +1368,10 @@ async def correct_community(certification_id: int, payload: dict, admin: Current
 @router.get("/verifications", dependencies=[AuditPerm])
 async def list_verifications(admin: CurrentAdmin, db: DbSession):
     scope = await resolve_community_scope(db, admin, None)
-    stmt = select(Certification).where(Certification.status == "PENDING")
-    if isinstance(scope, set):
-        if not scope:
-            return ok([])
-        stmt = stmt.where(Certification.community_id.in_(scope))
+    if isinstance(scope, set) and not scope:
+        return ok([])
+    stmt = select(Certification).where(
+        Certification.status == "PENDING", *_cert_community_conditions(scope))
     rows, _ = await paginate(db, stmt.order_by(Certification.id), 1, 50)
     return ok([await _cert_row(db, row) for row in rows])
 

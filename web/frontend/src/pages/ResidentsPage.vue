@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Building2, Camera, ChevronDown, Copy, Filter, Home, KeyRound, Pencil, Plus, Search, Settings2, ShieldCheck, ShieldOff, Trash2, UserRound, Users, X } from 'lucide-vue-next'
+import { Building2, Camera, ChevronDown, Copy, Eye, Filter, Home, KeyRound, Pencil, Plus, Search, Settings2, ShieldCheck, ShieldOff, Trash2, UserRound, Users, X } from 'lucide-vue-next'
 import { certificationsApi, residentAdminApi, residentApi } from '@/api'
 import { fmtDateTime, mapStatus } from '@/api/compat'
 import { useAppStore } from '@/stores/app'
@@ -24,6 +24,10 @@ const drawerOpen = ref(false)
 const editing = ref<any>(null)
 const form = ref<any>({})
 const selected = ref<Set<string>>(new Set())
+
+// 只读查看：列表行 → 详情抽屉，不进入编辑态，也不加载可维护的认证材料。
+const viewOpen = ref(false)
+const viewTarget = ref<any>(null)
 
 // 认证材料查看：点击身份认证 / 业主认证状态徽标后加载签名 URL 照片。
 const certViewerOpen = ref(false)
@@ -120,6 +124,26 @@ function openEdit(row: any) {
   certMaterialErrors.value = {}
   loadCertMaterials('realname')
   loadCertMaterials('owner')
+}
+
+function openView(row: any): void {
+  viewTarget.value = row
+  viewOpen.value = true
+}
+
+function editFromView(): void {
+  const target = viewTarget.value
+  if (!target) return
+  viewOpen.value = false
+  openEdit(target)
+}
+
+/** 认证照片弹窗层级低于抽屉，先关闭抽屉再打开，避免被遮挡。 */
+function viewCertFromDetail(kind: 'realname' | 'owner'): void {
+  const target = viewTarget.value
+  if (!target) return
+  viewOpen.value = false
+  openCertViewer(target, kind)
 }
 
 async function save() {
@@ -519,7 +543,7 @@ watch(() => app.currentCommunityId, () => {
             <td class="avatar-cell">
               <span :class="['resident-avatar', avatarTone(row)]" :title="row.nickname || row.name">{{ avatarText(row) }}</span>
             </td>
-            <td><span class="cell-ellipsis sm" :title="row.name">{{ row.name }}</span></td>
+            <td><button type="button" class="resident-name-link" :title="row.name" @click="openView(row)">{{ row.name }}</button></td>
             <td><span class="cell-ellipsis sm" :title="row.nickname || '—'">{{ row.nickname || '—' }}</span></td>
             <td><span :class="['identity-tag', row.identity]">{{ row.identity }}</span></td>
             <td><div class="resident-house-cell" :title="row.building || '—'"><strong>{{ row.building || '—' }}</strong><span>{{ row.relationship || '' }}</span></div></td>
@@ -564,6 +588,12 @@ watch(() => app.currentCommunityId, () => {
             <td>{{ row.joinedAt }}</td>
             <td>
               <div class="row-actions">
+                <button
+                  class="row-icon-button"
+                  aria-label="查看人员详情"
+                  data-tip="查看详情"
+                  @click="openView(row)"
+                ><Eye :size="15" /></button>
                 <button
                   v-if="canGrantAdmin"
                   class="row-icon-button"
@@ -648,6 +678,74 @@ watch(() => app.currentCommunityId, () => {
       <footer><button @click="closeCertViewer">关闭</button></footer>
     </div>
   </div>
+
+  <NiDrawer
+    :open="viewOpen"
+    :title="viewTarget ? `${viewTarget.name} · 人员详情` : '人员详情'"
+    eyebrow="社区业主"
+    @close="viewOpen = false"
+  >
+    <template v-if="viewTarget">
+      <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 18px">
+        <Building2 :size="17" style="color: #6852c5" />
+        <div style="flex: 1">
+          <span style="display: block; color: #958b9f; font-size: var(--font-size-caption)">所属社区 / 身份类型</span>
+          <strong style="display: block; color: #554761; font-size: var(--font-size-body)">
+            {{ viewTarget.communityName || community?.name || '—' }} · {{ viewTarget.identity || '—' }}
+          </strong>
+        </div>
+        <StatusBadge :value="viewTarget.status" />
+      </div>
+
+      <h4 class="section-title">基本信息</h4>
+      <div class="form-grid">
+        <label><span>姓名</span><input :value="viewTarget.name || '—'" disabled /></label>
+        <label><span>昵称</span><input :value="viewTarget.nickname || '—'" disabled /></label>
+        <label><span>性别</span><input :value="viewTarget.gender || '—'" disabled /></label>
+        <label><span>手机号</span><input :value="viewTarget.phone || '—'" disabled /></label>
+        <label><span>邮箱</span><input :value="viewTarget.email || '—'" disabled /></label>
+        <label><span>房屋 / 商铺</span><input :value="viewTarget.building || '—'" disabled /></label>
+        <label><span>与房屋关系</span><input :value="viewTarget.relationship || '—'" disabled /></label>
+        <label><span>加入时间</span><input :value="viewTarget.joinedAt || '—'" disabled /></label>
+        <label><span>用户级别</span><input :value="viewTarget.level || '—'" disabled /></label>
+        <label><span>信用分</span><input :value="viewTarget.creditScore ?? '—'" disabled /></label>
+        <label><span>信用等级</span><input :value="viewTarget.creditLevel || '—'" disabled /></label>
+        <label><span>账号状态</span><input :value="viewTarget.status || '—'" disabled /></label>
+        <label class="full"><span>个人描述</span><textarea :value="viewTarget.bio || '—'" disabled /></label>
+      </div>
+
+      <h4 class="section-title" style="margin-top: 22px">认证信息</h4>
+      <div class="form-grid">
+        <label><span>身份认证</span><input :value="viewTarget.realnameStatusLabel || '未认证'" disabled /></label>
+        <label><span>业主认证</span><input :value="viewTarget.certification || '未认证'" disabled /></label>
+        <label><span>认证编号</span><input :value="viewTarget.certificationNo || '—'" disabled /></label>
+      </div>
+      <div v-if="viewTarget.realnameCert?.id || viewTarget.ownerCert?.id" class="resident-view-cert-actions">
+        <button v-if="viewTarget.realnameCert?.id" type="button" @click="viewCertFromDetail('realname')">
+          <Camera :size="14" />查看身份认证照片
+        </button>
+        <button v-if="viewTarget.ownerCert?.id" type="button" @click="viewCertFromDetail('owner')">
+          <Camera :size="14" />查看业主认证照片
+        </button>
+      </div>
+
+      <h4 class="section-title" style="margin-top: 22px">后台身份</h4>
+      <div class="form-grid">
+        <label><span>授权状态</span><input :value="adminLabel(viewTarget)" disabled /></label>
+        <label><span>登录账号</span><input :value="viewTarget.adminAccount?.username || '未开通后台身份'" disabled /></label>
+      </div>
+
+      <p class="resident-view-note">当前为只读查看；如需变更档案、认证或后台授权，请使用列表中的编辑、授权等操作。</p>
+    </template>
+    <template #footer>
+      <button @click="viewOpen = false">关闭</button>
+      <button
+        v-if="viewTarget && auth.hasPermission('community:resident:update')"
+        class="primary-button"
+        @click="editFromView"
+      >编辑档案</button>
+    </template>
+  </NiDrawer>
 
   <NiDrawer :open="drawerOpen" :title="editing ? form.name : '新增社区人员'" :eyebrow="editing ? '维护档案' : '新建档案'" @close="drawerOpen = false">
     <div class="community-selector-card" style="min-height: 56px; padding: 10px 12px; margin-bottom: 18px">
@@ -876,4 +974,11 @@ watch(() => app.currentCommunityId, () => {
 .grant-result-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; color: #3d3945; font-size: var(--font-size-body); }
 .grant-result-password { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .4px; }
 .link-button { display: inline-flex; align-items: center; gap: 4px; border: 0; color: #6f59d4; background: transparent; font-size: var(--font-size-caption); cursor: pointer; }
+.resident-name-link { max-width: 100%; padding: 0; overflow: hidden; border: 0; color: #47424e; background: none; font-family: inherit; font-size: var(--font-size-body); font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.resident-name-link:hover { color: #6f59d4; }
+.resident-name-link:focus-visible { outline: 2px solid #8d7ce0; outline-offset: 2px; border-radius: 3px; }
+.resident-view-cert-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+.resident-view-cert-actions button { height: 32px; padding: 0 11px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e1dee5; border-radius: 8px; color: #6f59d4; background: #fff; font-size: var(--font-size-caption); cursor: pointer; }
+.resident-view-cert-actions button:hover { border-color: #cfc6ee; background: #f7f5fd; }
+.resident-view-note { margin: 18px 0 0; padding: 9px 11px; border-radius: 8px; color: #7a7482; background: #f7f5fa; font-size: var(--font-size-caption); line-height: 1.6; }
 </style>
