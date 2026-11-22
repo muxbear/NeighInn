@@ -62,6 +62,41 @@ async function fetchOrApiError(
   }
 }
 
+// 单文件上限 10MB（服务端 MAX_IMAGE_UPLOAD_BYTES）。华为/iPhone 原图常见 8–20MB，
+// H5 的 sizeType:'compressed' 不生效，这里在浏览器端先等比缩放再上传。
+const IMAGE_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024
+const IMAGE_SHRINK_TARGET_BYTES = 3 * 1024 * 1024
+
+async function shrinkImageForUpload(blob: Blob, scene: UploadScene): Promise<Blob> {
+  if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return blob
+  if (!blob.type.startsWith('image/') || blob.type === 'image/gif') return blob
+  if (blob.size <= IMAGE_SHRINK_TARGET_BYTES) return blob
+  // 认证材料要能看清证件号，保留更高分辨率；物品图/生活图 1600px 足够。
+  const isCert = scene === 'REALNAME_ID' || scene === 'OWNER_PROOF'
+  const maxSide = isCert ? 2400 : 1600
+  const quality = isCert ? 0.9 : 0.82
+  try {
+    const bitmap = await createImageBitmap(blob)
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return blob
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    if (typeof bitmap.close === 'function') bitmap.close()
+    const resized = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/jpeg', quality)
+    })
+    // 压缩后反而更大（小图或已高度压缩）时用原图。
+    return resized && resized.size > 0 && resized.size < blob.size ? resized : blob
+  } catch {
+    return blob
+  }
+}
+
 function uploadError(statusCode: number, body: any): ApiError {
   return new ApiError(
     Number(body?.code) || 50000,
@@ -113,9 +148,13 @@ export function useUpload() {
         if (!source.ok) {
           throw new ApiError(40001, '图片读取失败，请重新选择')
         }
-        const blob = await source.blob()
-        if (!blob.size) {
+        const raw = await source.blob()
+        if (!raw.size) {
           throw new ApiError(40001, '图片内容为空，请重新选择')
+        }
+        const blob = await shrinkImageForUpload(raw, scene)
+        if (blob.size > IMAGE_UPLOAD_LIMIT_BYTES) {
+          throw new ApiError(41301, '照片超过 10MB，请重新选择较小的照片')
         }
         const fileName = `upload-${Date.now()}${extensionOf(blob.type || contentTypeOf(path))}`
         const form = new FormData()
@@ -139,10 +178,13 @@ export function useUpload() {
         return String(body?.data?.objectKey ?? '')
       }
 
+      // App/小程序：uni.uploadFile 直接读本地路径，先压缩一遍，避免原图超过 10MB 被服务端拒绝。
+      const isCertScene = scene === 'REALNAME_ID' || scene === 'OWNER_PROOF'
+      const uploadPath = await compressImage(path, isCertScene ? 92 : 80)
       return await new Promise<string>((resolve, reject) => {
         const task = uni.uploadFile({
           url: uploadUrl,
-          filePath: path,
+          filePath: uploadPath,
           name: 'file',
           header: {
             Authorization: `Bearer ${token}`,
