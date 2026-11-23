@@ -291,11 +291,29 @@
             </view>
           </view>
 
-          <view v-if="lifeMediaType === 'video'" class="publish__life-upload" @click="pickLifeVideo">
-            <ni-icon name="camera" :size="30" state="active" />
-            <text class="publish__life-upload-title">{{ lifeVideo ? '已选择视频' : '拍摄或选择视频' }}</text>
-            <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
-          </view>
+          <template v-if="lifeMediaType === 'video'">
+            <view v-if="lifeVideo" class="publish__video-preview">
+              <video
+                class="publish__video-player"
+                :src="lifeVideo"
+                :controls="true"
+                :show-center-play-btn="true"
+                object-fit="contain"
+              />
+              <view class="publish__video-bar">
+                <text class="publish__video-tip">已选择视频，点击播放可预览</text>
+                <view class="publish__video-actions">
+                  <text class="publish__video-action" @click="pickLifeVideo">重新选择</text>
+                  <text class="publish__video-action publish__video-action--danger" @click="removeLifeVideo">删除</text>
+                </view>
+              </view>
+            </view>
+            <view v-else class="publish__life-upload" @click="pickLifeVideo">
+              <ni-icon name="camera" :size="30" state="active" />
+              <text class="publish__life-upload-title">拍摄或选择视频</text>
+              <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
+            </view>
+          </template>
           <template v-else>
             <view v-if="lifeImages.length === 0" class="publish__life-upload" @click="pickLifeImages">
               <ni-icon name="image" :size="30" state="active" />
@@ -426,11 +444,29 @@
               </view>
             </view>
           </view>
-          <view v-if="serviceMediaType === 'video'" class="publish__life-upload" @click="pickServiceVideo">
-            <ni-icon name="camera" :size="30" state="active" />
-            <text class="publish__life-upload-title">{{ serviceVideo ? '已选择视频（点击替换）' : '拍摄或选择视频' }}</text>
-            <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
-          </view>
+          <template v-if="serviceMediaType === 'video'">
+            <view v-if="serviceVideo" class="publish__video-preview">
+              <video
+                class="publish__video-player"
+                :src="serviceVideo"
+                :controls="true"
+                :show-center-play-btn="true"
+                object-fit="contain"
+              />
+              <view class="publish__video-bar">
+                <text class="publish__video-tip">已选择视频，点击播放可预览</text>
+                <view class="publish__video-actions">
+                  <text class="publish__video-action" @click="pickServiceVideo">重新选择</text>
+                  <text class="publish__video-action publish__video-action--danger" @click="removeServiceVideo">删除</text>
+                </view>
+              </view>
+            </view>
+            <view v-else class="publish__life-upload" @click="pickServiceVideo">
+              <ni-icon name="camera" :size="30" state="active" />
+              <text class="publish__life-upload-title">拍摄或选择视频</text>
+              <text class="publish__life-upload-desc">支持 mp4 / mov，最长 3 分钟</text>
+            </view>
+          </template>
           <template v-else>
             <view v-if="serviceImages.length === 0" class="publish__life-upload" @click="pickServiceImages">
               <ni-icon name="image" :size="30" state="active" />
@@ -1115,9 +1151,18 @@ async function submitItem(): Promise<void> {
   }
 }
 
+/** 释放 H5 的 blob: 临时地址，避免替换/删除视频后内存泄漏。 */
+function releaseLocalVideo(path: string): void {
+  if (!path || !path.startsWith('blob:')) return
+  if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+    URL.revokeObjectURL(path)
+  }
+}
+
 async function pickLifeVideo(): Promise<void> {
   try {
     const path = await prepareVideo()
+    if (lifeVideo.value && lifeVideo.value !== path) releaseLocalVideo(lifeVideo.value)
     lifeVideo.value = path
     showToast('视频已选择')
   } catch {
@@ -1125,14 +1170,25 @@ async function pickLifeVideo(): Promise<void> {
   }
 }
 
+function removeLifeVideo(): void {
+  releaseLocalVideo(lifeVideo.value)
+  lifeVideo.value = ''
+}
+
 async function pickServiceVideo(): Promise<void> {
   try {
     const path = await prepareVideo()
+    if (serviceVideo.value && serviceVideo.value !== path) releaseLocalVideo(serviceVideo.value)
     serviceVideo.value = path
     showToast('视频已选择')
   } catch {
     showToast('未选择视频', 'alert')
   }
+}
+
+function removeServiceVideo(): void {
+  releaseLocalVideo(serviceVideo.value)
+  serviceVideo.value = ''
 }
 
 async function pickLifeImages(): Promise<void> {
@@ -1785,6 +1841,43 @@ function openPublishRule(): void {
   margin-top: 3px;
   font-size: $ni-font-8;
   color: $ni-color-text-tertiary;
+}
+.publish__video-preview {
+  margin-top: 12px;
+  border-radius: $ni-radius-14;
+  overflow: hidden;
+  border: 1px solid #f0e3da;
+  background-color: #1c1613;
+}
+.publish__video-player {
+  width: 100%;
+  height: 180px;
+  background-color: #000000;
+}
+.publish__video-bar {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 11px;
+  background-color: #fffaf7;
+}
+.publish__video-tip {
+  flex: 1;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.publish__video-actions {
+  flex-direction: row;
+  align-items: center;
+}
+.publish__video-action {
+  margin-left: 12px;
+  font-size: $ni-font-10;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
+}
+.publish__video-action--danger {
+  color: $ni-color-danger-deep;
 }
 .publish__life-categories {
   flex-direction: row;
