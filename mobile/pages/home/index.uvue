@@ -31,6 +31,20 @@
         </view>
       </view>
 
+      <view
+        v-if="showCertificationTip"
+        class="home__cert-tip"
+        hover-class="home__cert-tip--pressed"
+        @click="goCertificationCenter"
+      >
+        <view class="home__cert-tip-icon">
+          <ni-icon name="shield" :size="13" state="white" />
+        </view>
+        <text class="home__cert-tip-text">认证后可免费领取物品、邻里互发消息、增加信用值</text>
+        <text class="home__cert-tip-action">去认证</text>
+        <ni-icon name="chevron" :size="10" state="active" />
+      </view>
+
       <view class="home__search">
         <ni-search-bar
           v-model="homeKeyword"
@@ -41,15 +55,6 @@
         />
       </view>
     </view>
-
-    <certification-guide-card
-      v-if="showCertificationGuide"
-      :realname-status="userStore.realnameStatus"
-      :owner-status="userStore.ownerStatus"
-      :auth-status="userStore.profile?.authStatus || 'LOGGED_IN_UNVERIFIED'"
-      @open="goCertificationCenter"
-      @dismiss="dismissCertificationGuide"
-    />
 
     <view v-if="!itemStore.homeFeed && itemStore.homeLoading" class="home__skeleton">
       <ni-skeleton :rows="4" :avatar="true" />
@@ -262,8 +267,7 @@ import { useSocialStore } from '../../stores/social.store'
 import { useCommunityStore } from '../../stores/community.store'
 import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
-import { STORAGE_KEYS, ZONE_MAP } from '../../config/constants'
-import { getStorage, setStorage } from '../../utils/storage'
+import { ZONE_MAP } from '../../config/constants'
 import { formatThousands } from '../../utils/formatter'
 import { lifeService } from '../../services/life.service'
 
@@ -279,15 +283,11 @@ const lifeCategory = ref('全部')
 const lifeCategories = ['全部', '小区风景', '邻里日常', '个人风采']
 const broadcastIndex = ref(0)
 const homeKeyword = ref('')
-const certGuideDismissedAt = ref(Number(getStorage<number>(STORAGE_KEYS.certGuideDismissedAt, 0) || 0))
-const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
-const showCertificationGuide = computed(() => {
-  if (!userStore.isLoggedIn) return false
-  // 实名与住户认证都完成才不再提醒；只完成其一的用户仍提示可继续提升信用值。
-  if (userStore.isRealnameVerified && userStore.isVerifiedOwner) return false
-  return Date.now() - certGuideDismissedAt.value > SEVEN_DAYS
-})
+// 未完成实名或住户认证的用户，在首页搜索框上方常驻提醒（不提供关闭）。
+const showCertificationTip = computed(
+  () => userStore.isLoggedIn && !(userStore.isRealnameVerified && userStore.isVerifiedOwner),
+)
 
 const community = computed(() => {
   if (itemStore.homeFeed) return itemStore.homeFeed.community
@@ -350,7 +350,6 @@ onLoad(() => {
 
 onShow(() => {
   if (typeof uni !== 'undefined') uni.hideTabBar({ animation: false })
-  certGuideDismissedAt.value = Number(getStorage<number>(STORAGE_KEYS.certGuideDismissedAt, 0) || 0)
   socialStore.fetchConversations().catch(() => undefined)
   notificationStore.fetchUnread().catch(() => undefined)
   userStore.refreshProfile().catch(() => undefined)
@@ -398,10 +397,6 @@ function goCertificationCenter(): void {
   uni.navigateTo({ url: '/pages/auth/center' })
 }
 
-function dismissCertificationGuide(): void {
-  certGuideDismissedAt.value = Date.now()
-  setStorage(STORAGE_KEYS.certGuideDismissedAt, certGuideDismissedAt.value)
-}
 function goSearch(): void {
   uni.navigateTo({ url: '/pages/home/search' })
 }
@@ -566,6 +561,40 @@ async function onLifeLike(post: any): Promise<void> {
 }
 .home__search {
   margin-top: 8px;
+}
+.home__cert-tip {
+  flex-direction: row;
+  align-items: center;
+  height: 34px;
+  margin-top: 8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 176, 130, 0.55);
+  background-color: rgba(255, 255, 255, 0.88);
+}
+.home__cert-tip--pressed {
+  opacity: 0.8;
+}
+.home__cert-tip-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background-image: $ni-gradient-brand;
+  align-items: center;
+  justify-content: center;
+}
+.home__cert-tip-text {
+  flex: 1;
+  margin-left: 6px;
+  font-size: 8px;
+  color: #8a5a3a;
+}
+.home__cert-tip-action {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: $ni-color-primary-dark;
 }
 .home__skeleton {
   background-color: $ni-color-white;
