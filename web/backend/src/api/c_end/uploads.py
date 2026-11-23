@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, Response, UploadFile
+from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from minio.error import S3Error
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
@@ -198,16 +198,111 @@ def _iter_minio_object(upstream) -> Iterator[bytes]:
         upstream.release_conn()
 
 
+def _parse_byte_range(range_header: str, total: int) -> tuple[int, int] | str | None:
+    """解析单段 Range：返回 (start, end) 闭区间 / 'invalid' / None（无 Range）。
+
+    浏览器播放 <video> 时会先发 ``Range: bytes=0-``，iOS/微信内核还依赖 206 +
+    Content-Range 才能起播；不支持 Range 时表现为“视频加载失败/点了没反应”。
+    """
+    header = (range_header or "").strip()
+    if not header.startswith("bytes="):
+        return None
+    spec = header[len("bytes="):].split(",", 1)[0].strip()
+    if "-" not in spec:
+        return "invalid"
+    start_text, _, end_text = spec.partition("-")
+    try:
+        if not start_text:
+            suffix = int(end_text)
+            if suffix <= 0 or total <= 0:
+                return "invalid"
+            start, end = max(0, total - suffix), total - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else total - 1
+    except ValueError:
+        return "invalid"
+    if total <= 0 or start >= total or start > end:
+        return "invalid"
+    return start, min(end, total - 1)
+
+
+async def _media_stream_response(
+    request,
+    client,
+    *,
+    bucket: str,
+    key: str,
+    media_type: str,
+    cache_control: str,
+) -> Response:
+    """从对象存储流式返回媒体，支持 Range/HEAD（视频拖动与 iOS 起播必需）。"""
+    try:
+        stat = await run_in_threadpool(client.stat_object, bucket, key)
+    except S3Error as exc:
+        logger.warning("媒体不存在 %s：%s", key, exc)
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404) from exc
+    except Exception as exc:
+        logger.warning("媒体信息读取异常 %s：%s", key, exc)
+        raise ApiError(ERR_DEPENDENCY, "文件读取失败，请稍后重试", 503) from exc
+
+    total = int(getattr(stat, "size", 0) or 0)
+    content_type = media_type or getattr(stat, "content_type", "") or "application/octet-stream"
+    parsed = _parse_byte_range(request.headers.get("range", ""), total)
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": "inline",
+        "Cache-Control": cache_control,
+    }
+    if parsed == "invalid":
+        headers["Content-Range"] = f"bytes */{total}"
+        return Response(status_code=416, headers=headers, media_type=content_type)
+    if total <= 0:
+        headers["Content-Length"] = "0"
+        return Response(status_code=200, content=b"", headers=headers, media_type=content_type)
+
+    if parsed is None:
+        start, end, status_code = 0, total - 1, 200
+    else:
+        start, end = parsed
+        status_code = 206
+        headers["Content-Range"] = f"bytes {start}-{end}/{total}"
+    length = end - start + 1
+    headers["Content-Length"] = str(length)
+
+    try:
+        upstream = await run_in_threadpool(
+            client.get_object, bucket, key, offset=start, length=length)
+    except S3Error as exc:
+        logger.warning("媒体不存在 %s：%s", key, exc)
+        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404) from exc
+    except Exception as exc:
+        logger.warning("媒体读取异常 %s：%s", key, exc)
+        raise ApiError(ERR_DEPENDENCY, "文件读取失败，请稍后重试", 503) from exc
+
+    if request.method.upper() == "HEAD":
+        await run_in_threadpool(upstream.close)
+        await run_in_threadpool(upstream.release_conn)
+        return Response(status_code=status_code, headers=headers, media_type=content_type)
+    return StreamingResponse(
+        _iter_minio_object(upstream),
+        status_code=status_code,
+        media_type=content_type,
+        headers=headers,
+    )
+
+
 # 注意：必须注册在 /media/{object_key:path} 之前，否则会被公开媒体路由吞掉。
+@router.head("/media/private/{object_key:path}")
 @router.get("/media/private/{object_key:path}")
 async def private_media(
-    object_key: str, db: DbSession, e: int = 0, s: str = ""
+    object_key: str, request: Request, db: DbSession, e: int = 0, s: str = ""
 ):
     """私信图片/短视频同源代理（私有桶 + HMAC 时效签名）。
 
     签名由 ``private_media_url`` 在消息下发时生成，只对 ``chat/`` 前缀有效；
     签名本身即访问凭证，因此不要求额外 Bearer Token（``<image>``/``<video>``
-    无法携带请求头）。
+    无法携带请求头）。视频需支持 Range/206，浏览器才能起播和拖动进度。
     """
     key = object_key.lstrip("/")
     segments = key.split("/")
@@ -224,22 +319,15 @@ async def private_media(
     client = get_minio()
     if client is None:
         raise ApiError(ERR_DEPENDENCY, "对象存储未配置，暂无法访问文件", 503)
-    try:
-        upstream = await run_in_threadpool(
-            client.get_object, settings.minio_bucket_private, key)
-    except S3Error as exc:
-        logger.warning("私信媒体不存在 %s：%s", key, exc)
-        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404) from exc
-    except Exception as exc:  # 网络/连接异常降级为依赖不可用
-        logger.warning("私信媒体读取异常 %s：%s", key, exc)
-        raise ApiError(ERR_DEPENDENCY, "文件读取失败，请稍后重试", 503) from exc
-
     media_type = (record.content_type if record and record.content_type else "") or \
         _MEDIA_MIME.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
-    return StreamingResponse(_iter_minio_object(upstream), media_type=media_type, headers={
-        "Cache-Control": "private, max-age=600",
-        "Content-Disposition": "inline",
-    })
+    return await _media_stream_response(
+        request, client,
+        bucket=settings.minio_bucket_private,
+        key=key,
+        media_type=media_type,
+        cache_control="private, max-age=600",
+    )
 
 
 # ---------------------------------------------------------------- 公开媒体同源代理
@@ -248,13 +336,14 @@ async def private_media(
 PUBLIC_MEDIA_PREFIXES = ("uploads/",)
 
 
+@router.head("/media/{object_key:path}")
 @router.get("/media/{object_key:path}")
-async def public_media(object_key: str, db: DbSession):
+async def public_media(object_key: str, request: Request, db: DbSession):
     """公开媒体（物品图/生活动态）同源代理。
 
     签名 URL 以 ``MINIO_ENDPOINT`` 为主机，H5/管理端换机器访问时无法解析
     ``127.0.0.1:5206`` 这类内部地址；公开图改由后端读流返回，客户端只访问
-    当前页面的同源 /api 路径。
+    当前页面的同源 /api 路径。视频同样支持 Range/206。
     """
     key = object_key.lstrip("/")
     segments = key.split("/")
@@ -270,26 +359,13 @@ async def public_media(object_key: str, db: DbSession):
     client = get_minio()
     if client is None:
         raise ApiError(ERR_DEPENDENCY, "对象存储未配置，暂无法访问文件", 503)
-    upstream = None
-    try:
-        upstream = await run_in_threadpool(
-            client.get_object, settings.minio_bucket_public, key)
-        data = await run_in_threadpool(upstream.read)
-    except S3Error as exc:
-        logger.warning("公开媒体不存在 %s：%s", key, exc)
-        raise ApiError(ERR_NOT_FOUND, "文件不存在", 404) from exc
-    except Exception as exc:  # 网络/连接异常降级为依赖不可用
-        logger.warning("公开媒体读取异常 %s：%s", key, exc)
-        raise ApiError(ERR_DEPENDENCY, "文件读取失败，请稍后重试", 503) from exc
-    finally:
-        if upstream is not None:
-            await run_in_threadpool(upstream.close)
-            await run_in_threadpool(upstream.release_conn)
-
     media_type = (record.content_type if record and record.content_type else "") or \
         _MEDIA_MIME.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
     # 键名含 uuid，内容不会变，可长缓存。
-    return Response(content=data, media_type=media_type, headers={
-        "Cache-Control": "public, max-age=604800",
-        "Content-Disposition": "inline",
-    })
+    return await _media_stream_response(
+        request, client,
+        bucket=settings.minio_bucket_public,
+        key=key,
+        media_type=media_type,
+        cache_control="public, max-age=604800",
+    )

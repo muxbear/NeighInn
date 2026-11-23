@@ -1,5 +1,7 @@
 """认证材料上传接口测试（MinIO 使用假客户端，不依赖外部服务）。"""
 
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import select
 
@@ -20,13 +22,22 @@ JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"0" * 32
 class FakeMinio:
     def __init__(self):
         self.calls = []
+        self.objects: dict[str, tuple[bytes, str | None]] = {}
 
     def put_object(self, bucket, object_key, data, length, content_type=None):
         self.calls.append((bucket, object_key, length, content_type))
+        payload = data.read() if hasattr(data, "read") else data
+        self.objects[object_key] = (bytes(payload or b""), content_type)
 
-    def get_object(self, bucket, object_key):
+    def get_object(self, bucket, object_key, offset=0, length=None):
         self.calls.append((bucket, object_key, 0, None))
-        return _FakeReadable(JPEG_BYTES)
+        payload, _ = self.objects.get(object_key, (JPEG_BYTES, None))
+        end = len(payload) if length is None else offset + length
+        return _FakeReadable(payload[offset:end])
+
+    def stat_object(self, bucket, object_key):
+        payload, content_type = self.objects.get(object_key, (JPEG_BYTES, None))
+        return SimpleNamespace(size=len(payload), content_type=content_type or "application/octet-stream")
 
 
 class _FakeReadable:
@@ -220,8 +231,33 @@ async def test_chat_media_upload_private_bucket_and_signed_proxy(
     fetched = await client.get(signed)
     assert fetched.status_code == 200, fetched.text
     assert fetched.headers["content-type"] == "image/jpeg"
+    assert fetched.headers["accept-ranges"] == "bytes"
+    assert fetched.headers["content-length"] == str(len(JPEG_BYTES))
     assert fetched.content == JPEG_BYTES
     assert fake.calls[-1][0] == settings.minio_bucket_private
+
+    # 视频必须支持 Range/206：浏览器 <video> 起播与拖动依赖它。
+    video_url = private_media_url(video_key)
+    part = await client.get(video_url, headers={"Range": "bytes=0-7"})
+    assert part.status_code == 206, part.text
+    assert part.headers["content-type"] == "video/mp4"
+    assert part.headers["accept-ranges"] == "bytes"
+    assert part.headers["content-range"] == f"bytes 0-7/{len(video_bytes)}"
+    assert part.headers["content-length"] == "8"
+    assert part.content == video_bytes[:8]
+
+    suffix = await client.get(video_url, headers={"Range": "bytes=-8"})
+    assert suffix.status_code == 206
+    assert suffix.content == video_bytes[-8:]
+
+    beyond = await client.get(video_url, headers={"Range": f"bytes={len(video_bytes)}-"})
+    assert beyond.status_code == 416
+    assert beyond.headers["content-range"] == f"bytes */{len(video_bytes)}"
+
+    head = await client.head(video_url)
+    assert head.status_code == 200
+    assert head.headers["accept-ranges"] == "bytes"
+    assert head.headers["content-length"] == str(len(video_bytes))
 
     # 篡改签名 / 过期 / 非 chat 前缀一律 404。
     tampered = signed.rsplit("&s=", 1)[0] + "&s=" + ("0" * 64)
