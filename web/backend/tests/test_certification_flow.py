@@ -671,3 +671,26 @@ async def test_certification_material_streamed_through_api(client, monkeypatch):
     resp = await client.get(
         f"{ADMIN_BASE}/certifications/{proof['id']}/materials/9")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_certification_approval_awards_credit_once(client, db_session):
+    """认证通过奖励信用值：实名 +5、住户 +5，并各写一条信用流水。"""
+    from src.db.models import CreditLog, User
+
+    csrf = await admin_login(client)
+    account = await register_user(client, "13977770009")
+    await verify_realname(client, csrf, account["token"])
+    await submit_owner_proof(client, account["token"], 1)
+    proof = await first_pending_cert(client, csrf, "OWNER_PROOF")
+    resp = await client.post(
+        f"{ADMIN_BASE}/certifications/{proof['id']}/approve", headers=csrf)
+    assert resp.status_code == 200, resp.text
+
+    db_session.expire_all()
+    user = await db_session.get(User, int(account["profile"]["id"]))
+    logs = list((await db_session.execute(
+        select(CreditLog).where(CreditLog.user_id == user.id))).scalars().all())
+    assert sorted(log.event_type for log in logs) == ["CERT_OWNER", "CERT_REALNAME"]
+    assert all(log.delta == 5 for log in logs)
+    assert user.credit_score == 110

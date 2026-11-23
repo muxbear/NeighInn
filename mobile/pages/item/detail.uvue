@@ -205,6 +205,7 @@ import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import type { DistanceInfo, Item, ItemComment } from '../../models'
 import { useItemStore } from '../../stores/item.store'
 import { useOrderStore } from '../../stores/order.store'
+import { useUserStore } from '../../stores/user.store'
 import { useToast } from '../../composables/useToast'
 import { useSystemMetrics } from '../../composables/useSystemMetrics'
 import { useIM } from '../../composables/useIM'
@@ -214,6 +215,7 @@ import { TRADE_METHOD_BUTTON } from '../../config/constants'
 
 const itemStore = useItemStore()
 const orderStore = useOrderStore()
+const userStore = useUserStore()
 const { toast, showToast } = useToast()
 const { statusBarHeight } = useSystemMetrics()
 const { openChat } = useIM()
@@ -250,6 +252,7 @@ const primaryDisabledText = computed(() => {
   if (item.value.status === 'RESERVED') return '已被预约'
   if (item.value.status === 'SOLD') return '已售出'
   if (item.value.status === 'OFF_SHELF') return '已下架'
+  if (item.value.type === '免费' && !userStore.isRealnameVerified) return '实名认证后可领取'
   return ''
 })
 const myOfferedItems = computed(() =>
@@ -258,6 +261,8 @@ const myOfferedItems = computed(() =>
 
 onLoad(async (options: any) => {
   itemId.value = String(options?.id ?? '')
+  // 实名状态决定免费领取能否发起，进详情页顺手刷新一次，避免审核刚通过仍是旧状态。
+  userStore.refreshProfile().catch(() => undefined)
   await loadDetail()
 })
 
@@ -402,6 +407,18 @@ async function onPrimary(): Promise<void> {
     return
   }
   if (item.value.type === '免费') {
+    if (!userStore.isRealnameVerified) {
+      uni.showModal({
+        title: '需完成实名认证',
+        content: '为保障邻里安全，免费领取需先完成实名认证。实名信息仅用于身份核验，展示时自动脱敏。',
+        confirmText: '去认证',
+        cancelText: '暂不领取',
+        success: (res) => {
+          if (res.confirm) uni.navigateTo({ url: '/pages/auth/center' })
+        },
+      })
+      return
+    }
     uni.showModal({
       title: '申请免费领取',
       content: '免费赠与不涉及资金，请在小区公共区域当面领取。确认申请吗？',

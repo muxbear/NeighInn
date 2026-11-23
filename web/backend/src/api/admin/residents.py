@@ -51,6 +51,7 @@ from src.db.models import (
     AdminUserRegionGrant,
     Certification,
     Community,
+    CreditLog,
     Dispute,
     FileObject,
     Item,
@@ -1218,10 +1219,12 @@ async def verify_resident_certification(resident_id: int, cert_type: str,
     else:
         user.realname_status = E.CertificationStatus.VERIFIED
 
+    credit_delta = await _award_certification_credit(db, cert, user)
+    base_note = ("住户认证已通过，已绑定小区" if cert_type == "OWNER_PROOF"
+                 else "实名认证已通过")
     await notify_user(
         db, cert.user_id, category="COMMUNITY", title="认证审核通过",
-        description=("住户认证已通过，已绑定小区" if cert_type == "OWNER_PROOF"
-                     else "实名认证已通过"),
+        description=base_note + (f"，信用值 +{credit_delta}" if credit_delta else ""),
         icon="shield", tag="认证", route={"type": "certification"},
     )
     await write_audit(
@@ -1520,6 +1523,34 @@ async def _assert_cert_scope(db: DbSession, admin: AdminUser, cert: Certificatio
     raise ApiError(ERR_DATA_SCOPE, "数据范围越界", 403)
 
 
+async def _award_certification_credit(db: DbSession, cert: Certification, user: User | None) -> int:
+    """认证通过奖励信用分：同一用户同类认证只加一次，返回本次实际加分。
+
+    实名 +5、住户 +5，写 credit_logs 供信用中心展示；分数上限沿用评价加分口径 1000。
+    """
+    if not user:
+        return 0
+    event_type = "CERT_REALNAME" if cert.type == "REALNAME" else "CERT_OWNER"
+    exists = await db.scalar(select(CreditLog.id).where(
+        CreditLog.user_id == user.id,
+        CreditLog.event_type == event_type,
+    ).limit(1))
+    if exists:
+        return 0
+    delta = 5
+    user.credit_score = min(1000, (user.credit_score or 0) + delta)
+    db.add(CreditLog(
+        user_id=user.id,
+        delta=delta,
+        event_type=event_type,
+        ref_type="certification",
+        ref_id=cert.id,
+        balance_after=user.credit_score,
+        note="完成实名认证，信用值 +5" if cert.type == "REALNAME" else "完成住户认证，信用值 +5",
+    ))
+    return delta
+
+
 @router.post("/certifications/{certification_id}/approve",
              dependencies=[AuditPerm])
 async def approve_certification(
@@ -1567,9 +1598,11 @@ async def approve_certification(
         resident.status = "ACTIVE"
         cert.resident_id = resident.id
 
+    credit_delta = await _award_certification_credit(db, cert, user)
+    base_note = "实名认证已通过" if cert.type == "REALNAME" else "住户认证已通过，已绑定小区"
     await notify_user(
         db, cert.user_id, category="COMMUNITY", title="认证审核通过",
-        description="实名认证已通过" if cert.type == "REALNAME" else "住户认证已通过，已绑定小区",
+        description=base_note + (f"，信用值 +{credit_delta}" if credit_delta else ""),
         icon="shield", tag="认证", route={"type": "certification"},
     )
     await write_audit(

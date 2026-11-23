@@ -283,7 +283,9 @@ const certGuideDismissedAt = ref(Number(getStorage<number>(STORAGE_KEYS.certGuid
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
 const showCertificationGuide = computed(() => {
-  if (!userStore.isLoggedIn || userStore.isVerifiedOwner) return false
+  if (!userStore.isLoggedIn) return false
+  // 实名与住户认证都完成才不再提醒；只完成其一的用户仍提示可继续提升信用值。
+  if (userStore.isRealnameVerified && userStore.isVerifiedOwner) return false
   return Date.now() - certGuideDismissedAt.value > SEVEN_DAYS
 })
 

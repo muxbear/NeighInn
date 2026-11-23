@@ -1,7 +1,7 @@
 """物品域服务层（M02–M04）：发布校验、序列化、归属守卫、距离计算。
 
 硬规则：
-- BR-02 本小区强绑定：发布者必须持有已认证的小区档案；
+- BR-02 本小区强绑定：发布者必须持有本小区的住户档案（未认证注册用户按其入住小区即可发布）；
 - BR-05 照片 3–12 张（参数可调）；BR-06 三种交易方式；BR-13 互换必填期望交换描述；
 - M03-01 质量说明 ≥20 字；W07 处置联动：限制发布/封禁用户禁止发布。
 """
@@ -35,7 +35,12 @@ from src.db.models import (
     UserPenalty,
 )
 from src.domain import enums as E
-from src.services.auth_service import bound_resident, browse_community_id, latest_certification
+from src.services.auth_service import (
+    bound_resident,
+    browse_community_id,
+    browse_resident,
+    latest_certification,
+)
 
 TRADE_LABEL = {E.TradeType.MONETARY: "出售", E.TradeType.FREE_GIFT: "免费", E.TradeType.BARTER: "互换"}
 
@@ -103,10 +108,14 @@ def assert_owner(item: Item, user: User) -> None:
 
 
 async def assert_can_publish(db: AsyncSession, user: User) -> Resident:
-    """发布前置守卫（BR-02 + W07 处置联动）。返回已认证的业主档案。"""
-    resident = await bound_resident(db, user.id)
+    """发布前置守卫（BR-02 + W07 处置联动）。返回发布所属的住户档案。
+
+    发布对已注册用户开放（含未认证），但必须已选择入住小区；内容仍走 AI 质检/
+    人工审核，交易与免费领取另有实名/认证门槛。
+    """
+    resident = await browse_resident(db, user)
     if not resident:
-        raise ApiError(ERR_NOT_VERIFIED, "请先完成实名与业主认证后再发布物品", 403)
+        raise ApiError(ERR_NOT_VERIFIED, "请先完善入住小区信息后再发布", 403)
     penalty = await db.scalar(
         select(UserPenalty).where(
             UserPenalty.user_id == user.id,

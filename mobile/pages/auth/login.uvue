@@ -15,7 +15,7 @@
         <text class="login__subtitle">登录后发现本小区好物与互助服务</text>
       </view>
 
-      <view class="login__tabs">
+      <view v-if="oneClickEnabled" class="login__tabs">
         <view
           class="login__tab"
           :class="{ 'login__tab--active': mode === 'oneclick' }"
@@ -32,7 +32,7 @@
         </view>
       </view>
 
-      <view v-if="mode === 'oneclick'" class="login__panel login__panel--oneclick">
+      <view v-if="mode === 'oneclick' && oneClickEnabled" class="login__panel login__panel--oneclick">
         <view class="login__phone-row">
           <view class="login__phone-icon">
             <ni-icon name="phone" :size="22" state="active" />
@@ -104,18 +104,20 @@
         <text class="login__register-link">立即注册</text>
       </view>
 
-      <view class="login__divider">
-        <view class="login__divider-line" />
-        <text class="login__divider-text">第三方登录</text>
-        <view class="login__divider-line" />
-      </view>
-
-      <view class="login__third-party">
-        <view class="login__wechat" hover-class="login__wechat--pressed" @click="loginWechat">
-          <ni-icon name="wechat" :size="26" state="white" />
+      <template v-if="wechatEnabled">
+        <view class="login__divider">
+          <view class="login__divider-line" />
+          <text class="login__divider-text">第三方登录</text>
+          <view class="login__divider-line" />
         </view>
-        <text class="login__wechat-label">微信登录</text>
-      </view>
+
+        <view class="login__third-party">
+          <view class="login__wechat" hover-class="login__wechat--pressed" @click="loginWechat">
+            <ni-icon name="wechat" :size="26" state="white" />
+          </view>
+          <text class="login__wechat-label">微信登录</text>
+        </view>
+      </template>
 
       <view class="login__agreement">
         <view class="login__checkbox" :class="{ 'login__checkbox--checked': agreed }" @click="agreed = !agreed">
@@ -156,7 +158,11 @@ const user = useUserStore()
 const appStore = useAppStore()
 const { toast, showToast } = useToast()
 
-const mode = ref<'oneclick' | 'sms'>('oneclick')
+const mode = ref<'oneclick' | 'sms'>('sms')
+// 运营要求：本机号码一键登录与微信登录暂不开放，仅保留验证码登录。
+// 恢复时把对应开关改为 true，并确认运营商/微信 SDK 配置可用。
+const oneClickEnabled = false
+const wechatEnabled = false
 const agreed = ref(false)
 const phone = ref('')
 const smsCode = ref('')
@@ -229,6 +235,10 @@ function showNotRegisteredModal(): void {
 }
 
 async function loginOneClick(): Promise<void> {
+  if (!oneClickEnabled) {
+    showToast('本机一键登录暂未开放，请使用验证码登录', 'alert')
+    return
+  }
   if (!ensureAgreement() || submitting.value) return
   submitting.value = true
   try {
@@ -303,6 +313,10 @@ async function loginSms(): Promise<void> {
 }
 
 async function loginWechat(): Promise<void> {
+  if (!wechatEnabled) {
+    showToast('微信登录暂未开放，请使用验证码登录', 'alert')
+    return
+  }
   if (!ensureAgreement() || submitting.value) return
   submitting.value = true
   try {

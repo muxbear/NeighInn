@@ -6,12 +6,12 @@
         <view class="regp__nav-button" @click="goBack">
           <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
         </view>
-        <text class="regp__nav-title">{{ showWelcome ? '注册完成' : '完善资料' }}</text>
+        <text class="regp__nav-title">完善资料</text>
         <view class="regp__nav-placeholder" />
       </view>
     </view>
 
-    <view v-if="!showWelcome" class="regp__content">
+    <view class="regp__content">
       <view class="regp__progress">
         <view class="regp__progress-head">
           <text class="regp__progress-label">完善邻里名片</text>
@@ -61,61 +61,6 @@
       <view class="regp__privacy">
         <ni-icon name="lock" :size="13" state="tertiary" />
         <text class="regp__privacy-text">手机号不会公开；实名信息仅用于身份核验，展示时自动脱敏。</text>
-      </view>
-    </view>
-
-    <view v-else class="regp__welcome">
-      <view class="regp__success">
-        <ni-icon name="check" :size="42" state="white" />
-      </view>
-      <text class="regp__welcome-title">注册成功，欢迎加入邻里小栈</text>
-      <text class="regp__welcome-desc">你的邻里账号已创建。实名认证与住户认证相互独立，完成住户认证即可在小区发布和交换闲置。</text>
-
-      <view class="regp__checklist">
-        <view class="regp__check-row">
-          <view class="regp__check-icon regp__check-icon--done">
-            <ni-icon name="check" :size="14" state="white" />
-          </view>
-          <view class="regp__check-copy">
-            <text class="regp__check-title">手机号已验证</text>
-            <text class="regp__check-desc">账号已创建并登录</text>
-          </view>
-        </view>
-        <view class="regp__check-row">
-          <view class="regp__check-icon regp__check-icon--pending">
-            <ni-icon name="shield" :size="14" state="gold" />
-          </view>
-          <view class="regp__check-copy">
-            <text class="regp__check-title">实名认证（选做）</text>
-            <text class="regp__check-desc">身份证正反面，可跳过；用于私信与好友</text>
-          </view>
-        </view>
-        <view class="regp__check-row regp__check-row--last">
-          <view class="regp__check-icon regp__check-icon--pending">
-            <ni-icon name="home" :size="14" state="gold" />
-          </view>
-          <view class="regp__check-copy">
-            <text class="regp__check-title">住户认证</text>
-            <text class="regp__check-desc">审核不超过 24 小时，通过后成为认证业主</text>
-          </view>
-        </view>
-      </view>
-
-      <view class="regp__permission">
-        <text class="regp__permission-title">你现在可以</text>
-        <text class="regp__permission-item">· 浏览本小区与邻近小区的好物</text>
-        <text class="regp__permission-item">· 收藏物品、查看浏览足迹</text>
-        <text class="regp__permission-note">完成住户认证后：发布物品、发起交易、互评；好友与私信需完成实名认证。</text>
-      </view>
-
-      <ni-button type="primary" size="xl" block icon="shield" @tap="goRealname">
-        去实名认证
-      </ni-button>
-      <view class="regp__skip" @click="goOwnerProof">
-        <text class="regp__skip-text">跳过实名，直接住户认证</text>
-      </view>
-      <view class="regp__skip regp__skip--secondary" @click="goHome">
-        <text class="regp__skip-text">先逛逛，稍后认证</text>
       </view>
     </view>
 
@@ -266,8 +211,6 @@ import { useCommunityStore } from '../../stores/community.store'
 import { useToast } from '../../composables/useToast'
 import { useCommunityRegionPicker } from '../../composables/useCommunityRegionPicker'
 import { profileService } from '../../services/profile.service'
-import { STORAGE_KEYS } from '../../config/constants'
-import { setStorage } from '../../utils/storage'
 import { formatCommunityRegion } from '../../utils/formatter'
 
 const user = useUserStore()
@@ -302,10 +245,8 @@ const avatarPreset = ref('avatar-person-1')
 const avatarGroups = ref<AvatarPresetGroup[]>([])
 const avatarLibraryVisible = ref(false)
 const selectedCommunity = ref<CommunityBinding | null>(null)
-const welcome = ref(false)
 const submitting = ref(false)
 
-const showWelcome = computed(() => welcome.value || user.onboardingStatus === 'PROFILE_COMPLETED')
 const avatarPreview = computed(() =>
   avatarPreset.value ? `/static/avatars/${avatarPreset.value}.svg` : user.avatarSrc,
 )
@@ -352,11 +293,12 @@ onLoad(async () => {
   }
   await user.refreshProfile()
   if (!user.profile) return
-  if (user.onboardingStatus === 'COMPLETED') {
+  // 注册流程只停留在资料完善：已完成（或已保存过资料）的账号直接进首页，
+  // 认证是可选环节，放到「我的/首页提示卡」里再做。
+  if (user.onboardingStatus === 'COMPLETED' || user.onboardingStatus === 'PROFILE_COMPLETED') {
     uni.switchTab({ url: '/pages/home/index' })
     return
   }
-  welcome.value = user.onboardingStatus === 'PROFILE_COMPLETED'
   nickname.value = user.profile?.nickname || ''
   avatarPreset.value = user.profile?.avatarPreset || 'avatar-person-1'
 
@@ -422,8 +364,12 @@ async function completeProfile(): Promise<void> {
       avatarKey: avatarPreset.value,
       intentCommunityId: intentCommunityPayload(),
     })
-    welcome.value = true
-    showToast('注册资料已保存')
+    // 注册即完成 onboarding，直接进主页面；认证不再是注册的必经环节。
+    await finishOnboarding()
+    showToast('注册成功，欢迎加入邻里小栈')
+    setTimeout(() => {
+      uni.switchTab({ url: '/pages/home/index' })
+    }, 400)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存失败', 'alert')
   } finally {
@@ -440,28 +386,7 @@ async function finishOnboarding(): Promise<void> {
   }
 }
 
-async function goRealname(): Promise<void> {
-  await finishOnboarding()
-  uni.navigateTo({ url: '/pages/auth/realname' })
-}
-
-async function goOwnerProof(): Promise<void> {
-  await finishOnboarding()
-  setStorage(STORAGE_KEYS.certGuideDismissedAt, Date.now())
-  uni.redirectTo({ url: '/pages/auth/owner-proof' })
-}
-
-async function goHome(): Promise<void> {
-  await finishOnboarding()
-  setStorage(STORAGE_KEYS.certGuideDismissedAt, Date.now())
-  uni.switchTab({ url: '/pages/home/index' })
-}
-
 function goBack(): void {
-  if (showWelcome.value) {
-    goHome()
-    return
-  }
   uni.showModal({
     title: '请先完成注册',
     content: '入住小区为必填项，请选择入住小区并完成注册后继续。',
@@ -773,19 +698,6 @@ function goBack(): void {
   font-size: 7px;
   color: $ni-color-text-tertiary;
 }
-.regp__skip {
-  align-items: center;
-  justify-content: center;
-  padding-top: 15px;
-  padding-bottom: 8px;
-}
-.regp__skip--secondary {
-  padding-top: 6px;
-}
-.regp__skip-text {
-  font-size: $ni-font-11;
-  color: $ni-color-text-tertiary;
-}
 .regp__privacy {
   flex-direction: row;
   align-items: flex-start;
@@ -800,104 +712,5 @@ function goBack(): void {
   font-size: 7px;
   line-height: 13px;
   color: $ni-color-text-tertiary;
-}
-.regp__welcome {
-  padding: 30px 20px;
-  align-items: center;
-}
-.regp__success {
-  width: 86px;
-  height: 86px;
-  border-radius: 31px;
-  background-image: $ni-gradient-success;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 22px rgba(85, 161, 115, 0.24);
-}
-.regp__welcome-title {
-  margin-top: 16px;
-  font-size: $ni-font-22;
-  font-weight: 700;
-  color: $ni-color-text-primary;
-  text-align: center;
-}
-.regp__welcome-desc {
-  margin-top: 7px;
-  font-size: $ni-font-11;
-  line-height: 18px;
-  color: $ni-color-text-secondary;
-  text-align: center;
-  padding-left: 8px;
-  padding-right: 8px;
-}
-.regp__checklist {
-  width: 100%;
-  margin-top: 20px;
-  padding: 4px 14px;
-  border-radius: $ni-radius-16;
-  background-color: $ni-color-white;
-  box-shadow: $ni-shadow-card;
-}
-.regp__check-row {
-  flex-direction: row;
-  align-items: center;
-  padding-top: 12px;
-  padding-bottom: 12px;
-  border-bottom: $ni-border-divider;
-}
-.regp__check-row--last {
-  border-bottom: 0;
-}
-.regp__check-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 14px;
-  align-items: center;
-  justify-content: center;
-}
-.regp__check-icon--done {
-  background-color: $ni-color-gift;
-}
-.regp__check-icon--pending {
-  background-color: $ni-color-credit-bg;
-}
-.regp__check-copy {
-  flex: 1;
-  margin-left: 9px;
-}
-.regp__check-title {
-  font-size: $ni-font-12;
-  font-weight: 700;
-  color: $ni-color-text-primary;
-}
-.regp__check-desc {
-  margin-top: 2px;
-  font-size: $ni-font-9;
-  color: $ni-color-text-tertiary;
-}
-.regp__permission {
-  width: 100%;
-  margin-top: 12px;
-  margin-bottom: 18px;
-  padding: 13px;
-  border-radius: $ni-radius-14;
-  background-color: #fff8e8;
-}
-.regp__permission-title {
-  font-size: $ni-font-11;
-  font-weight: 700;
-  color: $ni-color-service-deep;
-}
-.regp__permission-item {
-  margin-top: 4px;
-  font-size: $ni-font-9;
-  line-height: 15px;
-  color: #9a7c45;
-}
-.regp__permission-note {
-  margin-top: 7px;
-  font-size: 7px;
-  line-height: 13px;
-  color: #9a7c45;
 }
 </style>

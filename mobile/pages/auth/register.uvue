@@ -20,7 +20,7 @@
         </view>
         <text class="reg__slogan">真实邻居 · 安心流转</text>
         <text class="reg__title">创建你的邻里账号</text>
-        <text class="reg__subtitle">手机号验证后即可浏览本小区与邻近小区好物</text>
+        <text class="reg__subtitle">手机号验证后即可浏览、发布本小区与邻近小区好物</text>
       </view>
 
       <view class="reg__progress">
@@ -90,7 +90,7 @@
 
       <view class="reg__note">
         <ni-icon name="shield" :size="14" state="gold" />
-        <text class="reg__note-text">同一手机号仅可注册一个账号；完成实名与业主认证后即可发布物品和参与交易</text>
+        <text class="reg__note-text">同一手机号仅可注册一个账号；完成实名与住户认证可提升信用值、领取免费物品并享受更多邻里权益</text>
       </view>
     </view>
 

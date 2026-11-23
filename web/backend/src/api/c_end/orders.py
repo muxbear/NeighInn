@@ -12,6 +12,7 @@ from src.core.idempotency import complete_idempotency, guard_idempotency
 from src.core.responses import (
     ERR_BIZ_RULE,
     ERR_CONFLICT,
+    ERR_NOT_VERIFIED,
     ERR_PARAM,
     ApiError,
     ok,
@@ -76,6 +77,9 @@ async def create_order(payload: CreateOrderIn, request: Request,
     item = await svc.lock_item_for_order(db, payload.itemId)
     if item.seller_id == user.id:
         raise ApiError(ERR_BIZ_RULE, "不能购买自己发布的物品", 422)
+    # 免费领取需实名（运营要求）：实名信息用于线下当面领取时的身份核验。
+    if item.trade_type == E.TradeType.FREE_GIFT and user.realname_status != "VERIFIED":
+        raise ApiError(ERR_NOT_VERIFIED, "免费领取需先完成实名认证", 403)
 
     offered_snapshot: list[dict] = []
     if item.trade_type == E.TradeType.BARTER:

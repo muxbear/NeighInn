@@ -14,7 +14,7 @@ from src.db.models import Favorite, LifeComment, LifePost, User
 from src.db.models.common import utcnow
 from src.services import ai_audit_service as ai
 from src.services import item_service as item_svc
-from src.services.auth_service import bound_resident, browse_community_id
+from src.services.auth_service import browse_resident, browse_community_id
 
 router = APIRouter(tags=["c:life"])
 
@@ -99,9 +99,9 @@ async def life_posts(user: CurrentUser, db: DbSession,
 @router.post("/life/posts")
 async def publish_life(payload: PublishLifeIn, user: CurrentUser, db: DbSession):
     """发布生活动态：进入待审核（内容状态机 PENDING_REVIEW），复核通过后发布。"""
-    resident = await bound_resident(db, user.id)
+    resident = await browse_resident(db, user)
     if not resident:
-        raise ApiError(ERR_BIZ_RULE, "请先完成小区认证后再发布生活动态", 422)
+        raise ApiError(ERR_BIZ_RULE, "请先完善入住小区信息后再发布生活动态", 422)
     title = payload.title.strip()
     if not (2 <= len(title) <= 30):
         raise ApiError(ERR_PARAM, "标题需 2–30 个字", 400)

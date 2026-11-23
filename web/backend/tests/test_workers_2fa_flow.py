@@ -63,7 +63,7 @@ async def test_stale_gift_application_cancelled(client, db_session):
     """M06-02：赠与/互换申请 48h 未确认自动取消并解锁。"""
     _seller, item_id = await _seller_and_item(
         client, "13966660003", title="儿童绘本 30 册", tradeType="FREE_GIFT", priceCents=0)
-    buyer = await register_user(client, "13966660004")
+    buyer = await verified_user(client, "13966660004")
     order = await create_order(client, buyer["token"], item_id)
 
     db_session.expire_all()

@@ -78,26 +78,26 @@ const title = computed(() => {
   if (props.ownerStatus === 'REJECTED') return '住户认证未通过'
   if (props.realnameStatus === 'SUPPLEMENT') return '实名认证待补充材料'
   if (props.realnameStatus === 'PENDING') return '实名认证审核中'
-  if (props.realnameStatus === 'VERIFIED' && props.ownerStatus !== 'VERIFIED') return '实名已通过，完成住户认证'
+  if (props.realnameStatus === 'VERIFIED' && props.ownerStatus !== 'VERIFIED') return '实名已通过，完成住户认证再加信用值'
   if (props.realnameStatus === 'REJECTED' && props.ownerStatus !== 'VERIFIED') return '实名未通过，可先完成住户认证'
-  return '完成认证，解锁发布与交易'
+  return '完成认证，提升信用值'
 })
 
 const desc = computed(() => {
   if (props.ownerStatus === 'FROZEN') return '因违规处理被冻结，在售物品已自动下架；如有疑问请联系客服。'
   if (props.ownerStatus === 'REVOKED') return '认证已被撤销，查看原因后可重新提交材料。'
-  if (props.ownerStatus === 'SUPPLEMENT') return '请按审核意见补充材料后重新提交。'
+  if (props.ownerStatus === 'SUPPLEMENT') return '请按审核意见补充材料后重新提交，认证通过后信用值再提升。'
   if (props.ownerStatus === 'PENDING') {
-    return '预计 24 小时内完成审核，结果会通过通知中心告知。'
+    return '预计 24 小时内完成审核，通过后信用值提升，结果会通过通知中心告知。'
   }
-  if (props.ownerStatus === 'REJECTED') return '查看驳回原因并重新提交材料。'
-  if (props.realnameStatus === 'SUPPLEMENT') return '请按审核意见补充身份证材料后重新提交。'
+  if (props.ownerStatus === 'REJECTED') return '查看驳回原因并重新提交材料，认证通过后信用值提升。'
+  if (props.realnameStatus === 'SUPPLEMENT') return '请按审核意见补充身份证材料后重新提交，通过后信用值提升。'
   if (props.realnameStatus === 'PENDING') {
-    return '实名审核不影响住户认证，可同时提交。'
+    return '实名审核不影响住户认证，可同时提交，通过后均增加信用值。'
   }
-  if (props.realnameStatus === 'VERIFIED') return '选择小区并上传证明材料，即可获得认证业主标识。'
-  if (props.realnameStatus === 'REJECTED') return '实名可稍后重试，住户认证通过即可发布与交易。'
-  return '实名与住户认证相互独立，可任选一项开始。'
+  if (props.realnameStatus === 'VERIFIED') return '选择小区并上传证明材料，认证通过后信用值再提升，并获认证业主标识。'
+  if (props.realnameStatus === 'REJECTED') return '实名可稍后重试；完成实名与住户认证都能增加信用值、享受更多权益。'
+  return '完成实名与住户认证可增加信用值，解锁免费领取、私信好友等更多邻里权益。'
 })
 
 const actionText = computed(() => {
@@ -109,7 +109,7 @@ const actionText = computed(() => {
   }
   if (props.realnameStatus === 'SUPPLEMENT') return '去补充实名材料'
   if (props.realnameStatus === 'VERIFIED') return '去完成住户认证'
-  return '去认证中心'
+  return '去认证提升信用值'
 })
 </script>
 

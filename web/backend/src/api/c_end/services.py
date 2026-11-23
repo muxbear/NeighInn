@@ -13,7 +13,7 @@ from src.domain import enums as E
 from src.domain.state import help_sm
 from src.services import ai_audit_service as ai
 from src.services import item_service as item_svc
-from src.services.auth_service import bound_resident, browse_community_id
+from src.services.auth_service import browse_resident, browse_community_id
 from src.services.notify_service import notify_user
 
 router = APIRouter(tags=["c:services"])
@@ -100,9 +100,9 @@ async def list_services(user: CurrentUser, db: DbSession,
 @router.post("/services")
 async def create_service(payload: CreateServiceIn, user: CurrentUser, db: DbSession):
     """发布互助/服务：求助直接上线；邻里服务需后台审核通过后上线。"""
-    resident = await bound_resident(db, user.id)
+    resident = await browse_resident(db, user)
     if not resident:
-        raise ApiError(ERR_BIZ_RULE, "请先完成小区认证后再发布互助", 422)
+        raise ApiError(ERR_BIZ_RULE, "请先完善入住小区信息后再发布互助", 422)
     title = payload.title.strip()
     if not (2 <= len(title) <= 30):
         raise ApiError(ERR_PARAM, "标题需 2–30 个字", 400)

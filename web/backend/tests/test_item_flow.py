@@ -11,6 +11,7 @@ from src.db.models import AppNotification, Favorite, Item, ViewHistory
 from tests.conftest import (
     ADMIN_BASE,
     C_BASE,
+    DEFAULT_DRAFT,
     admin_login,
     bearer,
     create_draft,
@@ -22,14 +23,24 @@ from tests.conftest import (
 
 
 @pytest.mark.asyncio
-async def test_create_requires_verified_owner(client):
-    """BR-02/AC-03：未完成认证的账号无法发布（40304）。"""
+async def test_create_open_to_unverified_registered_user(client):
+    """BR-02 调整：完善资料（选入住小区）后，未认证用户也可发布物品。"""
     account = await register_user(client, "13911110001")
-    resp = await client.post(f"{C_BASE}/items", json={
-        "title": "测试物品", "tradeType": "MONETARY", "priceCents": 100,
-        "qualityDesc": "质量说明超过二十个字的描述文本内容",
-        "images": ["a.jpg", "b.jpg", "c.jpg"], "condition": "九九新",
-    }, headers=bearer(account["token"]))
+    headers = bearer(account["token"])
+    resp = await client.post(f"{C_BASE}/auth/register/complete", json={
+        "nickname": "测试邻居", "avatarKey": "avatar-person-1", "intentCommunityId": 1,
+    }, headers=headers)
+    assert resp.status_code == 200, resp.text
+    item_id = await create_draft(client, account["token"])
+    assert item_id
+
+
+@pytest.mark.asyncio
+async def test_create_requires_intent_community(client):
+    """未完善入住小区的账号没有小区归属，仍是 40304。"""
+    account = await register_user(client, "13911110003")
+    resp = await client.post(f"{C_BASE}/items", json=DEFAULT_DRAFT,
+                             headers=bearer(account["token"]))
     assert resp.status_code == 403
     assert resp.json()["code"] == 40304
 
@@ -123,7 +134,7 @@ async def test_publish_review_approve_and_visibility(client, db_session):
     assert listed["seller"]["verified"] is True
     assert listed["seller"]["realnameVerified"] is True
     assert listed["seller"]["ownerVerified"] is True
-    assert listed["seller"]["creditScore"] == 100
+    assert listed["seller"]["creditScore"] >= 100
     assert listed["seller"]["area"]
 
     detail = (await client.get(f"{C_BASE}/items/{item_id}",

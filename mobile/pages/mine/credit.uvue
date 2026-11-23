@@ -26,7 +26,7 @@
           <text class="credit-page__score">{{ credit.score }}</text>
           <text class="credit-page__score-unit">分</text>
         </view>
-        <ni-progress :percent="credit.score" :height="6" color="#D4A055" />
+        <ni-progress :percent="creditPercent" :height="6" color="#D4A055" />
         <view class="credit-page__score-labels">
           <text class="credit-page__score-label">0</text>
           <text class="credit-page__score-label">100</text>
@@ -59,6 +59,7 @@
 
       <view class="credit-page__rules">
         <text class="credit-page__rules-title">如何提升信用分</text>
+        <text class="credit-page__rules-item">· 完成实名认证、住户认证（各 +5 信用值）</text>
         <text class="credit-page__rules-item">· 完成担保交易、按时赴约、收到好评</text>
         <text class="credit-page__rules-item">· 参与邻里互助、服务响应及时</text>
         <text class="credit-page__rules-item">· 遵守平台规则，不发布违禁物品</text>
@@ -71,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import type { CreditInfo } from '../../models'
 import { itemService } from '../../services/item.service'
@@ -85,6 +86,7 @@ const credit = ref<CreditInfo>({
   nextLevel: '距离下一等级还差 8 分',
   records: [],
 })
+const creditPercent = computed(() => Math.max(0, Math.min(100, credit.value.score)))
 const levels = [
   { name: '待提升', range: '0–59', active: false },
   { name: '一般', range: '60–74', active: false },

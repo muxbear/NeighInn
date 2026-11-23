@@ -119,7 +119,10 @@ async def test_monetary_full_flow(client, db_session):
                                headers=bearer(buyer["token"]))
     assert review.status_code == 200
     credit_log = await db_session.scalar(
-        select(CreditLog).where(CreditLog.user_id == int(seller["profile"]["id"])))
+        select(CreditLog).where(
+            CreditLog.user_id == int(seller["profile"]["id"]),
+            CreditLog.event_type == "REVIEW",
+        ).order_by(CreditLog.id.desc()))
     assert credit_log is not None and credit_log.delta == 2
 
     outsider = await register_user(client, "13922220004")
@@ -142,11 +145,26 @@ async def test_monetary_full_flow(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_free_gift_requires_realname(client, db_session):
+    """免费领取需实名：未实名账号创建赠与订单被 40304 拦截，物品保持上架。"""
+    seller, item_id, _csrf = await _seller_item(
+        client, title="儿童绘本 30 册", tradeType="FREE_GIFT", priceCents=0)
+    buyer = await register_user(client, PHONE_BUYER)
+    resp = await client.post(f"{C_BASE}/orders", json={"itemId": int(item_id)},
+                             headers=bearer(buyer["token"]))
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40304
+    db_session.expire_all()
+    item = await db_session.get(Item, int(item_id))
+    assert item.status == "ON_SALE"
+
+
+@pytest.mark.asyncio
 async def test_gift_flow(client, db_session):
     """AC-06 赠与：申请→卖家确认→预约→交割闭环；不计入托管（BR-12）。"""
     seller, item_id, _csrf = await _seller_item(
         client, title="儿童绘本 30 册", tradeType="FREE_GIFT", priceCents=0)
-    buyer = await register_user(client, PHONE_BUYER)
+    buyer = await verified_user(client, PHONE_BUYER)
 
     order_data = await create_order(client, buyer["token"], item_id)
     order_id = order_data["orderId"]
