@@ -52,6 +52,10 @@
           right-text="选择"
           @tap="chooseCommunity"
         />
+        <view class="regp__apply-entry" @click="goApplyCommunity">
+          <text class="regp__apply-entry-text">没找到我家小区，申请添加</text>
+          <ni-icon name="chevron" :size="11" state="active" />
+        </view>
       </view>
 
       <ni-button type="primary" size="xl" block :loading="submitting" @tap="completeProfile">
@@ -334,6 +338,10 @@ function onAvatarConfirm(key: string): void {
 
 function chooseCommunity(): void {
   openRegionPicker()
+}
+
+function goApplyCommunity(): void {
+  uni.navigateTo({ url: '/pages/community/apply' })
 }
 
 function intentCommunityPayload(): number | string | undefined {
@@ -697,6 +705,17 @@ function goBack(): void {
   margin-top: 2px;
   font-size: 7px;
   color: $ni-color-text-tertiary;
+}
+.regp__apply-entry {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  margin-top: 9px;
+}
+.regp__apply-entry-text {
+  font-size: $ni-font-9;
+  font-weight: 600;
+  color: $ni-color-primary-dark;
 }
 .regp__privacy {
   flex-direction: row;

@@ -533,7 +533,7 @@ async def test_dashboard_summary_real(client, db_session):
     assert summary["metrics"]["users"] >= 2
     assert summary["metrics"]["gmvCents"] == 0  # 尚无成交
     assert summary["distribution"]["owner"] >= 2
-    assert len(summary["todos"]) == 8
+    assert len(summary["todos"]) == 9
 
     todos = (await client.get(f"{ADMIN_BASE}/dashboard/todos")).json()["data"]
     titles = [todo["title"] for todo in todos]

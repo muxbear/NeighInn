@@ -30,3 +30,22 @@ export function verifyCommunity(id: string, payload: CommunityApplyPayload): Pro
     loading: true,
   })
 }
+
+export interface AddCommunityPayload {
+  name: string
+  regionId: string
+  streetId?: string
+}
+
+export interface AddCommunityResult {
+  id: string
+  name: string
+  regionPath: string
+  status: string
+}
+
+export function applyCommunity(payload: AddCommunityPayload): Promise<AddCommunityResult> {
+  return post<AddCommunityResult>('/communities/apply', payload as unknown as Record<string, any>, {
+    loading: true,
+  })
+}

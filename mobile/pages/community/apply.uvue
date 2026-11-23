@@ -1,0 +1,449 @@
+<template>
+  <scroll-view class="apply" direction="vertical" :show-scrollbar="false" style="flex: 1; height: 1px;">
+    <ni-status-bar />
+    <view class="apply__nav">
+      <view class="apply__nav-button" @click="goBack">
+        <ni-icon name="chevron" :size="19" state="dark" :rotate="180" />
+      </view>
+      <text class="apply__nav-title">申请添加小区</text>
+      <view class="apply__nav-placeholder" />
+    </view>
+
+    <view class="apply__content">
+      <view class="apply__intro">
+        <view class="apply__intro-icon">
+          <ni-icon name="home" :size="18" state="white" />
+        </view>
+        <view class="apply__intro-copy">
+          <text class="apply__intro-title">没找到我家小区？</text>
+          <text class="apply__intro-desc">填写小区所在地区和名称，平台审核通过后即可在小区列表中选择。</text>
+        </view>
+      </view>
+
+      <view class="apply__card">
+        <text class="apply__label">所在地区 <text class="apply__required">*</text></text>
+        <ni-cell
+          icon="pin"
+          icon-state="active"
+          :title="regionTitle"
+          :desc="regionDesc"
+          right-text="选择"
+          @tap="openPicker"
+        />
+
+        <text class="apply__label">小区名称 <text class="apply__required">*</text></text>
+        <ni-input
+          v-model="name"
+          placeholder="请输入小区全称，例如：阳光花园小区"
+          :maxlength="64"
+          prefix-icon="home"
+          :height="50"
+        />
+        <text class="apply__hint">2–64 个字，建议使用物业或门牌上的正式名称，便于审核核对。</text>
+      </view>
+
+      <ni-button type="primary" size="xl" block :loading="submitting" @tap="submit">
+        提交添加申请
+      </ni-button>
+
+      <view class="apply__note">
+        <ni-icon name="shield" :size="13" state="tertiary" />
+        <text class="apply__note-text">提交后申请会进入平台后台「社区运维」待审批列表；审核结果不会自动加入你的入住小区，通过后请回到此处重新搜索选择。</text>
+      </view>
+    </view>
+
+    <ni-sheet v-model:visible="pickerVisible" title="选择所在地区" height="70vh">
+      <view class="picker">
+        <view v-if="crumbs.length" class="picker__crumbs">
+          <view
+            v-for="(crumb, index) in crumbs"
+            :key="crumb.level"
+            class="picker__crumb"
+            @click="jumpTo(index)"
+          >
+            <text class="picker__crumb-text">{{ crumb.label }}</text>
+            <ni-icon name="chevron" :size="9" state="tertiary" />
+          </view>
+        </view>
+        <text class="picker__hint">{{ levelHint }}</text>
+
+        <view v-if="loading" class="picker__loading">
+          <ni-loading :size="20" text="正在加载区划" />
+        </view>
+        <template v-else>
+          <view v-if="level === 'street'" class="picker__skip" @click="skipStreet">
+            <view class="picker__skip-copy">
+              <text class="picker__skip-title">暂不选择街道</text>
+              <text class="picker__skip-desc">直接使用当前区县提交申请</text>
+            </view>
+            <ni-icon name="check" :size="14" state="green" />
+          </view>
+          <view
+            v-for="node in options"
+            :key="node.id"
+            class="picker__option"
+            @click="chooseNode(node)"
+          >
+            <text class="picker__option-name">{{ node.name }}</text>
+            <ni-icon name="chevron" :size="14" state="tertiary" />
+          </view>
+          <ni-empty
+            v-if="!options.length"
+            icon="pin"
+            title="暂无区划数据"
+            desc="请返回选择上一级地区"
+          />
+        </template>
+      </view>
+    </ni-sheet>
+
+    <ni-toast :visible="toast.visible" :text="toast.text" :icon="toast.icon" :bottom="40" />
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import type { RegionNode } from '../../models'
+import { communityService } from '../../services/community.service'
+import { useUserStore } from '../../stores/user.store'
+import { useToast } from '../../composables/useToast'
+import { ApiError } from '../../api/errors'
+
+type PickerLevel = 'province' | 'city' | 'district' | 'street'
+
+const user = useUserStore()
+const { toast, showToast } = useToast()
+
+const name = ref('')
+const submitting = ref(false)
+const pickerVisible = ref(false)
+const loading = ref(false)
+const level = ref<PickerLevel>('province')
+const options = ref<RegionNode[]>([])
+const province = ref<RegionNode | null>(null)
+const city = ref<RegionNode | null>(null)
+const district = ref<RegionNode | null>(null)
+const street = ref<RegionNode | null>(null)
+
+const crumbs = computed(() => {
+  const list: { label: string; level: PickerLevel }[] = []
+  if (province.value) list.push({ label: province.value.name, level: 'province' })
+  if (city.value) list.push({ label: city.value.name, level: 'city' })
+  if (district.value) list.push({ label: district.value.name, level: 'district' })
+  if (street.value) list.push({ label: street.value.name, level: 'street' })
+  return list
+})
+
+const regionPath = computed(() =>
+  [province.value?.name, city.value?.name, district.value?.name]
+    .filter(Boolean)
+    .join(' / '),
+)
+const regionTitle = computed(() => regionPath.value || '请选择省/市/区县')
+const regionDesc = computed(() =>
+  street.value ? `街道：${street.value.name}` : '街道为选填，不确定可直接用区县提交',
+)
+const levelHint = computed(() => {
+  if (level.value === 'province') return '请选择小区所在的省份/直辖市'
+  if (level.value === 'city') return '请选择小区所在的地市'
+  if (level.value === 'district') return '请选择小区所在的区/县'
+  return '可选择街道缩小范围，也可直接使用当前区县'
+})
+
+onLoad(() => {
+  if (!user.isLoggedIn) {
+    uni.redirectTo({ url: '/pages/auth/login' })
+  }
+})
+
+async function loadChildren(parentId: string): Promise<void> {
+  loading.value = true
+  try {
+    options.value = await communityService.getRegionChildren(parentId)
+  } catch (error) {
+    options.value = []
+    showToast(error instanceof Error ? error.message : '区划加载失败', 'alert')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function openPicker(): Promise<void> {
+  province.value = null
+  city.value = null
+  district.value = null
+  street.value = null
+  level.value = 'province'
+  pickerVisible.value = true
+  await loadChildren('')
+}
+
+async function chooseNode(node: RegionNode): Promise<void> {
+  if (level.value === 'province') {
+    province.value = node
+    city.value = null
+    district.value = null
+    street.value = null
+    level.value = 'city'
+    await loadChildren(node.id)
+    return
+  }
+  if (level.value === 'city') {
+    city.value = node
+    district.value = null
+    street.value = null
+    level.value = 'district'
+    await loadChildren(node.id)
+    return
+  }
+  if (level.value === 'district') {
+    district.value = node
+    street.value = null
+    level.value = 'street'
+    await loadChildren(node.id)
+    return
+  }
+  street.value = node
+  pickerVisible.value = false
+}
+
+function skipStreet(): void {
+  street.value = null
+  pickerVisible.value = false
+}
+
+async function jumpTo(index: number): Promise<void> {
+  const target = crumbs.value[index]
+  if (!target) return
+  if (target.level === 'province') {
+    city.value = null
+    district.value = null
+    street.value = null
+    level.value = 'city'
+    await loadChildren(province.value?.id || '')
+  } else if (target.level === 'city') {
+    district.value = null
+    street.value = null
+    level.value = 'district'
+    await loadChildren(city.value?.id || '')
+  } else if (target.level === 'district') {
+    street.value = null
+    level.value = 'street'
+    await loadChildren(district.value?.id || '')
+  }
+}
+
+async function submit(): Promise<void> {
+  if (submitting.value) return
+  const value = name.value.trim()
+  if (!district.value) {
+    showToast('请选择小区所在区/县', 'alert')
+    return
+  }
+  if (value.length < 2) {
+    showToast('请输入完整的小区名称', 'alert')
+    return
+  }
+  submitting.value = true
+  try {
+    await communityService.apply({
+      name: value,
+      regionId: district.value.id,
+      streetId: street.value?.id,
+    })
+    uni.showModal({
+      title: '申请已提交',
+      content: '平台审核通过后，即可在「选择入住小区」中搜索到该小区。',
+      showCancel: false,
+      confirmText: '我知道了',
+      success: () => {
+        uni.navigateBack({ delta: 1 })
+      },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 40901) {
+      showToast(error.message || '该小区已存在或已提交申请', 'alert')
+      return
+    }
+    showToast(error instanceof Error ? error.message : '提交失败，请稍后重试', 'alert')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function goBack(): void {
+  uni.navigateBack({ delta: 1 })
+}
+</script>
+
+<style scoped lang="scss">
+.apply {
+  flex: 1;
+  height: 1px;
+  background-color: $ni-color-page;
+}
+.apply__nav {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 10px;
+  padding-right: 10px;
+  background-color: $ni-color-white;
+  border-bottom: 1px solid #f0ece8;
+}
+.apply__nav-button {
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+}
+.apply__nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: $ni-font-16;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.apply__nav-placeholder {
+  width: 42px;
+}
+.apply__content {
+  padding: 14px;
+  padding-bottom: 40px;
+}
+.apply__intro {
+  flex-direction: row;
+  align-items: center;
+  padding: 14px;
+  border-radius: $ni-radius-16;
+  background-image: $ni-gradient-brand;
+}
+.apply__intro-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.22);
+  align-items: center;
+  justify-content: center;
+}
+.apply__intro-copy {
+  flex: 1;
+  margin-left: 10px;
+}
+.apply__intro-title {
+  font-size: $ni-font-13;
+  font-weight: 700;
+  color: #ffffff;
+}
+.apply__intro-desc {
+  margin-top: 3px;
+  font-size: $ni-font-8;
+  line-height: 14px;
+  color: rgba(255, 255, 255, 0.92);
+}
+.apply__card {
+  margin-top: 12px;
+  margin-bottom: 16px;
+  padding: 15px;
+  border-radius: $ni-radius-18;
+  background-color: $ni-color-white;
+  box-shadow: $ni-shadow-card;
+}
+.apply__label {
+  margin-top: 14px;
+  margin-bottom: 8px;
+  font-size: $ni-font-11;
+  font-weight: 700;
+  color: $ni-color-text-primary;
+}
+.apply__required {
+  color: $ni-color-danger-deep;
+}
+.apply__hint {
+  margin-top: 7px;
+  font-size: 7px;
+  line-height: 13px;
+  color: $ni-color-text-tertiary;
+}
+.apply__note {
+  margin-top: 14px;
+  flex-direction: row;
+  align-items: flex-start;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.apply__note-text {
+  flex: 1;
+  margin-left: 4px;
+  font-size: 7px;
+  line-height: 13px;
+  color: $ni-color-text-tertiary;
+}
+.picker {
+  padding: 12px 14px 24px;
+}
+.picker__crumbs {
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.picker__crumb {
+  flex-direction: row;
+  align-items: center;
+  margin-right: 4px;
+  margin-bottom: 4px;
+  padding-left: 8px;
+  padding-right: 8px;
+  height: 24px;
+  border-radius: 8px;
+  background-color: $ni-color-primary-bg;
+}
+.picker__crumb-text {
+  font-size: $ni-font-8;
+  color: $ni-color-primary-dark;
+}
+.picker__hint {
+  margin-bottom: 8px;
+  font-size: $ni-font-8;
+  color: $ni-color-text-tertiary;
+}
+.picker__loading {
+  padding-top: 30px;
+  align-items: center;
+}
+.picker__skip {
+  flex-direction: row;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: $ni-radius-12;
+  background-color: $ni-color-gift-bg;
+}
+.picker__skip-copy {
+  flex: 1;
+}
+.picker__skip-title {
+  font-size: $ni-font-11;
+  font-weight: 600;
+  color: $ni-color-gift-deep;
+}
+.picker__skip-desc {
+  margin-top: 2px;
+  font-size: 7px;
+  color: $ni-color-gift-deep;
+}
+.picker__option {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  height: 46px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-bottom: 1px solid $ni-color-divider;
+}
+.picker__option-name {
+  font-size: $ni-font-11;
+  color: $ni-color-text-primary;
+}
+</style>

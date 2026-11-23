@@ -10,7 +10,12 @@ from sqlalchemy import and_, case, func, or_, select
 from src.api.utils import epoch_ms
 from src.core.config import settings
 from src.core.deps import CurrentAdmin, DbSession
-from src.core.permissions import assert_community_allowed, get_permission_codes
+from src.core.permissions import (
+    allowed_community_ids,
+    assert_community_allowed,
+    community_scope_conditions,
+    get_permission_codes,
+)
 from src.core.responses import ERR_NOT_FOUND, ApiError, not_implemented, ok
 from src.db.models import (
     Broadcast,
@@ -268,6 +273,13 @@ async def _todos(db: DbSession, admin: CurrentAdmin,
         select(HelpRequest.community_id)
         .where(*service_filters)
         .order_by(HelpRequest.id.desc()).limit(1))
+    # 移动端「申请添加小区」：社区档案 PENDING 即待审批（数据范围内计数）。
+    app_allowed = await allowed_community_ids(db, admin)
+    app_filters = [Community.status == "PENDING",
+                   *community_scope_conditions(app_allowed, Community.id)]
+    pending_community_apps = await _count(db, Community, *app_filters)
+    oldest_app_at = await db.scalar(
+        select(func.min(Community.updated_at)).where(*app_filters))
 
     cert_desc = (
         f"实名 {cert_breakdown.get('REALNAME', 0)} 项 · "
@@ -275,6 +287,12 @@ async def _todos(db: DbSession, admin: CurrentAdmin,
         if pending_certs else "暂无待审核认证"
     )
     todos = [
+        {"key": "community_application", "icon": "MapPin", "color": "green",
+         "title": "小区添加待审批", "description": "移动端提交的小区添加申请",
+         "count": pending_community_apps,
+         "route": "/community-management/maintenance?status=PENDING",
+         "permission": "community:maintenance:view",
+         "oldestPendingAt": epoch_ms(oldest_app_at)},
         {"key": "certification", "icon": "ClipboardCheck", "color": "blue",
          "title": "住户认证待审核", "description": cert_desc,
          "count": pending_certs, "route": "/governance/verification",

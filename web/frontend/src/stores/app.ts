@@ -35,7 +35,10 @@ export const useAppStore = defineStore('app', {
     },
     async loadCommunities() {
       const data = await communityApi.list({ page: 1, pageSize: 50 })
-      this.communities = data.items ?? []
+      // 待审批/已驳回的小区不是运营空间，不能出现在顶部社区切换里。
+      this.communities = (data.items ?? []).filter(
+        (item: any) => !['PENDING', 'REJECTED'].includes(String(item.statusCode || item.status || '')),
+      )
       if (!this.communities.some((item: any) => Number(item.id) === this.currentCommunityId)) {
         // 当前社区可能不在前 50 条内（刚创建或分页之外）：按 ID 补取详情后再决定是否回退。
         try {

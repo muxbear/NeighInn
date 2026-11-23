@@ -147,6 +147,8 @@ export const communityApi = {
   update: (id: number | string, payload: Dict) => http.put<any, any>(`/communities/${id}`, payload),
   remove: (id: number | string) => http.delete<any, any>(`/communities/${id}`),
   importRows: (payload: Dict) => http.post<any, any>('/communities/import', payload),
+  review: (id: number | string, decision: 'APPROVE' | 'REJECT', note = '') =>
+    http.post<any, any>(`/communities/${id}/review`, { decision, note }),
   regionTree: async (): Promise<any[]> => {
     if (regionTreeMemory) return regionTreeMemory
     const cached = readCachedRegionTree()

@@ -1,4 +1,5 @@
 import * as communityApi from '../api/community.api'
+import type { AddCommunityPayload, AddCommunityResult } from '../api/community.api'
 import type {
   CommunityApplyPayload,
   CommunityBinding,
@@ -30,6 +31,10 @@ export const communityService = {
 
   getRegionChildren(parentId = ''): Promise<RegionNode[]> {
     return communityApi.getRegionChildren(parentId)
+  },
+
+  apply(payload: AddCommunityPayload): Promise<AddCommunityResult> {
+    return communityApi.applyCommunity(payload)
   },
 
   verify(id: string, payload: CommunityApplyPayload): Promise<CommunityVerifyResult> {

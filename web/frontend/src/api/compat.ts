@@ -222,7 +222,11 @@ export function normalizeAudit(row: any): any {
 }
 
 export function normalizeCommunity(row: any): any {
-  return { ...row, status: mapStatus(row.status), statusCode: row.status }
+  const labels: Record<string, string> = {
+    OPERATING: '正常运营', PREPARING: '筹备中', SUSPENDED: '已停用',
+    PENDING: '待审批', REJECTED: '已驳回',
+  }
+  return { ...row, status: labels[row.status] ?? mapStatus(row.status), statusCode: row.status }
 }
 
 export function normalizeCertification(row: any): any {

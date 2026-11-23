@@ -111,6 +111,13 @@
       }
     },
     {
+      "path": "pages/community/apply",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#FAF8F5"
+      }
+    },
+    {
       "path": "pages/profile/edit",
       "style": {
         "navigationStyle": "custom",

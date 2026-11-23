@@ -370,7 +370,9 @@ async function runLinkCommunitySearch() {
     else if (linkCityId.value) params.cityId = linkCityId.value
     const data = await communityApi.list(params)
     if (requestId !== linkCommunityRequestId) return
-    linkCommunityResults.value = data.items || []
+    linkCommunityResults.value = (data.items || []).filter(
+      (row: any) => !['PENDING', 'REJECTED'].includes(String(row.statusCode || row.status || '')),
+    )
   } catch (exc: any) {
     if (requestId !== linkCommunityRequestId) return
     linkCommunityResults.value = []

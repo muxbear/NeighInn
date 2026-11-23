@@ -162,7 +162,7 @@ async def test_todos_only_expose_actionable_modules(client):
         params={"communityId": 1}, headers=csrf)).json()["data"]
     keys = {item["key"] for item in todos}
     assert keys == {
-        "certification", "item", "life", "report", "dispute",
+        "community_application", "certification", "item", "life", "report", "dispute",
         "withdrawal", "help", "help_service",
     }
     assert "repair" not in keys and "feedback" not in keys

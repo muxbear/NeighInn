@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -81,11 +82,13 @@ class CommunityImportIn(BaseModel):
     items: list[CommunityImportRow]
 
 
-VALID_COMMUNITY_STATUS = ("OPERATING", "PREPARING", "SUSPENDED")
+VALID_COMMUNITY_STATUS = ("OPERATING", "PREPARING", "SUSPENDED", "PENDING", "REJECTED")
 STATUS_ALIASES = {
     "正常运营": "OPERATING", "运营中": "OPERATING", "OPERATING": "OPERATING",
     "筹备中": "PREPARING", "PREPARING": "PREPARING",
     "已停用": "SUSPENDED", "停用": "SUSPENDED", "SUSPENDED": "SUSPENDED",
+    "待审批": "PENDING", "PENDING": "PENDING",
+    "已驳回": "REJECTED", "REJECTED": "REJECTED",
 }
 
 
@@ -418,6 +421,43 @@ async def update_community(community_id: int, payload: CommunityIn,
                       before=before, after=_row(community))
     await db.commit()
     return ok(_row(community), "社区已更新")
+
+
+class CommunityReviewIn(BaseModel):
+    decision: str  # APPROVE / REJECT
+    note: str = ""
+
+
+@router.post("/communities/{community_id}/review",
+             dependencies=[Depends(require_permission("community:maintenance:update"))])
+async def review_community(community_id: int, payload: CommunityReviewIn,
+                           request: Request, admin: CurrentAdmin, db: DbSession):
+    """审批移动端提交的小区添加申请：通过后状态转正常运营，C 端立即可选。"""
+    community = await db.get(Community, community_id)
+    if not community:
+        raise ApiError(ERR_NOT_FOUND, "社区不存在", 404)
+    await resolve_community_scope(db, admin, community.id)
+    if community.status != "PENDING":
+        raise ApiError(ERR_PARAM, "该社区不在待审批状态", 422)
+    decision = (payload.decision or "").upper()
+    if decision not in ("APPROVE", "REJECT"):
+        raise ApiError(ERR_PARAM, "审批结论不合法", 400)
+    before = _row(community)
+    if decision == "APPROVE":
+        community.status = "OPERATING"
+        community.opened_at = community.opened_at or datetime.now(UTC).date()
+        message = "社区申请已通过，移动端可立即选择"
+    else:
+        community.status = "REJECTED"
+        message = "社区申请已驳回"
+    await write_audit(
+        db, request, actor=admin,
+        action=f"community.application.{decision.lower()}",
+        resource_type="community", resource_id=community.id,
+        before=before, after={**_row(community), "note": payload.note.strip()[:200]},
+    )
+    await db.commit()
+    return ok(_row(community), message)
 
 
 @router.delete("/communities/{community_id}",

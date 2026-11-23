@@ -155,7 +155,10 @@ async function runCommunitySearch(keyword: string) {
     else if (cityId.value) params.cityId = cityId.value
     const data = await communityApi.list(params)
     if (requestId !== communitySearchRequestId) return
-    communityResults.value = data.items || []
+    // 待审批/已驳回的小区不是运营空间，筛选栏里不可选。
+    communityResults.value = (data.items || []).filter(
+      (row: any) => !['PENDING', 'REJECTED'].includes(String(row.statusCode || row.status || '')),
+    )
   } catch (exc: any) {
     if (requestId === communitySearchRequestId) {
       communityResults.value = []

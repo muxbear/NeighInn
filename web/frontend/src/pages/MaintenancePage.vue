@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { Building2, ChevronRight, Download, Filter, Folder, FolderOpen, Home, Map, MapPin, Pencil, Plus, Search, Trash2, Upload } from 'lucide-vue-next'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Building2, Check, ChevronRight, Download, Filter, Folder, FolderOpen, Home, Map, MapPin, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import { communityApi } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useTodoStore } from '@/stores/todos'
 import { useConfirm } from '@/composables/useConfirm'
 import StatusBadge from '@/components/StatusBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -11,7 +13,12 @@ import { formatDateTime } from '@/utils/format'
 import { groupProvinces } from '@/utils/region'
 
 const app = useAppStore()
+const todos = useTodoStore()
+const route = useRoute()
+const router = useRouter()
 const { confirm } = useConfirm()
+const statusFilter = computed(() => String(route.query.status || '').toUpperCase())
+const isPendingView = computed(() => statusFilter.value === 'PENDING')
 const regionRoots = ref<any[]>([])
 const childrenByParent = reactive<Record<string, any[]>>({})
 const cityLoading = reactive<Record<string, boolean>>({})
@@ -35,6 +42,8 @@ const STATUS_OPTIONS = [
   { value: 'OPERATING', label: '正常运营' },
   { value: 'PREPARING', label: '筹备中' },
   { value: 'SUSPENDED', label: '已停用' },
+  { value: 'PENDING', label: '待审批' },
+  { value: 'REJECTED', label: '已驳回' },
 ]
 
 const formOpen = ref(false)
@@ -220,9 +229,13 @@ async function loadCommunities(): Promise<void> {
   loading.value = true
   try {
     const params: any = { keyword: query.value, page: page.value, pageSize: 10 }
-    if (currentCity.value?.id) params.cityId = currentCity.value.id
-    const street = streetNodes.value.find((item: any) => item.name === selectedStreetName.value)
-    if (street) params.streetId = street.id
+    // 待审批视图是跨地市的工作队列：忽略左侧区划筛选，避免申请落在其他城市时看不到。
+    if (statusFilter.value) params.status = statusFilter.value
+    if (!statusFilter.value) {
+      if (currentCity.value?.id) params.cityId = currentCity.value.id
+      const street = streetNodes.value.find((item: any) => item.name === selectedStreetName.value)
+      if (street) params.streetId = street.id
+    }
     const data = await communityApi.list(params)
     communities.value = data.items || []
     total.value = data.total || 0
@@ -230,6 +243,37 @@ async function loadCommunities(): Promise<void> {
     app.showToast(exc?.message || '社区目录加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+function clearStatusFilter(): void {
+  router.push('/community-management/maintenance')
+}
+
+watch(() => route.query.status, () => {
+  page.value = 1
+  loadCommunities()
+})
+
+async function reviewCommunity(row: any, decision: 'APPROVE' | 'REJECT'): Promise<void> {
+  const approve = decision === 'APPROVE'
+  const agreed = await confirm({
+    title: approve ? '通过小区申请' : '驳回小区申请',
+    message: approve
+      ? `确定通过“${row.name}”的添加申请吗？通过后移动端小区列表立即可选。`
+      : `确定驳回“${row.name}”的添加申请吗？驳回后该申请不会生效。`,
+    confirmText: approve ? '通过' : '驳回',
+    danger: !approve,
+  })
+  if (!agreed) return
+  try {
+    await communityApi.review(row.id, decision)
+    app.showToast(approve ? '已通过，小区已生效' : '已驳回该申请')
+    await loadCommunities()
+    await refreshSharedCommunities()
+    todos.refresh().catch(() => undefined)
+  } catch (exc: any) {
+    app.showToast(exc?.message || '审批失败')
   }
 }
 
@@ -677,15 +721,23 @@ onMounted(loadRegions)
         <div class="city-overview"><span><strong>{{ districtNodes.length }}</strong> 个区县</span><i /><span><strong>{{ cityStreetCount }}</strong> 个街道</span><i /><span><strong>{{ total }}</strong> 个社区</span></div>
         <button class="community-import-button" @click="openImport"><Upload :size="16" />批量导入</button>
       </div>
+      <div v-if="isPendingView" class="community-review-banner">
+        <div>
+          <strong>待审批的小区添加申请</strong>
+          <span>移动端提交的小区申请（跨地市汇总）。通过后移动端小区列表立即可选，驳回后不生效。</span>
+        </div>
+        <button @click="clearStatusFilter">查看全部社区</button>
+      </div>
       <div class="community-location-filters">
         <div class="location-path"><MapPin :size="16" /><span>{{ selectedProvinceName }}</span><ChevronRight :size="13" /><strong>{{ selectedCityName }}</strong></div>
         <label><select v-model="selectedDistrictName" aria-label="所在区县" :disabled="districtLoading || !districtNodes.length" @change="selectDistrict(selectedDistrictName)"><option v-if="districtLoading" value="">加载中…</option><option v-for="district in districtNodes" :key="district.id">{{ district.name }}</option></select></label>
         <label><select :value="selectedStreetName" aria-label="所在街道" :disabled="streetLoading || !streetNodes.length" @change="selectStreet"><option value="">全部街道</option><option v-if="streetLoading" value="__loading" disabled>加载中…</option><option v-for="street in streetNodes" :key="street.id">{{ street.name }}</option></select></label>
       </div>
       <div class="community-table-toolbar">
-        <div><h3>{{ selectedStreetName || '全部' }}社区列表</h3><span>共 {{ total }} 个社区</span></div>
+        <div><h3>{{ isPendingView ? '待审批小区申请' : (selectedStreetName || '全部') + '社区列表' }}</h3><span>共 {{ total }} 个社区</span></div>
         <div>
           <div class="table-search"><Search :size="16" /><input v-model="query" placeholder="搜索社区名称或编码…" @keyup.enter="loadCommunities" /></div>
+          <button v-if="!isPendingView" class="community-review-entry" @click="router.push('/community-management/maintenance?status=PENDING')">待审批申请</button>
           <button @click="loadCommunities"><Filter :size="15" />筛选</button>
           <button @click="openImport"><Upload :size="15" />批量导入</button>
           <button class="primary-button" @click="openCreate"><Plus :size="15" />新增社区</button>
@@ -702,8 +754,14 @@ onMounted(loadRegions)
               <td>{{ row.managerName }}</td><td><StatusBadge :value="row.status" /></td><td>{{ formatDateTime(row.updatedAt) }}</td>
               <td>
                 <div class="row-actions">
-                  <button class="row-icon-button" aria-label="编辑社区" data-tip="编辑社区" @click="openEdit(row)"><Pencil :size="15" /></button>
-                  <button class="row-icon-button danger" aria-label="删除社区" data-tip="删除社区" @click="removeCommunity(row)"><Trash2 :size="15" /></button>
+                  <template v-if="row.statusCode === 'PENDING'">
+                    <button class="row-icon-button" aria-label="通过申请" data-tip="通过申请" @click="reviewCommunity(row, 'APPROVE')"><Check :size="15" /></button>
+                    <button class="row-icon-button danger" aria-label="驳回申请" data-tip="驳回申请" @click="reviewCommunity(row, 'REJECT')"><X :size="15" /></button>
+                  </template>
+                  <template v-else>
+                    <button class="row-icon-button" aria-label="编辑社区" data-tip="编辑社区" @click="openEdit(row)"><Pencil :size="15" /></button>
+                    <button class="row-icon-button danger" aria-label="删除社区" data-tip="删除社区" @click="removeCommunity(row)"><Trash2 :size="15" /></button>
+                  </template>
                 </div>
               </td>
             </tr>

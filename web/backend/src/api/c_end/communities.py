@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 
 from src.core.config import settings
 from src.core.deps import CurrentUser, DbSession
-from src.core.responses import ok
+from src.core.responses import ERR_CONFLICT, ERR_PARAM, ApiError, ok
 from src.db.models import Community, HelpRequest, Item, Region, Resident
 from src.services.auth_service import browse_resident
 
@@ -190,3 +193,85 @@ async def search_communities(
     rows = list((await db.execute(stmt.order_by(Community.id).limit(50))).scalars().all())
     regions = await _region_lookup(db)
     return ok([await _to_binding(db, community, None, regions=regions) for community in rows])
+
+
+class CommunityApplyIn(BaseModel):
+    name: str
+    regionId: int
+    streetId: int | None = None
+
+
+async def _region_path_names(db: DbSession, node: Region) -> list[str]:
+    """区县/街道 → 省-市-区县(-街道) 名称链，用于生成申请记录地址。"""
+    names: list[str] = []
+    current: Region | None = node
+    guard = 0
+    while current is not None and guard < 8:
+        names.append(current.name)
+        current = await db.get(Region, current.parent_id) if current.parent_id else None
+        guard += 1
+    names.reverse()
+    # 直辖市省、市同名时去重相邻项。
+    result: list[str] = []
+    for name in names:
+        if not result or result[-1] != name:
+            result.append(name)
+    return result
+
+
+async def _generate_applied_community_code(db: DbSession, region: Region) -> str:
+    prefix = region.code[:6] if region.code else "000000"
+    for _ in range(8):
+        code = f"SQ{prefix}{uuid4().hex[:6].upper()}"
+        if not await db.scalar(select(Community.id).where(Community.code == code)):
+            return code
+    raise ApiError(ERR_PARAM, "小区编码生成失败，请稍后重试", 500)
+
+
+@router.post("/communities/apply")
+async def apply_community(payload: CommunityApplyIn, user: CurrentUser, db: DbSession):
+    """移动端申请添加小区：落一条 PENDING 社区档案，后台「社区运维」审批后生效。
+
+    审核前状态为 PENDING，C 端列表/搜索只取 OPERATING，因此不会提前出现在小区选择里。
+    """
+    name = (payload.name or "").strip()
+    if not (2 <= len(name) <= 64):
+        raise ApiError(ERR_PARAM, "小区名称需 2–64 个字", 400)
+    region = await db.get(Region, payload.regionId) if payload.regionId else None
+    if region is None or region.level != "DISTRICT":
+        raise ApiError(ERR_PARAM, "请选择所在区/县", 400)
+    street = await db.get(Region, payload.streetId) if payload.streetId else None
+    if payload.streetId and (street is None or street.parent_id != region.id):
+        raise ApiError(ERR_PARAM, "所选街道不属于该区县", 400)
+
+    existing = await db.scalar(
+        select(Community).where(
+            Community.region_id == region.id,
+            Community.name == name,
+            Community.status != "REJECTED",
+        ).limit(1)
+    )
+    if existing is not None:
+        if existing.status == "PENDING":
+            raise ApiError(ERR_CONFLICT, "该小区已提交添加申请，请等待审核结果", 409)
+        raise ApiError(ERR_CONFLICT, "该小区已在平台收录，请直接搜索选择", 409)
+
+    path_names = await _region_path_names(db, street or region)
+    community = Community(
+        region_id=region.id,
+        street_id=street.id if street else None,
+        name=name,
+        code=await _generate_applied_community_code(db, region),
+        type="商品房社区",
+        address=" ".join(path_names),
+        status="PENDING",
+    )
+    db.add(community)
+    await db.commit()
+    await db.refresh(community)
+    return ok({
+        "id": str(community.id),
+        "name": community.name,
+        "regionPath": community.address,
+        "status": community.status,
+    }, "申请已提交，平台审核通过后即可选择该小区")

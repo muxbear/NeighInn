@@ -670,7 +670,9 @@ async function loadPickerCommunities(reset = false) {
   try {
     const data = await communityApi.list(params)
     if (requestId !== pickerRequestId) return
-    const items = data?.items || []
+    const items = (data?.items || []).filter(
+      (row: any) => !['PENDING', 'REJECTED'].includes(String(row.statusCode || row.status || '')),
+    )
     pickerTotal.value = Number(data?.total || 0)
     pickerCommunities.value = reset ? items : pickerCommunities.value.concat(items)
   } catch (exc: any) {
