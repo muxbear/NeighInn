@@ -232,3 +232,47 @@ async def test_super_admin_scope_is_read_only(client, db_session):
         json={"regionIds": [], "communityIds": []}, headers=csrf)
     assert resp.status_code == 422, resp.text
     assert resp.json()["code"] == 42201
+
+
+@pytest.mark.asyncio
+async def test_scoped_region_tree_only_managed_communities(client, db_session):
+    """筛选区划树按社区范围裁剪：只保留可管理社区所在的区县/街道及上级节点。"""
+    csrf = await admin_login(client)
+    role_id = await _role_id(client, csrf, "community_admin")
+    admin_id = await _create_admin(client, csrf, "scope_tree", [role_id])
+
+    xihu = await _region_id(db_session, "330106")
+    lake = await _community_id(db_session, "SQ3301020001")
+    resp = await client.put(
+        f"{ADMIN_BASE}/admin-users/{admin_id}/community-scope",
+        json={"regionIds": [xihu], "communityIds": [lake]},
+        headers=csrf,
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.post(f"{ADMIN_BASE}/auth/login", json={
+        "username": "scope_tree", "password": SCOPE_PASSWORD,
+    })
+    assert resp.status_code == 200, resp.text
+
+    tree = (await client.get(
+        f"{ADMIN_BASE}/regions/tree", params={"scoped": "true"})).json()["data"]
+    assert [node["code"] for node in tree] == ["330000"]
+    zhejiang = tree[0]
+    assert [node["code"] for node in zhejiang["children"]] == ["330100"]
+    hangzhou = zhejiang["children"][0]
+    district_codes = {node["code"] for node in hangzhou["children"]}
+    assert {"330106", "330102"} <= district_codes
+    assert "330105" not in district_codes  # 小河佳苑社区不在该账号范围内
+
+    shangcheng = next(node for node in hangzhou["children"] if node["code"] == "330102")
+    assert [node["code"] for node in shangcheng["children"]] == ["330102001"]
+    xihu_node = next(node for node in hangzhou["children"] if node["code"] == "330106")
+    assert "330106001" in {node["code"] for node in xihu_node["children"]}
+
+    # 超级管理员仍拿到全量区划树。
+    await admin_login(client)
+    full = (await client.get(
+        f"{ADMIN_BASE}/regions/tree", params={"scoped": "true"})).json()["data"]
+    assert len(full) == 31
+    assert "110000" in {node["code"] for node in full}

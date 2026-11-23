@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronRight, Home, MapPin, Search, X } from 'lucide-vue-next'
 import { communityApi } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { groupProvinces, indexRegions, type RegionEntry, type RegionNode } from '@/utils/region'
 
 withDefaults(defineProps<{
@@ -13,6 +14,11 @@ withDefaults(defineProps<{
 })
 
 const app = useAppStore()
+const auth = useAuthStore()
+// 区划树按账号数据范围裁剪；账号/范围变化时重新拉取，避免沿用上一个账号的树。
+const regionScopeKey = computed(
+  () => `${auth.admin?.id ?? ''}:${auth.admin?.dataScope ?? ''}:${auth.admin?.communities?.length ?? 0}`,
+)
 const regionRoots = ref<RegionNode[]>([])
 const regionIndex = ref<Record<string, RegionEntry>>({})
 const regionLoading = ref(false)
@@ -58,7 +64,7 @@ function ensureRegionTree(): Promise<void> {
   if (regionTreePromise) return regionTreePromise
   regionLoading.value = true
   regionError.value = ''
-  regionTreePromise = communityApi.regionTree()
+  regionTreePromise = communityApi.regionScopeTree(regionScopeKey.value)
     .then((roots) => {
       regionRoots.value = roots as RegionNode[]
       regionIndex.value = indexRegions(roots as RegionNode[])
@@ -225,6 +231,14 @@ watch(() => app.currentCommunityId, async () => {
 watch(() => app.communities.length, async () => {
   if (!regionRoots.value.length) return
   await refreshSelectedCommunityRow()
+  syncCascadeFromCommunity()
+})
+// 账号或数据范围变化（同标签页切换后台账号）时，按新范围重拉区划树。
+watch(regionScopeKey, async () => {
+  regionRoots.value = []
+  regionIndex.value = {}
+  regionTreePromise = null
+  await ensureRegionTree()
   syncCascadeFromCommunity()
 })
 </script>

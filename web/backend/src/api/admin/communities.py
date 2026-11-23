@@ -12,6 +12,7 @@ from src.api.utils import paginate
 from src.core.audit import write_audit
 from src.core.deps import CurrentAdmin, DbSession
 from src.core.permissions import (
+    allowed_community_ids,
     community_scope_conditions,
     require_permission,
     resolve_community_scope,
@@ -221,14 +222,45 @@ async def _region_children_payload(db: DbSession, parent_id: int | None) -> list
 
 
 @router.get("/regions/tree")
-async def region_tree(admin: CurrentAdmin, db: DbSession):
-    """完整区划树（兼容旧客户端）；社区运维页面改用 roots/children 分级加载。"""
+async def region_tree(admin: CurrentAdmin, db: DbSession,
+                      scoped: bool = Query(default=False)):
+    """完整区划树（兼容旧客户端）；社区运维页面改用 roots/children 分级加载。
+
+    ``scoped=true`` 时按后台账号的社区数据范围裁剪：只保留其可管理社区所在的
+    区县/街道及其上级节点，供筛选栏四级联动使用（超级管理员仍返回全量）。
+    """
     rows = list((await db.execute(select(Region).order_by(Region.sort, Region.id))).scalars().all())
+    keep_ids: set[int] | None = None
+    if scoped:
+        allowed = await allowed_community_ids(db, admin)
+        if allowed is not None:
+            by_id = {row.id: row for row in rows}
+            seeds: set[int] = set()
+            if allowed:
+                pairs = (await db.execute(
+                    select(Community.region_id, Community.street_id)
+                    .where(Community.id.in_(allowed))
+                )).all()
+                for region_id, street_id in pairs:
+                    if region_id:
+                        seeds.add(int(region_id))
+                    if street_id:
+                        seeds.add(int(street_id))
+            keep_ids = set(seeds)
+            # 补齐所有上级节点，保证裁剪后的树从省到街道连续。
+            for seed in seeds:
+                current = by_id.get(seed)
+                while current is not None and current.parent_id:
+                    keep_ids.add(int(current.parent_id))
+                    current = by_id.get(int(current.parent_id))
     nodes = {row.id: {"id": str(row.id), "name": row.name, "level": row.level,
-                      "code": row.code, "children": []} for row in rows}
+                      "code": row.code, "children": []} for row in rows
+             if keep_ids is None or row.id in keep_ids}
     roots: list[dict] = []
     for row in rows:
-        node = nodes[row.id]
+        node = nodes.get(row.id)
+        if node is None:
+            continue
         if row.parent_id and row.parent_id in nodes:
             nodes[row.parent_id]["children"].append(node)
         else:

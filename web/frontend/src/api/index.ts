@@ -52,6 +52,7 @@ const REGION_CHILDREN_CACHE_PREFIX = 'ni_admin_region_children_v3_'
 const REGION_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 let regionRootsMemory: any[] | null = null
 let regionTreeMemory: any[] | null = null
+let regionScopeTreeMemory: { key: string; tree: any[] } | null = null
 const regionChildrenMemory = new Map<string, any[]>()
 
 // 升级时清理旧版区划缓存：旧树可能缺少下级区划，且大对象会挤占 sessionStorage 配额。
@@ -158,6 +159,16 @@ export const communityApi = {
     writeCachedRegionTree(tree)
     return tree
   },
+  /**
+   * 按当前后台账号数据范围裁剪过的区划树（只含可管理社区所在的区划）。
+   * 缓存按账号区分，避免同标签页切换账号后拿到上一个账号的范围。
+   */
+  regionScopeTree: async (scopeKey = ''): Promise<any[]> => {
+    if (regionScopeTreeMemory?.key === scopeKey) return regionScopeTreeMemory.tree
+    const tree = await http.get<any, any>('/regions/tree', { params: { scoped: true } })
+    regionScopeTreeMemory = { key: scopeKey, tree }
+    return tree
+  },
   regionRoots: async (): Promise<any[]> => {
     if (regionRootsMemory) return regionRootsMemory
     const cached = readCachedRegionRoots()
@@ -187,6 +198,7 @@ export const communityApi = {
   clearRegionCache: (): void => {
     regionRootsMemory = null
     regionTreeMemory = null
+    regionScopeTreeMemory = null
     regionChildrenMemory.clear()
     try {
       sessionStorage.removeItem(REGION_ROOTS_CACHE_KEY)
